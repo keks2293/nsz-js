@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NSZ to NSP Converter</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+        }
+        h1 {
+            color: #1a1a2e;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .drop-zone {
+            border: 3px dashed #3498db;
+            border-radius: 12px;
+            padding: 60px 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #f8f9fa;
+            margin-bottom: 30px;
+        }
+        .drop-zone:hover, .drop-zone.dragover {
+            background: #e3f2fd;
+            border-color: #2196f3;
+        }
+        .drop-zone-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+        .drop-zone-text {
+            font-size: 18px;
+            color: #666;
+        }
+        .drop-zone-hint {
+            font-size: 14px;
+            color: #999;
+            margin-top: 10px;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        .keys-section {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+        }
+        .keys-section h3 {
+            color: #1a1a2e;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .keys-section textarea {
+            width: 100%;
+            height: 150px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            font-family: monospace;
+            font-size: 13px;
+            resize: vertical;
+        }
+        .keys-section textarea:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        .keys-hint {
+            font-size: 12px;
+            color: #999;
+            margin-top: 10px;
+        }
+        .file-info {
+            background: #e8f5e9;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .file-info.visible {
+            display: block;
+        }
+        .file-info h3 {
+            color: #2e7d32;
+            margin-bottom: 15px;
+        }
+        .file-details {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        .file-detail {
+            background: white;
+            padding: 12px;
+            border-radius: 8px;
+        }
+        .file-detail-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+        }
+        .file-detail-value {
+            font-size: 16px;
+            color: #1a1a2e;
+            font-weight: 600;
+        }
+        .progress-container {
+            margin-bottom: 20px;
+            display: none;
+        }
+        .progress-container.visible {
+            display: block;
+        }
+        .progress-bar {
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3498db, #2ecc71);
+            width: 0%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        .progress-text {
+            text-align: center;
+            margin-top: 10px;
+            color: #666;
+        }
+        .log-container {
+            background: #1a1a2e;
+            color: #fff;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 13px;
+            display: none;
+        }
+        .log-container.visible {
+            display: block;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-radius: 4px;
+        }
+        .log-entry.info { color: #3498db; }
+        .log-entry.success { color: #2ecc71; }
+        .log-entry.warning { color: #f39c12; }
+        .log-entry.error { color: #e74c3c; }
+        .btn {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            border-radius: 30px;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.3s ease;
+            font-weight: bold;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(52, 152, 219, 0.4);
+        }
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .btn-secondary {
+            background: linear-gradient(135deg, #95a5a6, #7f8c8d);
+            margin-top: 10px;
+        }
+        .btn-secondary:hover {
+            box-shadow: 0 10px 30px rgba(149, 165, 166, 0.4);
+        }
+        .btn-keys {
+            background: linear-gradient(135deg, #9b59b6, #8e44ad);
+        }
+        .btn-keys:hover {
+            box-shadow: 0 10px 30px rgba(155, 89, 182, 0.4);
+        }
+        .status {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 16px;
+            color: #666;
+        }
+        .status.error { color: #e74c3c; }
+        .status.success { color: #2ecc71; }
+        .file-list {
+            margin-top: 20px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .file-item {
+            background: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .file-item-name {
+            font-weight: 500;
+        }
+        .file-item-size {
+            color: #666;
+            font-size: 14px;
+        }
+        .remove-btn {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .remove-btn:hover {
+            background: #c0392b;
+        }
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>NSZ to NSP Converter</h1>
+        <p class="subtitle">Convert Nintendo Switch compressed games to NSP format</p>
+        
+        <div class="drop-zone" id="dropZone">
+            <div class="drop-zone-icon">📦</div>
+            <div class="drop-zone-text">Drop NSZ files here or click to select</div>
+            <div class="drop-zone-hint">Supports .nsz files (multi-file selection enabled)</div>
+            <input type="file" id="fileInput" multiple accept=".nsz">
+        </div>
+        
+        <div class="file-list" id="fileList"></div>
+        
+        
+        
+        <div class="file-info" id="fileInfo">
+            <h3>📋 File Information</h3>
+            <div class="file-details" id="fileDetails"></div>
+        </div>
+        
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill">0%</div>
+            </div>
+            <div class="progress-text" id="progressText">Preparing...</div>
+        </div>
+        
+        <div class="log-container" id="logContainer"></div>
+        
+        <button class="btn" id="convertBtn" disabled>Convert to NSP</button>
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <button class="btn btn-secondary" id="clearBtn" style="display: none; flex: 1;">Clear All</button>
+            <button class="btn btn-secondary" id="fixPaddingBtn" style="flex: 1;">Fix Padding: OFF</button>
+        </div>
+        
+        <div class="status" id="status"></div>
+    </div>
+    
+    <script src="crypto/aes-js.js"></script>
+    <script type="module" src="main.js"></script>
+</body>
+</html>

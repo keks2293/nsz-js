@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Final AES-CTR Test</title>
+    <script src="crypto/aes-js.js"></script>
+</head>
+<body>
+    <h1>Final AES-CTR Test</h1>
+    <div id="output"></div>
+    <script>
+        function log(msg) {
+            document.getElementById('output').innerHTML += `<p>${msg}</p>`;
+        }
+        
+        // Test AES-CTR with PyCryptodome compatible counter
+        log('<strong>Test: AES-CTR (PyCryptodome compatible)</strong>');
+        
+        const key = new Uint8Array([
+            0x3c, 0x83, 0x58, 0xe3, 0x7c, 0x54, 0xac, 0xa5,
+            0xbb, 0x20, 0xfc, 0x36, 0x74, 0x1c, 0x17, 0x27
+        ]);
+        
+        const nonce = new Uint8Array([
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        ]);
+        
+        const offset = 131072; // 0x20000
+        const blockIndex = Math.floor(offset / 16);
+        
+        log(`Key: ${Array.from(key).map(b=>b.toString(16).padStart(2,'0')).join('')}`);
+        log(`Nonce: ${Array.from(nonce).map(b=>b.toString(16).padStart(2,'0')).join('')}`);
+        log(`Offset: ${offset} (0x${offset.toString(16)})`);
+        log(`Block Index: ${blockIndex}`);
+        log('');
+        
+        // Build counter block: nonce[0:8] + BE64(blockIndex)
+        const ctr = new Uint8Array(16);
+        for (let j = 0; j < 8; j++) ctr[j] = nonce[j];
+        
+        // Write blockIndex as BIG-endian uint64 in bytes 8-15
+        let tmp = blockIndex;
+        for (let j = 15; j >= 8; j--) {
+            ctr[j] = tmp & 0xff;
+            tmp >>= 8;
+        }
+        
+        log(`Counter block: ${Array.from(ctr).map(b=>b.toString(16).padStart(2,'0')).join('')}`);
+        log(`Expected:     00000002000000000000000000002000`);
+        log('');
+        
+        // Encrypt counter with AES-ECB
+        const aes = new aesjs.AES(key);
+        const encryptedCtr = aes.encrypt(ctr);
+        
+        log(`<strong>Keystream block: ${Array.from(encryptedCtr).map(b=>b.toString(16).padStart(2,'0')).join('')}</strong>`);
+        log(`Expected:         4d101641764aa9f1c...`);
+        
+        const first8 = Array.from(encryptedCtr.slice(0, 8)).map(b=>b.toString(16).padStart(2,'0')).join('');
+        log(`<strong>First 8 bytes match: ${first8 === '4d101641764aa9f1c' ? 'YES!' : 'NO'}</strong>`);
+        log(`Expected: 4d101641764aa9f1c`);
+        log(`Actual:   ${first8}`);
+    </script>
+</body>
+</html>
