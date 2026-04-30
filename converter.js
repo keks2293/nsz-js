@@ -47,6 +47,7 @@ class NSZConverter {
         const files = pfs0Reader.getFiles();
         
         onLog('info', `Found ${files.length} files in container`);
+        onProgress(0.05, 'Reading container...');
 
         const cnmtFiles = files.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
         const cnmtHashes = new Set();
@@ -62,7 +63,11 @@ class NSZConverter {
 
         const outputFiles = [];
         
-        for (const f of files) {
+        for (let idx = 0; idx < files.length; idx++) {
+            const f = files[idx];
+            const progress = 0.05 + (0.65 * (idx / files.length));
+            onProgress(progress, `Processing file ${idx + 1}/${files.length}...`);
+            
             const isNcz = f.name.toLowerCase().endsWith('.ncz');
             const outputName = isNcz ? f.name.slice(0, -4) + '.nca' : f.name;
             
@@ -110,11 +115,12 @@ class NSZConverter {
             }
         }
 
+        onProgress(0.7, 'Building PFS0 container...');
         const stringTable = outputFiles.map(f => f.name).join('\0') + '\0';
-        return this.buildPFS0(outputFiles, writable, { file, onLog, fixPadding });
+        return this.buildPFS0(outputFiles, writable, { file, onLog, fixPadding, onProgress });
     }
 
-    async buildPFS0Stream(writable, fileEntries, fileDataList, headerSize, stringTable, paddingSize, fixPadding = false) {
+    async buildPFS0Stream(writable, fileEntries, fileDataList, headerSize, stringTable, paddingSize, fixPadding = false, onProgress = () => {}) {
         const encoder = new TextEncoder();
         
         let paddedStringTable;
@@ -158,8 +164,12 @@ class NSZConverter {
         }
 
         await writable.write({ type: 'write', position: 0, data: headerBuffer.buffer });
+        onProgress(0.85, 'Writing header...');
         
         // Write files at absolute positions (after header)
+        const totalSize = fileDataList.reduce((sum, d) => sum + (d.byteLength || d.length), 0);
+        let written = 0;
+        
         for (let i = 0; i < fileEntries.length; i++) {
             const data = fileDataList[i];
             let buffer = data instanceof ArrayBuffer ? data : (data.buffer || data);
@@ -167,10 +177,14 @@ class NSZConverter {
             // Absolute position = header size + relative offset
             const writePosition = paddedHeaderSize + Number(fileEntries[i].offset);
             await writable.write({ type: 'write', position: writePosition, data: buffer });
+            
+            written += buffer.byteLength || buffer.length;
+            const progress = 0.85 + (0.15 * (written / totalSize));
+            onProgress(progress, `Writing file ${i + 1}/${fileEntries.length}...`);
         }
 
-        const totalSize = paddedHeaderSize + fileEntries.reduce((sum, e) => sum + Number(e.size), 0);
-        return { size: totalSize };
+        const total = paddedHeaderSize + fileEntries.reduce((sum, e) => sum + Number(e.size), 0);
+        return { size: total };
     }
 
     async decompressNCZ(file, nczFile) {
@@ -211,7 +225,7 @@ class NSZConverter {
     }
 
     async buildPFS0(files, writable = null, options = {}) {
-        const { file = null, onLog = () => {}, fixPadding = false } = options;
+        const { file = null, onLog = () => {}, fixPadding = false, onProgress = () => {} } = options;
         const outputName = file ? file.name.replace(/\.nsz$/i, '.nsp') : 'output.nsp';
         
         const stringTable = files.map(f => f.name).join('\0') + '\0';
@@ -233,17 +247,19 @@ class NSZConverter {
         });
         
         if (!writable) {
-            onLog('error', 'File System Access API required for large files');
-            throw new Error('File System Access API required');
+            onLog('info', 'Using memory download (no File System Access)');
+            return this.buildPFS0Memory(fileEntries, stringTable, headerSize, paddingSize, fixPadding, onProgress, outputName);
         }
         
+        onProgress(0.8, 'Writing output file...');
         const fileDataList = files.map(f => f.data);
-        const streamResult = await this.buildPFS0Stream(writable, fileEntries, fileDataList, headerSize, stringTable, paddingSize, fixPadding);
+        const streamResult = await this.buildPFS0Stream(writable, fileEntries, fileDataList, headerSize, stringTable, paddingSize, fixPadding, onProgress);
+        onProgress(1.0, 'Done!');
         onLog('success', `Output: ${outputName} (${this.formatBytes(streamResult.size)})`);
         return { blob: null, name: outputName, size: streamResult.size, writable: true };
     }
 
-    async buildPFS0Stream(writable, fileEntries, fileDataList, headerSize, stringTable, paddingSize, fixPadding = false) {
+    async buildPFS0Memory(fileEntries, stringTable, headerSize, paddingSize, fixPadding, onProgress, outputName) {
         const encoder = new TextEncoder();
         
         const fullHeaderSize = headerSize + paddingSize;
@@ -270,18 +286,28 @@ class NSZConverter {
             stringOffset += nameBytes.length + 1;
         }
 
-        await writable.write(header);
+        onProgress(0.85, 'Building file in memory...');
         
-        for (const data of fileDataList) {
+        const totalDataSize = fileEntries.reduce((sum, e) => sum + Number(e.size), 0);
+        const totalSize = fullHeaderSize + totalDataSize;
+        const outputBuffer = new Uint8Array(totalSize);
+        
+        outputBuffer.set(header, 0);
+        
+        let offset = fullHeaderSize;
+        for (let i = 0; i < fileEntries.length; i++) {
+            const data = fileEntries[i].data;
             const arr = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-            await writable.write(arr);
+            outputBuffer.set(arr, offset);
+            offset += arr.length;
+            
+            const progress = 0.85 + (0.15 * (offset - fullHeaderSize) / totalDataSize);
+            onProgress(progress, `Processing file ${i + 1}/${fileEntries.length}...`);
         }
-        
-        let totalSize = fullHeaderSize;
-        for (const e of fileEntries) {
-            totalSize += Number(e.size);
-        }
-        return { size: totalSize };
+
+        const blob = new Blob([outputBuffer], { type: 'application/octet-stream' });
+        onProgress(1.0, 'Done!');
+        return { blob, name: outputName, size: totalSize };
     }
 }
 
