@@ -15,8 +15,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     const fileInfo = document.getElementById('fileInfo');
     const fileDetails = document.getElementById('fileDetails');
     const progressContainer = document.getElementById('progressContainer');
-    const progressFill = document.getElementById('progressFill');
-    const progressText = document.getElementById('progressText');
+        const progressFill = document.getElementById('progressFill');
+        const progressPercent = document.getElementById('progressPercent');
+        const progressText = document.getElementById('progressText');
     const logContainer = document.getElementById('logContainer');
     const convertBtn = document.getElementById('convertBtn');
     const clearBtn = document.getElementById('clearBtn');
@@ -48,7 +49,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     function updateProgress(progress, text) {
         const percent = Math.round(progress * 100);
         progressFill.style.width = `${percent}%`;
-        progressFill.textContent = `${percent}%`;
+        progressPercent.textContent = `${percent}%`;
         progressText.textContent = text;
     }
 
@@ -183,42 +184,50 @@ window.addEventListener('DOMContentLoaded', async () => {
         status.textContent = '';
         status.className = 'status';
 
+        updateProgress(0, 'Starting...');
         addLog('info', 'Starting conversion...');
         await loadDefaultKeys();
+
+        updateProgress(0, 'Starting...');
+
+        let directoryHandle = null;
+
+        if ('showDirectoryPicker' in window) {
+            try {
+                directoryHandle = await window.showDirectoryPicker({
+                    startIn: 'downloads'
+                });
+                addLog('info', 'Using File System Access API - saving to selected directory');
+            } catch (e) {
+                if (e.name !== 'AbortError') {
+                    addLog('warning', 'File System Access not available: ' + e.message);
+                }
+            }
+        }
 
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
             addLog('info', `Processing ${i + 1}/${files.length}: ${file.name}`);
 
+            updateProgress(i / files.length, 'Starting...');
+            
             try {
-                const outputName = file.name.replace(/\.nsz$/i, '.nsp');
-                
                 let writable = null;
-                
-                if ('showSaveFilePicker' in window) {
+                const outputName = file.name.replace(/\.nsz$/i, '.nsp');
+
+                if (directoryHandle) {
                     try {
-                        const handle = await window.showSaveFilePicker({
-                            suggestedName: outputName,
-                            startIn: 'downloads',
-                            types: [{
-                                description: 'Nintendo Submission Package',
-                                accept: { 'application/octet-stream': ['.nsp'] }
-                            }]
-                        });
-                        writable = await handle.createWritable();
-                        addLog('info', 'Using File System Access API for direct write');
+                        const fileHandle = await directoryHandle.getFileHandle(outputName, { create: true });
+                        writable = await fileHandle.createWritable();
                     } catch (e) {
-                        if (e.name === 'AbortError') {
-                            addLog('info', 'Save cancelled, using memory download');
-                        } else {
-                            addLog('warning', 'File System Access not available: ' + e.message);
-                        }
+                        addLog('warning', 'Failed to create file in directory: ' + e.message);
                     }
                 }
 
                 const result = await converter.decompressNSZtoNSP(file, {
                     onProgress: (progress, text) => {
-                        const overall = (i / files.length) + (1 / files.length) * progress;
+                        const normalizedProgress = Math.max(0, Math.min(1, (progress - 0.05) / 0.85));
+                        const overall = (i + normalizedProgress) / files.length;
                         updateProgress(overall, text);
                     },
                     onLog: addLog,

@@ -146,6 +146,29 @@
             background: #e0e0e0;
             border-radius: 15px;
             overflow: hidden;
+            position: relative;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3498db, #2ecc71);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        .progress-percent {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #333;
+            font-weight: bold;
+            font-size: 14px;
+            z-index: 2;
+            pointer-events: none;
+        }
+        .progress-text {
+            text-align: center;
+            margin-top: 10px;
+            color: #666;
         }
         .progress-fill {
             height: 100%;
@@ -157,6 +180,14 @@
             justify-content: center;
             color: white;
             font-weight: bold;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .progress-fill span {
+            position: relative;
+            z-index: 1;
+            white-space: nowrap;
         }
         .progress-text {
             text-align: center;
@@ -301,7 +332,8 @@
         
         <div class="progress-container" id="progressContainer">
             <div class="progress-bar">
-                <div class="progress-fill" id="progressFill">0%</div>
+                <div class="progress-fill" id="progressFill"></div>
+                <div class="progress-percent" id="progressPercent">0%</div>
             </div>
             <div class="progress-text" id="progressText">Preparing...</div>
         </div>
