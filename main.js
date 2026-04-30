@@ -199,6 +199,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     try {
                         const handle = await window.showSaveFilePicker({
                             suggestedName: outputName,
+                            startIn: 'downloads',
                             types: [{
                                 description: 'Nintendo Submission Package',
                                 accept: { 'application/octet-stream': ['.nsp'] }
