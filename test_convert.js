@@ -7,7 +7,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 // Load aes-js
-const aesjs = require('./browser/crypto/aes-js.js');
+const aesjs = require('./crypto/aes-js.js');
 
 // Simple SHA256
 function sha256(data) {

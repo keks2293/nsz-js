@@ -1,7 +1,7 @@
 // Test AES-CTR in Node.js using aes-js library
 // This should match Python PyCryptodome output
 
-const aesjs = require('./browser/crypto/aes-js.js');
+const aesjs = require('./crypto/aes-js.js');
 
 const key = new Uint8Array([
     0x3c, 0x83, 0x58, 0xe3, 0x7c, 0x54, 0xac, 0xa5,
