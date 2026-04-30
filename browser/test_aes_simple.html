@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Simple AES Test</title>
+    <script src="crypto/aes-js.js"></script>
+</head>
+<body>
+    <h1>Simple AES Test</h1>
+    <div id="output"></div>
+    <script>
+        function log(msg) {
+            document.getElementById('output').innerHTML += `<p>${msg}</p>`;
+        }
+        
+        // Test 1: Basic AES-ECB
+        log('<strong>Test 1: AES-ECB with known values</strong>');
+        
+        // From AES test vectors (NIST)
+        // Key: 2b7e151628aed2a6abf7158809cf4f3c
+        // Plaintext: 3243f6a8885a308d313198a2e0370734
+        // Ciphertext: 3925841d02dc09fbdc118597196a0b32
+        
+        const key = new Uint8Array([
+            0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
+            0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c
+        ]);
+        
+        const plaintext = new Uint8Array([
+            0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d,
+            0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34
+        ]);
+        
+        const expectedCiphertext = '3925841d02dc09fbdc118597196a0b32';
+        
+        log(`Key: ${Array.from(key).map(b=>b.toString(16).padStart(2,'0')).join('')}`);
+        log(`Plaintext: ${Array.from(plaintext).map(b=>b.toString(16).padStart(2,'0')).join('')}`);
+        
+        const aes = new aesjs.AES(key);
+        const ciphertext = aes.encrypt(plaintext);
+        
+        const actualCiphertext = Array.from(ciphertext).map(b=>b.toString(16).padStart(2,'0')).join('');
+        log(`<strong>Expected ciphertext: ${expectedCiphertext}</strong>`);
+        log(`<strong>Actual ciphertext:   ${actualCiphertext}</strong>`);
+        log(`Match: ${actualCiphertext === expectedCiphertext ? 'YES!' : 'NO'}`);
+        
+        // Test 2: AES-CTR with PyCryptodome compatible counter
+        log('<hr>');
+        log('<strong>Test 2: AES-CTR (PyCryptodome compatible)</strong>');
+        
+        const ctrKey = new Uint8Array([
+            0x3c, 0x83, 0x58, 0xe3, 0x7c, 0x54, 0xac, 0xa5,
+            0xbb, 0x20, 0xfc, 0x36, 0x74, 0x1c, 0x17, 0x27
+        ]);
+        
+        const nonce = new Uint8Array([
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        ]);
+        
+        const offset = 131072;
+        const blockIndex = Math.floor(offset / 16);
+        
+        log(`Key: ${Array.from(ctrKey).map(b=>b.toString(16).padStart(2,'0')).join('')}`);
+        log(`Nonce: ${Array.from(nonce).map(b=>b.toString(16).padStart(2,'0')).join('')}`);
+        log(`Block Index: ${blockIndex}`);
+        
+        // Build counter block: nonce[0:8] + LE64(blockIndex)
+        const ctr = new Uint8Array(16);
+        for (let j = 0; j < 8; j++) ctr[j] = nonce[j];
+        let tmp = blockIndex;
+        for (let j = 8; j < 16; j++) {
+            ctr[j] = tmp & 0xff;
+            tmp >>= 8;
+        }
+        
+        log(`Counter block: ${Array.from(ctr).map(b=>b.toString(16).padStart(2,'0')).join('')}`);
+        
+        // Encrypt counter with AES-ECB
+        const aes2 = new aesjs.AES(ctrKey);
+        const encryptedCtr = aes2.encrypt(ctr);
+        
+        log(`<strong>Keystream block: ${Array.from(encryptedCtr).map(b=>b.toString(16).padStart(2,'0')).join('')}</strong>`);
+        log(`Expected:         4d101641764aa9f1c...`);
+        log(`First 8 bytes match: ${Array.from(encryptedCtr.slice(0,8)).map(b=>b.toString(16).padStart(2,'0')).join('') === '4d101641764aa9f1c' ? 'YES!' : 'NO'}`);
+    </script>
+</body>
+</html>
