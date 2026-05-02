@@ -247,7 +247,7 @@ class NCZDecompressor {
         };
     }
 
-async createBlockDecompressorReader() {
+    async createBlockDecompressorReader() {
         // Skip block header to get to compressed data
         this.pos += 8; // NCZBLOCK magic
         this.pos += 4; // version, type, unused, blockSizeExponent
@@ -260,10 +260,8 @@ async createBlockDecompressorReader() {
             compressedBlockSizeList.push(this.readUint32());
         }
         
-        const decompressedData = await this.decompressChunk(this.data.slice(this.pos));
-        
         return new BlockDecompressorReader(
-            decompressedData,
+            this.data.slice(this.pos),
             blockSizeExponent,
             numberOfBlocks,
             decompressedSize,
@@ -273,47 +271,8 @@ async createBlockDecompressorReader() {
 
     async decompressChunk(data) {
         try {
-            console.log('DEBUG decompress input:', data.length, 'bytes, type:', data.constructor.name);
-            
-            // Try native DecompressionStream (supports zstd in modern browsers)
-            if (typeof DecompressionStream !== 'undefined') {
-                try {
-                    console.log('Trying native DecompressionStream...');
-                    const stream = new ReadableStream({
-                        start(controller) {
-                            controller.enqueue(data);
-                            controller.close();
-                        }
-                    }).pipeThrough(new DecompressionStream('zstd'));
-                    const chunks = [];
-                    const reader = stream.getReader();
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-                        chunks.push(value);
-                    }
-                    if (chunks.length > 0) {
-                        const totalLen = chunks.reduce((a, b) => a + b.length, 0);
-                        const result = new Uint8Array(totalLen);
-                        let pos = 0;
-                        for (const c of chunks) {
-                            result.set(c, pos);
-                            pos += c.length;
-                        }
-                        console.log('DEBUG native result:', result.length, 'bytes');
-                        return result;
-                    }
-                } catch(e) {
-                    console.log('FAIL native:', e.message);
-                }
-            }
-            
-            // Fallback to ZstdDecompressor
             const zstd = new ZstdDecompressor();
-            let result = null;
-            try { result = zstd.decompress(data); } catch(e) { console.log('FAIL zstd:', e.message); }
-            console.log('DEBUG zstd result:', result ? result.length + ' bytes' : 'null');
-            return result || new Uint8Array(0);
+            return zstd.decompressStreaming(data);
         } catch (e) {
             console.error('Decompression ERROR:', e.message);
             return new Uint8Array(0);

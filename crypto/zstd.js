@@ -26,20 +26,26 @@ class ZstdDecompressor {
         });
     }
 
-    decompress(data) {
-        console.log('[ZSTD] fzstd decompress input:', data.length, 'bytes');
-        console.log('[ZSTD] first bytes:', Array.from(data.slice(0, 8)));
-        
-        try {
-            if (typeof fzstd !== 'undefined' && fzstd.decompress) {
-                const result = fzstd.decompress(data);
-                console.log('[ZSTD] fzstd result:', result ? result.length + ' bytes' : 'null');
-                return result || new Uint8Array(0);
+    // Decompress using fzstd streaming API (Decompress class)
+    decompressStreaming(data) {
+        if (typeof fzstd !== 'undefined' && fzstd.Decompress) {
+            const chunks = [];
+            const stream = new fzstd.Decompress((chunk, isLast) => {
+                chunks.push(chunk);
+            });
+            stream.push(data, true);
+            
+            if (chunks.length === 0) return new Uint8Array(0);
+            
+            const totalLen = chunks.reduce((a, b) => a + b.length, 0);
+            const result = new Uint8Array(totalLen);
+            let pos = 0;
+            for (const chunk of chunks) {
+                result.set(chunk, pos);
+                pos += chunk.length;
             }
-        } catch(e) {
-            console.log('[ZSTD] fzstd error:', e.message);
+            return result;
         }
-        
         return new Uint8Array(0);
     }
 }

@@ -1,6 +1,6 @@
 # NSZ to NSP Converter (JavaScript)
 
-A pure JavaScript implementation for converting Nintendo Switch NSZ (compressed NSP) files to NSP format. Works entirely in the browser or Node.js.
+A pure JavaScript implementation for converting Nintendo Switch NSZ (compressed NSP) files to NSP format. Works entirely in the browser.
 
 ## Features
 
@@ -22,14 +22,6 @@ A pure JavaScript implementation for converting Nintendo Switch NSZ (compressed 
 3. (Optional) Load default keys or paste your own prod.keys
 4. Click "Convert to NSP" to decompress
 
-### Node.js Version
-
-```bash
-cd node
-npm install
-node nsz.js -d "path/to/file.nsz" -o "output/directory"
-```
-
 ## Architecture
 
 ```
@@ -49,21 +41,8 @@ nsz-js/
 │   ├── aesxts.js      # AES XTS mode encryption
 │   ├── sha256.js      # SHA-256 hash function
 │   └── zstd.js        # Zstandard decompression (uses fzstd)
-├── node/               # Node.js specific implementation
-│   ├── nsz.js         # CLI entry point
-│   ├── decompressor.js # Node.js decompressor
-│   ├── keys.js        # Node.js key management (uses crypto module)
-│   ├── parseArguments.js # CLI argument parsing
-│   ├── pathTools.js   # Path utilities
-│   ├── fileExistingChecks.js # File validation
-│   └── fs/            # File system implementations
-│       ├── index.js   # Export wrapper
-│       ├── pfs0.js    # PFS0 file system
-│       ├── ncz.js     # NCZ file system
-│       └── nca.js     # NCA header parsing
 ├── test_convert.js     # Conversion test script
 ├── test_aes_manual.js # Manual AES test
-├── test_aes_node.js    # Node.js AES test
 ├── test_aes_ctr.py     # Python AES-CTR test
 ├── counter-test.js     # Counter mode test
 ├── test_aes_simple.html    # Simple AES browser test
@@ -98,24 +77,10 @@ nsz-js/
 - **crypto/sha256.js** - Pure JavaScript SHA-256 implementation
 - **crypto/zstd.js** - Zstandard decompression using fzstd library (loaded from CDN)
 
-### Node.js Files
-
-- **node/nsz.js** - CLI entry point for Node.js version
-- **node/decompressor.js** - Main decompression logic for Node.js
-- **node/keys.js** - Key management using Node.js crypto module, includes `Keys`, `AESECB`, `AESCTR`, and `crc32`
-- **node/parseArguments.js** - Command-line argument parser
-- **node/pathTools.js** - Path manipulation utilities
-- **node/fileExistingChecks.js** - File existence and validation checks
-- **node/fs/index.js** - Export wrapper for file system classes
-- **node/fs/pfs0.js** - PFS0 implementation for Node.js
-- **node/fs/ncz.js** - NCZ implementation for Node.js
-- **node/fs/nca.js** - NCA header parsing for Node.js
-
 ### Test Files
 
 - **test_convert.js** - Tests the NSZ to NSP conversion process
 - **test_aes_manual.js** - Manual AES encryption/decryption tests
-- **test_aes_node.js** - Node.js AES functionality tests
 - **test_aes_ctr.py** - Python script for AES-CTR verification
 - **counter-test.js** - Tests counter mode operations
 - **test_aes_simple.html** - Simple AES test page for browser
@@ -157,7 +122,3 @@ The implementation includes full key derivation from prod.keys:
 - Modern browser with ES6+ module support
 - File System Access API (for direct file writing)
 - Web Crypto API support
-
-### Node.js
-- Node.js 14+ with ES module support
-- `zstd-codec` package for decompression
