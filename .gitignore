@@ -17,3 +17,7 @@ npm-debug.log*
 # IDE
 .vscode/
 .idea/
+
+# Converted files
+*.nsz
+*.nsp

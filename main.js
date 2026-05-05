@@ -247,6 +247,11 @@ window.addEventListener('DOMContentLoaded', async () => {
                     URL.revokeObjectURL(url);
                     addLog('success', `Done: ${result.name}`);
                 }
+
+                files.splice(i, 1);
+                i--;
+                updateFileList();
+                updateFileInfo();
             } catch (error) {
                 addLog('error', `Failed: ${error.message}`);
             }
