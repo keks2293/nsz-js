@@ -86,7 +86,7 @@ class NSZConverter {
                             onLog('error', `[CORRUPTED]  ${outputName} - hash mismatch!`);
                         }
                     } else {
-                        const expectedFromFilename = file.name.toLowerCase().replace('.nsz', '.nca');
+                        const expectedFromFilename = file.name.toLowerCase().replace(/\.nsz$/i, '.nca');
                         if (hash.startsWith(expectedFromFilename.substring(0, 32))) {
                             onLog('success', `[VERIFIED]   ${outputName}`);
                         }

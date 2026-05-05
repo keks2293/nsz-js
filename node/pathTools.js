@@ -6,7 +6,7 @@ export function expandFiles(dirPath) {
 
 export function isGame(filePath) {
     const ext = path.extname(filePath).toLowerCase();
-    return ['.nsp', '.xci', '.nsz', '.xcz'].includes(ext);
+    return ['.nsp', '.xci', '.nsz', '.nspz', '.nsx', '.xcz'].includes(ext);
 }
 
 export function isUncompressedGame(filePath) {
@@ -16,7 +16,7 @@ export function isUncompressedGame(filePath) {
 
 export function isCompressedGame(filePath) {
     const ext = path.extname(filePath).toLowerCase();
-    return ['.nsz', '.xcz'].includes(ext);
+    return ['.nsz', '.nspz', '.xcz'].includes(ext);
 }
 
 export function isCompressedGameFile(filePath) {
@@ -25,7 +25,7 @@ export function isCompressedGameFile(filePath) {
 
 export function isNspNsz(filePath) {
     const ext = path.extname(filePath).toLowerCase();
-    return ['.nsp', '.nsz'].includes(ext);
+    return ['.nsp', '.nsz', '.nspz', '.nsx'].includes(ext);
 }
 
 export function isXciXcz(filePath) {
@@ -45,6 +45,8 @@ export function targetExtension(filePath) {
         '.xci': '.xcz',
         '.nca': '.ncz',
         '.nsz': '.nsp',
+        '.nspz': '.nsp',
+        '.nsx': '.nsp',
         '.xcz': '.xci',
         '.ncz': '.nca'
     }[ext] || ext;

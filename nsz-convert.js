@@ -24,7 +24,7 @@ let fzstd = null;
 async function main() {
     const args = process.argv.slice(2);
     const inputPath = args[0];
-    const outputPath = args[1] || inputPath?.replace(/\.nsz$/i, '.nsp');
+    const outputPath = args[1] || inputPath?.replace(/\.(nsz|nspz|nsx)$/i, '.nsp');
     
     if (!inputPath) {
         console.log('NSZ to NSP Converter');
