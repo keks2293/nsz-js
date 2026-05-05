@@ -37,6 +37,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
+    function isCompressedGame(name) {
+        const lower = name.toLowerCase();
+        return lower.endsWith('.nsz') || lower.endsWith('.nspz') || lower.endsWith('.xcz');
+    }
+
     function addLog(type, message) {
         const entry = document.createElement('div');
         entry.className = `log-entry ${type}`;
@@ -147,7 +152,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         dropZone.classList.remove('dragover');
         await converter.init();
         for (const file of e.dataTransfer.files) {
-            if (file.name.toLowerCase().endsWith('.nsz')) files.push(file);
+            if (isCompressedGame(file.name)) files.push(file);
         }
         updateFileList();
         updateFileInfo();
@@ -156,7 +161,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     fileInput.addEventListener('change', async (e) => {
         await converter.init();
         for (const file of e.target.files) {
-            if (file.name.toLowerCase().endsWith('.nsz')) files.push(file);
+            if (isCompressedGame(file.name)) files.push(file);
         }
         updateFileList();
         updateFileInfo();

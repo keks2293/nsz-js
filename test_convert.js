@@ -127,5 +127,5 @@ if (args.length < 1) {
 }
 
 const input = args[0];
-const output = args[1] || input.replace('.nsz', '.nsp');
+const output = args[1] || input.replace(/\.(nsz|nspz|nsx)$/i, '.nsp');
 convertNSZtoNSP(input, output).catch(e => console.error('Error:', e));
