@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>AES-CTR Tests</title>
+    <script type="importmap">
+    {
+        "imports": {
+            "aes-js": "./static/aes-js.js"
+        }
+    }
+    </script>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .pass { color: green; }
+        .fail { color: red; }
+        .section { margin: 15px 0; padding: 10px; border-left: 3px solid #333; }
+    </style>
+</head>
+<body>
+    <h1>AES-CTR Tests</h1>
+    <div id="output"></div>
+    <script type="module">
+        import aesjs from 'aes-js';
+
+        const output = document.getElementById('output');
+        let total = 0, passed = 0;
+
+        function log(msg, cls) {
+            const p = document.createElement('p');
+            p.innerHTML = msg;
+            if (cls) p.className = cls;
+            output.appendChild(p);
+        }
+
+        function check(name, actual, expected) {
+            total++;
+            const match = actual === expected;
+            if (match) passed++;
+            log(`<strong>${name}:</strong> ${match ? '<span class="pass">PASS</span>' : '<span class="fail">FAIL</span>'}`);
+            if (!match) {
+                log(`  Expected: ${expected}`);
+                log(`  Actual:   ${actual}`);
+            }
+            return match;
+        }
+
+        function hex(arr) {
+            return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        // Test 1: AES-ECB NIST test vector
+        output.innerHTML += '<div class="section"><h2>Test 1: AES-ECB (NIST)</h2>';
+        const ecbKey = new Uint8Array([0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c]);
+        const ecbPt = new Uint8Array([0x32,0x43,0xf6,0xa8,0x88,0x5a,0x30,0x8d,0x31,0x31,0x98,0xa2,0xe0,0x37,0x07,0x34]);
+        const ecbExpected = '3925841d02dc09fbdc118597196a0b32';
+        log(`Key: ${hex(ecbKey)}`);
+        log(`Plaintext: ${hex(ecbPt)}`);
+        const aes = new aesjs.AES(ecbKey);
+        check('ECB ciphertext', hex(aes.encrypt(ecbPt)), ecbExpected);
+
+        // Test 2: AES-CTR keystream (PyCryptodome compatible)
+        output.innerHTML += '<div class="section"><h2>Test 2: AES-CTR keystream</h2>';
+        const ctrKey = new Uint8Array([0x3c,0x83,0x58,0xe3,0x7c,0x54,0xac,0xa5,0xbb,0x20,0xfc,0x36,0x74,0x1c,0x17,0x27]);
+        const nonce = new Uint8Array([0x00,0x00,0x00,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00]);
+        const offset = 131072;
+        const blockIndex = Math.floor(offset / 16);
+        log(`Key: ${hex(ctrKey)}`);
+        log(`Nonce: ${hex(nonce)}`);
+        log(`Offset: ${offset} (0x${offset.toString(16)}), BlockIdx: ${blockIndex}`);
+
+        // Counter block: nonce[0:8] + BE64(blockIndex)
+        const ctr = new Uint8Array(16);
+        for (let j = 0; j < 8; j++) ctr[j] = nonce[j];
+        let tmp = blockIndex;
+        for (let j = 15; j >= 8; j--) { ctr[j] = tmp & 0xff; tmp >>= 8; }
+        log(`Counter block: ${hex(ctr)} (expected: 00000002000000000000000000002000)`);
+        check('Counter block', hex(ctr), '00000002000000000000000000002000');
+
+        // Encrypt counter with AES-ECB
+        const aes2 = new aesjs.AES(ctrKey);
+        const keystreamBlock = aes2.encrypt(ctr);
+        log(`Keystream block: ${hex(keystreamBlock)}`);
+        check('First block', hex(keystreamBlock), 'e95fed2b7d0afca982d145a0ddea1c84');
+
+        // Test 3: Full CTR mode with aes-js
+        output.innerHTML += '<div class="section"><h2>Test 3: Full CTR mode</h2>';
+        const counter = new aesjs.Counter(blockIndex);
+        const aesCtr = new aesjs.ModeOfOperation.ctr(ctrKey, counter);
+        const zeros = new Uint8Array(48);
+        const fullKeystream = aesCtr.encrypt(zeros);
+        const expectedFull = 'e95fed2b7d0afca982d145a0ddea1c84799cd6049be13c145365e02e7c0cd67c7dda265086d308349093deb0c56bd1e5';
+        log(`Keystream (48 bytes): ${hex(fullKeystream)}`);
+        check('Full keystream', hex(fullKeystream), expectedFull);
+
+        // Summary
+        output.innerHTML += `<div class="section"><h2>Result: ${passed}/${total} passed ${passed === total ? '&#10004;' : '&#10008;'}</h2></div>`;
+    </script>
+</body>
+</html>
