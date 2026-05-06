@@ -146,7 +146,6 @@ class NSZConverter {
 
         headerBuffer[0] = 0x50; headerBuffer[1] = 0x46; headerBuffer[2] = 0x53; headerBuffer[3] = 0x30;
         view.setUint32(4, fileEntries.length, true);
-        view.setUint32(4, fileEntries.length, true);
         view.setUint32(8, stringTableSizeInHeader, true);
         view.setUint32(12, 0, true);
 
@@ -307,7 +306,7 @@ class NSZConverter {
             offset += arr.length;
             
             const progress = 0.85 + (0.15 * (offset - fullHeaderSize) / totalDataSize);
-            onProgress(progress, `Processing file ${i + 1}/${fileEntries.length}...`);
+            onProgress(progress, `Building file ${i + 1}/${fileEntries.length}...`);
         }
 
         const blob = new Blob([outputBuffer], { type: 'application/octet-stream' });
