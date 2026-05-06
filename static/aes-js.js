@@ -780,7 +780,7 @@
 
     // node.js
     if (typeof exports !== 'undefined') {
-        module.exports = aesjs;
+        module.exports = aesjs
 
     // RequireJS/AMD
     // http://www.requirejs.org/docs/api.html
@@ -792,14 +792,12 @@
     } else {
 
         // If there was an existing library at "aesjs" make sure it's still available
-        if (root && root.aesjs) {
+        if (root.aesjs) {
             aesjs._aesjs = root.aesjs;
         }
 
-        if (root) {
-            root.aesjs = aesjs;
-        }
+        root.aesjs = aesjs;
     }
 
 
-})(typeof self !== 'undefined' ? self : this);
+})(this);

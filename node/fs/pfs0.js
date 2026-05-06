@@ -1,5 +1,4 @@
 import fs from 'fs';
-import crypto from 'crypto';
 
 export class PFS0 {
     constructor(buffer) {

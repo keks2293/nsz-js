@@ -1,5 +1,5 @@
-import crypto from 'crypto';
 import fs from 'fs';
+import { aes128Encrypt, aes128Decrypt } from '../crypto/unified.js';
 
 const crc32Table = (() => {
     const table = new Uint32Array(256);
@@ -82,13 +82,13 @@ export class Keys {
         const masterKeyBuffer = Buffer.isBuffer(masterKey) ? masterKey : Buffer.from(masterKey);
         const kekSeedBuffer = Buffer.isBuffer(kekSeed) ? kekSeed : Buffer.from(kekSeed);
 
-        const kek = crypto.createCipheriv('aes-128-ecb', masterKeyBuffer.slice(0, 16), null);
-        const decryptedKek = Buffer.concat([kek.update(kekSeedBuffer), kek.final()]);
+        const kek = aes128Encrypt(masterKeyBuffer.slice(0, 16), kekSeedBuffer);
+        const decryptedKek = kek;
 
-        const srcKek = crypto.createCipheriv('aes-128-ecb', decryptedKek, null);
-        const decryptedSrcKek = Buffer.concat([srcKek.update(sourceKey), srcKek.final()]);
+        const srcKek = aes128Encrypt(decryptedKek, sourceKey);
+        const decryptedSrcKek = srcKek;
 
-        const finalKey = crypto.createCipheriv('aes-128-ecb', decryptedSrcKek, null);
+        const finalKey = aes128Encrypt(decryptedSrcKek, keySeed);
         const result = Buffer.concat([finalKey.update(keySeed), finalKey.final()]);
 
         return result;

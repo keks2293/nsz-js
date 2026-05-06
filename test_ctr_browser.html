@@ -3,12 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <title>Test AES-CTR in Browser</title>
-    <script src="crypto/aes-js.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "aes-js": "./static/aes-js.js"
+        }
+    }
+    </script>
 </head>
 <body>
     <h1>Testing AES-CTR (PyCryptodome compatible)</h1>
     <div id="output"></div>
-    <script>
+    <script type="module">
+        import aesjs from 'aes-js';
+
         function log(msg) {
             document.getElementById('output').innerHTML += `<p>${msg}</p>`;
         }

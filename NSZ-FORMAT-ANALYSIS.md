@@ -179,6 +179,20 @@ class AESCTR:
 - 8-byte prefix = `nonce[0:8]`
 - Total nonce = 8 bytes prefix + 8 bytes counter = 16 bytes (standard AES-CTR)
 
+**AES-CTR implementation history:**
+
+*Why Node.js `crypto` module was implemented:*
+- Initial implementation used Node.js `crypto.createCipheriv('aes-128-ecb', ...)` for AES-ECB keystream generation
+- Native crypto module provides better performance than pure-JS AES implementations
+- Works well in Node.js environments where `require('crypto')` is available
+
+*Why Node.js `crypto` module was dropped:*
+- Browser environments do NOT support Node.js `crypto` module
+- AES-ECB (required for AES-CTR keystream generation) is NOT available in Web Crypto API (`crypto.subtle` does not support ECB mode)
+- Maintained two separate files (`aesctr.cjs` for Node.js, `aesctr.mjs` for browsers) which increased complexity
+- Solution: Use `crypto/aesctr.mjs` with a pure-JS AES implementation (`aes-js`) for cross-platform compatibility
+- Files `crypto/aesctr.js` and `crypto/aesctr.cjs` have been removed (2026-05-06)
+
 ---
 
 ## 7. FakeSection (Gap Handling)
@@ -236,7 +250,9 @@ if hexHash[:32] == fileNameHash:
 
 3. **First section gap handling (FIXED)** — Missing logic to skip uncompressed gap for first section. Python code: `if firstSection: uncompressedSize = UNCOMPRESSABLE_HEADER_SIZE - sections[0].offset; i += uncompressedSize`. Added `firstSection` flag to both `_decompressWithStreaming` and `_decompressWithBlocks`.
 
-4. **AES-CTR counter endianness (FIXED)** — Python's `Counter.new(64, prefix=nonce[0:8], initial_value=(offset >> 4))` uses big-endian for counter bytes. Fixed in `_decryptChunk` to write counter bytes in big-endian order: `ctr[8 + (7 - j)] = ofs & 0xff`.
+4. **AES-CTR counter endianness (FIXED)** — Python's `Counter.new(64, prefix=nonce[0:8], initial_value=(offset >> 4))` uses big-endian for counter bytes. Fixed in `crypto/aesctr.mjs` to write counter bytes in big-endian order using `Buffer.writeBigUInt64BE()`.
+
+5. **Node.js crypto dropped** — Removed `crypto/aesctr.js` and `crypto/aesctr.cjs` (Node.js `crypto` module) because they're not supported in browsers. AES-ECB is not available in Web Crypto API. Now using pure-JS AES (aes-js) in `crypto/aesctr.mjs` for cross-platform compatibility. See section 6 for full history.
 
 ### Issues still to verify in nsz-js:
 

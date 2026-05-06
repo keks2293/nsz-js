@@ -43,12 +43,14 @@ nsz-js/
 ├── ticket.js           # Ticket, CNMT, NCA header parsing
 ├── xci.js              # XCI (game card) container support
 ├── crypto/             # Cryptographic utilities
-│   ├── aes-js.js      # AES implementation (ECB, CBC modes)
 │   ├── aes128.js      # AES-128 ECB/CBC implementation
-│   ├── aesctr.js      # AES CTR and BKTR mode encryption
+│   ├── aesctr.js      # AES CTR and BKTR mode encryption (uses aes-js from static/)
 │   ├── aesxts.js      # AES XTS mode encryption
 │   ├── sha256.js      # SHA-256 hash function
-│   └── zstd.js        # Zstandard decompression (uses fzstd)
+│   └── zstd.js        # Zstandard decompression (loads fzstd from static/)
+├── static/             # Static dependencies for browser (offline use)
+│   ├── aes-js.js      # AES implementation from npm (aes-js package)
+│   └── fzstd.js       # Zstandard decompression from npm (fzstd package)
 ├── node/               # Node.js specific implementation
 │   ├── nsz.js         # CLI entry point
 │   ├── decompressor.js # Node.js decompressor
@@ -91,12 +93,32 @@ nsz-js/
 
 ### Crypto Files
 
-- **crypto/aes-js.js** - Full AES implementation from aes-js library (ECB, CBC, CTR modes)
 - **crypto/aes128.js** - Lightweight AES-128 implementation with ECB and CBC modes
-- **crypto/aesctr.js** - AES-CTR and AES-CTR-BKTR encryption/decryption
+- **crypto/aesctr.js** - AES-CTR and AES-CTR-BKTR encryption/decryption (uses `aes-js` npm package)
 - **crypto/aesxts.js** - AES-XTS mode for NCA section decryption
 - **crypto/sha256.js** - Pure JavaScript SHA-256 implementation
 - **crypto/zstd.js** - Zstandard decompression using fzstd library (loaded from CDN)
+
+### Dependencies
+
+**Browser (served from `static/` folder):**
+- **aes-js** ([GitHub](https://github.com/ricmoo/aes-js), [npm](https://www.npmjs.com/package/aes-js)) - Pure JavaScript AES implementation for ECB mode. Required for AES-CTR keystream generation since Web Crypto API doesn't support AES-ECB. Downloaded from npm, served from `static/aes-js.js`.
+- **fzstd** ([GitHub](https://github.com/101arrowz/fzstd), [npm](https://www.npmjs.com/package/fzstd)) - Zstandard decompression, served from `static/fzstd.js` and loaded by `crypto/zstd.js`.
+
+**Node.js (npm packages):**
+- **zstd-codec** ([GitHub](https://github.com/yoshihitoh/zstd-codec), [npm](https://www.npmjs.com/package/zstd-codec)) - Zstandard decompression for Node.js environments
+
+### Static Folder
+
+The `static/` folder contains downloaded copies of browser dependencies for offline use and to avoid CDN issues:
+
+| File | Package | Version | Source |
+|------|---------|---------|--------|
+| `static/aes-js.js` | aes-js | 3.1.2 | Copied from `node_modules/aes-js/index.js` |
+| `static/fzstd.js` | fzstd | 0.1.1 | Copied from `node_modules/fzstd/lib/index.js` |
+| `static/prod.keys` | - | - | Nintendo Switch keys file (user-provided) |
+
+To update dependencies: `npm install aes-js@x.x.x fzstd@x.x.x` then copy files to `static/`
 
 ### Node.js Files
 
