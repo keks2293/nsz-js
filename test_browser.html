@@ -64,6 +64,7 @@
 
         // Test 2: Full CTR mode (48 bytes) using production AESCTR
         output.innerHTML += '<div class="section"><h2>Test 2: Full CTR mode (48 bytes)</h2>';
+        aesCtr.seek(offset);
         const fullKeystream = aesCtr.decrypt(new Uint8Array(48));
         const expectedFull = 'e95fed2b7d0afca982d145a0ddea1c84799cd6049be13c145365e02e7c0cd67c7dda265086d308349093deb0c56bd1e5';
         log(`Keystream (48 bytes): ${hex(fullKeystream)}`);

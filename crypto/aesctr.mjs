@@ -33,13 +33,17 @@ class AESCTR {
         this.blockIndex = Math.floor(offset / 16);
     }
 
-    encrypt(data, offset = 0) {
-        this.seek(offset);
+    encrypt(data, offset = null) {
+        if (offset !== null) {
+            this.seek(offset);
+        }
         return this._xorKeystream(data);
     }
 
-    decrypt(data, offset = 0) {
-        this.seek(offset);
+    decrypt(data, offset = null) {
+        if (offset !== null) {
+            this.seek(offset);
+        }
         return this._xorKeystream(data);
     }
 
@@ -65,15 +69,10 @@ class AESCTR {
                 ctr[j] = this.nonce[j];
             }
             // Last 8 bytes: blockIdx as BIG-endian uint64
-            // Use aes-js Counter utility or manual BE64 encoding
-            const be64 = new Uint8Array(8);
             let tmp = blockIdx;
-            for (let j = 7; j >= 0; j--) {
-                be64[j] = tmp & 0xff;
+            for (let j = 15; j >= 8; j--) {
+                ctr[j] = tmp & 0xff;
                 tmp >>= 8;
-            }
-            for (let j = 0; j < 8; j++) {
-                ctr[8 + j] = be64[j];
             }
 
             // Debug: print first counter block
@@ -114,13 +113,17 @@ class AESCTR_BKTR {
         this.blockIndex = Math.floor(offset / 16);
     }
 
-    encrypt(data, offset = 0) {
-        this.seek(offset);
+    encrypt(data, offset = null) {
+        if (offset !== null) {
+            this.seek(offset);
+        }
         return this._xorKeystream(data);
     }
 
-    decrypt(data, offset = 0) {
-        this.seek(offset);
+    decrypt(data, offset = null) {
+        if (offset !== null) {
+            this.seek(offset);
+        }
         return this._xorKeystream(data);
     }
 
