@@ -132,9 +132,10 @@ export class NSZDecompressor {
 
                 if (chunk.length === 0) break;
 
-                if (s.cryptoType === 3 || s.cryptoType === 4) {
-                    chunk = this.decryptChunk(chunk, s.cryptoKey, s.cryptoCounter, i);
-                }
+        if (s.cryptoType === 3 || s.cryptoType === 4) {
+            const aesCtr = new (await import('../crypto/aesctr.mjs')).AESCTR(s.cryptoKey, s.cryptoCounter);
+            chunk = Buffer.from(aesCtr.decrypt(new Uint8Array(chunk), i));
+        }
 
                 chunk.copy(output, i);
                 i += chunk.length;
@@ -172,26 +173,6 @@ export class NSZDecompressor {
         } catch (e) {
             return Buffer.alloc(0);
         }
-    }
-
-    decryptChunk(data, key, counter, offset) {
-        const ctr = Buffer.from(counter);
-        const ofs = Math.floor(offset / 16);
-        
-        for (let j = 0; j < 8; j++) {
-            ctr[0x10 - j - 1] = ofs & 0xff;
-            ofs >>= 8;
-        }
-
-        const output = Buffer.alloc(data.length);
-        
-        for (let i = 0; i < data.length; i++) {
-            const keyByte = key[i % 16];
-            const ctrByte = ctr[8 + (i % 8)];
-            output[i] = data[i] ^ keyByte ^ ctrByte;
-        }
-        
-        return output;
     }
 
     writeNSP(files) {

@@ -1,3 +1,5 @@
+import { AESCTR } from '../crypto/aesctr.mjs';
+
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
 
 export class NCZ {
@@ -42,7 +44,9 @@ export class NCZ {
             sections.unshift({
                 offset: UNCOMPRESSABLE_HEADER_SIZE,
                 size: sections[0].offset - UNCOMPRESSABLE_HEADER_SIZE,
-                cryptoType: 0
+                cryptoType: 0,
+                cryptoKey: null,
+                cryptoCounter: null
             });
         }
 
@@ -97,14 +101,19 @@ export class NCZ {
                 }
             }
 
+            let aesCtr = null;
+            if (s.cryptoType === 3 || s.cryptoType === 4) {
+                aesCtr = new AESCTR(s.cryptoKey, s.cryptoCounter);
+            }
+
             while (i < end) {
                 const chunkSize = Math.min(0x10000, end - i);
-
                 const chunk = stream.read(chunkSize);
                 if (chunk.length === 0) break;
 
-                if (s.cryptoType === 3 || s.cryptoType === 4) {
-                    this.decryptChunk(chunk, s.cryptoKey, s.cryptoCounter, i).copy(output, i);
+                if (aesCtr) {
+                    const decrypted = aesCtr.decrypt(new Uint8Array(chunk), i);
+                    output.set(decrypted, i);
                 } else {
                     chunk.copy(output, i);
                 }
