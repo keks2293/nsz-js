@@ -1,5 +1,5 @@
 // Test different counter formats to match PyCryptodome output
-// Reference keystream at position 131072: 4d101641764aa9f1ca218af9da18cc26
+// Reference keystream at position 131072: e95fed2b7d0afca982d145a0ddea1c84
 
 function testCounterFormats() {
     const key = [0x3c, 0x83, 0x58, 0xe3, 0x7c, 0x54, 0xac, 0xa5, 

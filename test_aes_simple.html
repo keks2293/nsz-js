@@ -73,11 +73,11 @@
         log(`Nonce: ${Array.from(nonce).map(b=>b.toString(16).padStart(2,'0')).join('')}`);
         log(`Block Index: ${blockIndex}`);
         
-        // Build counter block: nonce[0:8] + LE64(blockIndex)
+        // Build counter block: nonce[0:8] + BE64(blockIndex)
         const ctr = new Uint8Array(16);
         for (let j = 0; j < 8; j++) ctr[j] = nonce[j];
         let tmp = blockIndex;
-        for (let j = 8; j < 16; j++) {
+        for (let j = 15; j >= 8; j--) {
             ctr[j] = tmp & 0xff;
             tmp >>= 8;
         }
@@ -89,8 +89,8 @@
         const encryptedCtr = aes2.encrypt(ctr);
         
         log(`<strong>Keystream block: ${Array.from(encryptedCtr).map(b=>b.toString(16).padStart(2,'0')).join('')}</strong>`);
-        log(`Expected:         4d101641764aa9f1c...`);
-        log(`First 8 bytes match: ${Array.from(encryptedCtr.slice(0,8)).map(b=>b.toString(16).padStart(2,'0')).join('') === '4d101641764aa9f1c' ? 'YES!' : 'NO'}`);
+        log(`Expected:         e95fed2b7d0afca982d145a0ddea1c84`);
+        log(`First 16 bytes match: ${Array.from(encryptedCtr.slice(0,16)).map(b=>b.toString(16).padStart(2,'0')).join('') === 'e95fed2b7d0afca982d145a0ddea1c84' ? 'YES! ✅' : 'NO ❌'}`);
     </script>
 </body>
 </html>

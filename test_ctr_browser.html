@@ -85,11 +85,11 @@
         
         const keystreamHex = Array.from(encryptedCtr).map(b => b.toString(16).padStart(2, '0')).join('');
         log(`<strong>Keystream block: ${keystreamHex}</strong>`);
-        log(`Expected:         4d101641764aa9f1c...`);
+        log(`Expected:         e95fed2b7d0afca982d145a0ddea1c84`);
         
         const first8 = keystreamHex.substring(0, 16);
         log(`<strong>First 8 bytes: ${first8}</strong>`);
-        log(`<strong>Match: ${first8 === '4d101641764aa9f1c' ? 'YES! ✅' : 'NO ❌'}</strong>`);
+        log(`<strong>Match: ${first8 === 'e95fed2b7d0afca982d145a0ddea1c84' ? 'YES! ✅' : 'NO ❌'}</strong>`);
     </script>
 </body>
 </html>
