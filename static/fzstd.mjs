@@ -1,4 +1,3 @@
-"use strict";
 // Some numerical data is initialized as -1 even when it doesn't need initialization to help the JIT infer types
 // aliases for shorter compressed code (most minifers don't do this)
 var ab = ArrayBuffer, u8 = Uint8Array, u16 = Uint16Array, i16 = Int16Array, u32 = Uint32Array, i32 = Int32Array;
@@ -38,7 +37,7 @@ var cpw = function (v, t, s, e) {
 /**
  * Codes for errors generated within this library
  */
-exports.ZstdErrorCode = {
+export var ZstdErrorCode = {
     InvalidData: 0,
     WindowSizeTooLarge: 1,
     InvalidBlockType: 2,
@@ -611,7 +610,7 @@ var cct = function (bufs, ol) {
  *            it will yield better performance.
  * @returns The decompressed data
  */
-function decompress(dat, buf) {
+export function decompress(dat, buf) {
     var bufs = [], nb = +!buf;
     var bt = 0, ol = 0;
     for (; dat.length;) {
@@ -649,7 +648,6 @@ function decompress(dat, buf) {
     }
     return cct(bufs, ol);
 }
-exports.decompress = decompress;
 /**
  * Decompressor for Zstandard streamed data
  */
@@ -752,4 +750,4 @@ var Decompress = /*#__PURE__*/ (function () {
     };
     return Decompress;
 }());
-exports.Decompress = Decompress;
+export { Decompress };
