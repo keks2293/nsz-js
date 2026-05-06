@@ -21,37 +21,37 @@ This document describes the test files available in the nsz-js project for verif
 python3 test_aes_ctr.py
 ```
 
-**Expected output:** Keystream hex string starting with `4d101641764aa9f1c...`
+**Expected output:** Keystream hex string starting with `e95fed2b7d0afca982d145a0ddea1c84...`
 
 ---
 
-### test_aes_node.js (Node.js)
-**Location:** `/test_aes_node.js`
+### test_aes_node.mjs (Node.js)
+**Location:** `/test_aes_node.mjs`
 **Purpose:** Test AES-CTR in Node.js using aes-js library
 **What it tests:**
 - AES-CTR keystream matches Python output
-- Counter block construction (nonce[0:8] + LE64 blockIndex)
+- Counter block construction (nonce[0:8] + BE64 blockIndex)
 - aes-js AES-ECB encryption of counter blocks
 
 **How to run:**
 ```bash
-node test_aes_node.js
+node --experimental-vm-modules test_aes_node.mjs
 ```
 
-**Expected output:** Keystream starting with `4d101641764aa9f1c...`
+**Expected output:** Keystream starting with `e95fed2b7d0afca982d145a0ddea1c84...`
 
 ---
 
-### test_aes_manual.js (Node.js - Manual)
-**Location:** `/test_aes_manual.js`
+### test_aes_manual.cjs (Node.js - Manual)
+**Location:** `/test_aes_manual.cjs`
 **Purpose:** Standalone AES-CTR test with no dependencies
 **What it tests:**
-- Manual AES-CTR implementation
+- Manual AES-CTR implementation using Node.js crypto
 - Counter construction without external libraries
 
 **How to run:**
 ```bash
-node test_aes_manual.js
+node test_aes_manual.cjs
 ```
 
 ---
@@ -105,8 +105,8 @@ node test_aes_manual.js
 
 ## 3. NSZ Conversion Test
 
-### test_convert.js (Node.js)
-**Location:** `/test_convert.js`
+### test_convert.cjs (Node.js)
+**Location:** `/test_convert.cjs`
 **Purpose:** Quick NSZ to NSP converter using fixed crypto modules
 **What it tests:**
 - Full NSZ decompression pipeline
@@ -116,12 +116,12 @@ node test_aes_manual.js
 
 **How to run:**
 ```bash
-node test_convert.js
+node test_convert.cjs
 ```
 
 **Prerequisites:**
 - Requires NSZ file input
-- Requires `crypto/aes-js.js` and `crypto/aesctr.js`
+- Requires `crypto/aesctr.mjs`
 
 ---
 
@@ -129,17 +129,31 @@ node test_convert.js
 
 | Component | Python Ref | Node.js | Browser |
 |-----------|-------------|---------|---------|
-| AES-CTR keystream | ✅ test_aes_ctr.py | ✅ test_aes_node.js | ✅ test_ctr.html |
-| Counter format (BE64) | ✅ test_aes_ctr.py | ✅ test_aes_node.js | ✅ test_final.html |
-| NCZ decompression | - | ✅ test_convert.js | - |
-| PFS0 parsing | - | ✅ test_convert.js | - |
-| AES-CTR + zstd | - | ✅ test_convert.js | - |
+| AES-CTR keystream | ✅ test_aes_ctr.py | ✅ test_aes_node.mjs | ✅ test_ctr.html |
+| Counter format (BE64) | ✅ test_aes_ctr.py | ✅ test_aes_node.mjs | ✅ test_final.html |
+| NCZ decompression | - | ✅ test_convert.cjs | - |
+| PFS0 parsing | - | ✅ test_convert.cjs | - |
+| AES-CTR + zstd | - | ✅ test_convert.cjs | - |
 
 ---
 
 ## 5. Key Test Vectors
 
 ### AES-CTR Test Vector (from Python nsz)
+
+This test verifies that keystream generation matches Python nsz.
+
+**Inputs:**
+- `Key` — encryption key (16 bytes, AES-128)
+- `Nonce` — initial counter (16 bytes)
+- `Offset` — file position where keystream is needed
+
+**Calculation:**
+1. `BlockIdx = Offset >> 4` (divide offset by AES block size = 16 bytes)
+2. Build counter block: first 8 bytes = nonce[0:8], last 8 bytes = BlockIdx in big-endian
+3. Encrypt counter block with AES-ECB → get keystream block
+
+**Result:**
 ```
 Key:       3c8358e37c54aca5bb20fc36741c1727
 Nonce:    00000002000000000000000000000000 (16 bytes)
@@ -147,7 +161,12 @@ Offset:    131072 (0x20000)
 BlockIdx:  8192 (offset >> 4)
 
 Counter block (BE64): 00000002000000000000000000002000
-Expected keystream (first 16 bytes): 4d101641764aa9f1c...
+Expected keystream (48 bytes): e95fed2b7d0afca982d145a0ddea1c84799cd6049be13c145365e02e7c0cd67c7dda265086d308349093deb0c56bd1e5
+```
+
+**Run the test:**
+```bash
+node test_vector.mjs
 ```
 
 ---
@@ -156,11 +175,14 @@ Expected keystream (first 16 bytes): 4d101641764aa9f1c...
 
 ### Quick verification:
 ```bash
+# Test test vector (section 5)
+node test_vector.mjs
+
 # Test AES-CTR in Node
-node test_aes_node.js
+node --experimental-vm-modules test_aes_node.mjs
 
 # Test full conversion (requires NSZ file)
-# node test_convert.js path/to/file.nsz
+# node test_convert.cjs path/to/file.nsz
 ```
 
 ### Browser tests:

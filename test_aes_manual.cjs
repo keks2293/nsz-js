@@ -34,7 +34,7 @@ let encryptedCtr = cipher.update(ctr);
 encryptedCtr = Buffer.concat([encryptedCtr, cipher.final()]);
 
 console.log('Encrypted counter (keystream block):', encryptedCtr.toString('hex'));
-console.log('Expected (from Python):               4d101641764aa9f1c...');
+console.log('Expected (from Python):               e95fed2b7d0afca982d145a0ddea1c84');
 console.log();
 
 // Now test full CTR mode
@@ -54,8 +54,8 @@ console.log(keystream.toString('hex'));
 console.log();
 
 // Check first 8 bytes
-const expectedStart = '4d101641764aa9f1c';
-const actualStart = keystream.slice(0, 8).toString('hex');
+const expectedStart = 'e95fed2b7d0afca982d145a0ddea1c84';
+const actualStart = keystream.slice(0, 16).toString('hex');
 console.log('Match:', actualStart === expectedStart ? 'YES!' : 'NO');
 console.log('Expected:', expectedStart);
 console.log('Actual:  ', actualStart);

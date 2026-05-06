@@ -63,11 +63,11 @@
         const encryptedCtr = aes.encrypt(ctr);
         
         log(`<strong>Keystream block: ${Array.from(encryptedCtr).map(b=>b.toString(16).padStart(2,'0')).join('')}</strong>`);
-        log(`Expected:         4d101641764aa9f1c...`);
+        log(`Expected:         e95fed2b7d0afca982d145a0ddea1c84`);
         
-        const first8 = Array.from(encryptedCtr.slice(0, 8)).map(b=>b.toString(16).padStart(2,'0')).join('');
-        log(`<strong>First 8 bytes match: ${first8 === '4d101641764aa9f1c' ? 'YES!' : 'NO'}</strong>`);
-        log(`Expected: 4d101641764aa9f1c`);
+        const first8 = Array.from(encryptedCtr.slice(0, 16)).map(b=>b.toString(16).padStart(2,'0')).join('');
+        log(`<strong>First 16 bytes match: ${first8 === 'e95fed2b7d0afca982d145a0ddea1c84' ? 'YES! ✅' : 'NO ❌'}</strong>`);
+        log(`Expected: e95fed2b7d0afca982d145a0ddea1c84`);
         log(`Actual:   ${first8}`);
     </script>
 </body>

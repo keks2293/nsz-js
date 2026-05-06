@@ -22,7 +22,7 @@
         // key = 3c8358e37c54aca5bb20fc36741c1727
         // nonce = 00000002000000000000000000000000
         // offset = 131072 (0x20000)
-        // keystream starts with: 4d101641764aa9f1c...
+        // keystream: e95fed2b7d0afca982d145a0ddea1c84799cd6049be13c145365e02e7c0cd67c7dda265086d308349093deb0c56bd1e5
         
         const key = new Uint8Array([
             0x3c, 0x83, 0x58, 0xe3, 0x7c, 0x54, 0xac, 0xa5,
@@ -46,9 +46,9 @@
         const ctr = new Uint8Array(16);
         for (let j = 0; j < 8; j++) ctr[j] = nonce[j];
         
-        // Write blockIndex as LE uint64 in bytes 8-15
+        // Write blockIndex as BE uint64 in bytes 8-15
         let tmp = blockIndex;
-        for (let j = 8; j < 16; j++) {
+        for (let j = 15; j >= 8; j--) {
             ctr[j] = tmp & 0xff;
             tmp >>= 8;
         }
@@ -60,7 +60,8 @@
         const encryptedCtr = aes.encrypt(ctr);
         
         document.getElementById('output').innerHTML += `<p><strong>Keystream (first 16 bytes): ${Array.from(encryptedCtr).map(b=>b.toString(16).padStart(2,'0')).join('')}</strong></p>`;
-        document.getElementById('output').innerHTML += `<p>Expected (from Python): 4d101641764aa9f1c...</p>`;
+        document.getElementById('output').innerHTML += `<p>Expected (from Python): e95fed2b7d0afca982d145a0ddea1c84</p>`;
+        document.getElementById('output').innerHTML += `<p>Match: ${Array.from(encryptedCtr).map(b=>b.toString(16).padStart(2,'0')).join('') === 'e95fed2b7d0afca982d145a0ddea1c84' ? 'YES! ✅' : 'NO ❌'}</p>`;
         
         // Now test full CTR mode from aes-js
         document.getElementById('output').innerHTML += `<h2>Testing aes-js CTR mode</h2>`;
