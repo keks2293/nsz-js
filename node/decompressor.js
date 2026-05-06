@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
+import { sha256 } from '../crypto/unified.js';
 import { PFS0 } from './fs/pfs0.js';
 import { NCZ } from './fs/ncz.js';
 import { Keys } from './keys.js';
@@ -146,7 +146,7 @@ export class NSZDecompressor {
             }
         }
 
-        const hash = crypto.createHash('sha256').update(output).digest('hex');
+        const hash = sha256(output);
         this.log(statusCallback, 'info', `NCA SHA256: ${hash}`);
 
         return output;

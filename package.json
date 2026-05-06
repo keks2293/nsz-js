@@ -8,10 +8,17 @@
     "start": "node node/nsz.js",
     "decompress": "node node/nsz.js -d"
   },
-  "keywords": ["nintendo-switch", "nsz", "nsp", "decompressor"],
+  "keywords": [
+    "nintendo-switch",
+    "nsz",
+    "nsp",
+    "decompressor"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "aes-js": "^3.1.2",
+    "fzstd": "^0.1.1",
     "zstd-codec": "^0.1.5"
   }
 }

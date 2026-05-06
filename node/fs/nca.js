@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { Keys, AESECB } from './keys.js';
 import { PFS0 } from './pfs0.js';
 

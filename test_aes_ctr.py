@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test AES-CTR keystream generation to compare with JS implementation"""
-from Cryptodome.Cipher import AES
-from Cryptodome.Util import Counter
+from Crypto.Cipher import AES
+from Crypto.Util import Counter
 
 def generate_keystream(key_hex, nonce_hex, offset, length=48):
     """
@@ -22,20 +22,6 @@ def generate_keystream(key_hex, nonce_hex, offset, length=48):
     
     return keystream.hex()
 
-def generate_counter_block(nonce_hex, block_index):
-    """Show what the counter block looks like for a given block index"""
-    nonce = bytes.fromhex(nonce_hex)
-    counter_block = bytearray(16)
-    
-    # First 8 bytes: nonce[0:8]
-    counter_block[0:8] = nonce[0:8]
-    
-    # Last 8 bytes: block_index as little-endian uint64
-    for i in range(8):
-        counter_block[8 + i] = (block_index >> (i * 8)) & 0xff
-    
-    return bytes(counter_block).hex()
-
 if __name__ == '__main__':
     # Test with the key and nonce from the debug output
     key_hex = '3c8358e37c54aca5bb20fc36741c1727'
@@ -52,12 +38,6 @@ if __name__ == '__main__':
     print(f"Block index (offset >> 4): {offset >> 4}")
     print()
     
-    # Show counter block for first few blocks
-    for block_idx in range(3):
-        counter_hex = generate_counter_block(nonce_hex, block_idx)
-        print(f"Counter block {block_idx}: {counter_hex}")
-    
-    print()
     keystream = generate_keystream(key_hex, nonce_hex, offset, 48)
     print(f"Keystream at offset {offset}:")
     print(f"  {keystream}")

@@ -130,15 +130,15 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     async function loadDefaultKeys() {
         try {
-            const response = await fetch('https://raw.githubusercontent.com/AfterHrs/prodkeys/main/prod.keys');
+            const response = await fetch('./static/prod.keys');
             if (response.ok) {
                 const keyText = await response.text();
                 converter.setKeys(keyText);
-                addLog('success', 'Keys loaded');
+                addLog('success', 'Keys loaded from static/prod.keys');
                 return true;
             }
         } catch (error) {
-            addLog('warning', 'Keys not available, proceeding without');
+            addLog('info', 'No static/prod.keys found, using keys from textarea if provided');
         }
         return false;
     }

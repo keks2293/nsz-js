@@ -1,5 +1,5 @@
 import { ZstdDecompressor } from './crypto/zstd.js';
-import { AESCTR } from './crypto/aesctr.js';
+import { AESCTR } from './crypto/aesctr.mjs';
 
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
 

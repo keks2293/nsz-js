@@ -6,20 +6,19 @@ class ZstdDecompressor {
 
     static async load() {
         if (globalReady) return;
-        
+
         await new Promise((resolve, reject) => {
-            console.log('[ZSTD] Loading fzstd from CDN...');
-            
+            console.log('[ZSTD] Loading fzstd from static...');
+
             const script = document.createElement('script');
-            script.src = 'https://unpkg.com/fzstd@0.1.1';
-            script.crossOrigin = 'anonymous';
+            script.src = './static/fzstd.js';
             script.onload = () => {
                 console.log('[ZSTD] fzstd loaded:', typeof fzstd);
                 globalReady = true;
                 resolve();
             };
             script.onerror = () => {
-                console.error('[ZSTD] Failed to load fzstd');
+                console.error('[ZSTD] Failed to load fzstd from static');
                 reject(new Error('Failed to load fzstd'));
             };
             document.head.appendChild(script);
