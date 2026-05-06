@@ -91,7 +91,7 @@ class NCZDecompressor {
         this.ncaHeader = null;
     }
 
-    async decompress() {
+    async decompress(progressCallback = null) {
         const { sections, ncaSize, headerEnd } = this.getSections();
         console.log('[NCZ] sections:', sections.length, 'ncaSize:', ncaSize, 'headerEnd:', headerEnd);
 
@@ -106,9 +106,9 @@ class NCZDecompressor {
         console.log('[NCZ] compression mode:', useBlockCompression ? 'block' : 'streaming');
 
         if (useBlockCompression) {
-            return await this._decompressWithBlocks(sections, compressedData, output);
+            return await this._decompressWithBlocks(sections, compressedData, output, progressCallback);
         } else {
-            return await this._decompressWithStreaming(sections, compressedData, output);
+            return await this._decompressWithStreaming(sections, compressedData, output, progressCallback);
         }
     }
 
@@ -157,7 +157,7 @@ class NCZDecompressor {
         return { sections, ncaSize, headerEnd: offset };
     }
 
-    async _decompressWithStreaming(sections, compressedData, output) {
+    async _decompressWithStreaming(sections, compressedData, output, progressCallback = null) {
         const stream = new StreamingZstdReader(compressedData);
 
         let decompressedOffset = UNCOMPRESSABLE_HEADER_SIZE;
@@ -194,13 +194,17 @@ class NCZDecompressor {
 
                 i += chunk.length;
                 decompressedOffset += chunk.length;
+
+                if (progressCallback) {
+                    progressCallback(decompressedOffset / ncaSize);
+                }
             }
         }
 
         return output;
     }
 
-    async _decompressWithBlocks(sections, compressedData, output) {
+    async _decompressWithBlocks(sections, compressedData, output, progressCallback = null) {
         const blockHeader = new NCZBlockHeader(compressedData, 0);
         const blockDecompressor = new AsyncBlockDecompressorReader(
             compressedData,
@@ -243,6 +247,10 @@ class NCZDecompressor {
 
                 i += chunk.length;
                 decompressedOffset += chunk.length;
+
+                if (progressCallback) {
+                    progressCallback(decompressedOffset / ncaSize);
+                }
             }
         }
 
