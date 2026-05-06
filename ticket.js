@@ -5,7 +5,7 @@ export class Ticket {
         const view = new DataView(buffer);
         let offset = 0;
 
-        const signatureType = view.getUint32(offset, false);
+        const signatureType = view.getUint32(offset, true);
         offset += 4;
 
         const signatureSizes = {

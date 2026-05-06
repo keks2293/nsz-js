@@ -108,26 +108,26 @@ function downloadFile(url, path) {
 function parsePfs0Header(buffer) {
     const view = new DataView(buffer.buffer, buffer.byteOffset);
     const magic = view.getUint32(0, true);
-    
+
     if (magic !== PFS0_MAGIC) {
         throw new Error(`Invalid PFS0 magic: 0x${magic.toString(16)}`);
     }
 
-    const fileCount = view.getUint32(8, true);
-    const stringTableSize = view.getUint32(12, true);
+    const fileCount = view.getUint32(4, true);
+    const stringTableSize = view.getUint32(8, true);
 
     const files = [];
     for (let i = 0; i < fileCount; i++) {
-        const offset = 16 + i * 16;
-        const dataOffset = view.getUint32(offset, true);
-        const dataSize = view.getUint32(offset + 8, true);
-        const nameOffset = view.getUint32(offset + 12, true);
-        
-        const nameStart = 16 + fileCount * 16 + nameOffset;
+        const entryOffset = 0x10 + i * 0x18;
+        const dataOffset = view.getUint32(entryOffset, true);
+        const dataSize = view.getUint32(entryOffset + 8, true);
+        const nameOffset = view.getUint32(entryOffset + 16, true);
+
+        const nameStart = 0x10 + fileCount * 0x18 + nameOffset;
         let nameEnd = nameStart;
         while (buffer[nameEnd] !== 0 && nameEnd < buffer.length) nameEnd++;
         const name = buffer.slice(nameStart, nameEnd).toString('utf-8');
-        
+
         files.push({ name, dataOffset, dataSize });
     }
 
@@ -177,12 +177,12 @@ async function convertNszToNsp(input, pfs0, nczFiles, outPath) {
     }
 
     // File entries and data
-    const headerSize = 16 + pfs0.fileCount * 16 + pfs0.stringTableSize;
+    const headerSize = 0x10 + pfs0.fileCount * 0x18 + pfs0.stringTableSize;
     let dataPos = headerSize;
     
     for (let i = 0; i < pfs0.files.length; i++) {
         const file = pfs0.files[i];
-        const entryOffset = 16 + i * 16;
+        const entryOffset = 0x10 + i * 0x18;
         const ncz = nczFiles.find(n => n.name === file.name);
         
         // Data offset
