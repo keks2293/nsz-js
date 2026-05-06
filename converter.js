@@ -45,6 +45,8 @@ class NSZConverter {
         const fileBuffer = await file.slice(0, Math.min(file.size, 4 * 1024 * 1024)).arrayBuffer();
         const pfs0Reader = new PFS0Reader(fileBuffer);
         const files = pfs0Reader.getFiles();
+        console.log('[PFS0] Header size:', pfs0Reader.getHeaderSize(), 'Files:', files.length);
+        files.forEach(f => console.log('[PFS0] File:', f.name, 'offset:', f.offset, 'size:', f.size));
         
         onLog('info', `Found ${files.length} files in container`);
         onProgress(0.05, 'Reading container...');
@@ -189,7 +191,10 @@ class NSZConverter {
 
     async decompressNCZ(file, nczFile) {
         const nczSize = nczFile.size;
+        console.log('[NCZ] decompressing:', nczFile.name, 'offset:', nczFile.offset, 'size:', nczSize);
         const buffer = await file.slice(nczFile.offset, nczFile.offset + nczSize).arrayBuffer();
+        const uint8 = new Uint8Array(buffer);
+        console.log('[NCZ] buffer received, length:', buffer.byteLength, 'first 32 bytes:', Array.from(uint8.slice(0, 32)).map(b => b.toString(16).padStart(2, '0')).join(' '));
         try {
             const decompressor = new NCZDecompressor(buffer, this.keys);
             return decompressor.decompress();
