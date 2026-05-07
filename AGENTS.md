@@ -36,6 +36,12 @@ When original files from npm don't work directly in the target environment:
 - **Problem**: `fzstd` (CommonJS) uses `exports` which isn't defined in browsers
   **Solution**: Use ESM version `fzstd/esm/index.mjs` instead, copy to `static/fzstd.mjs`, import directly in `crypto/zstd.js`
 
+- **Problem**: `fzstd` ESM exports `Decompress` class (not `decompress` function)
+  **Solution**: In `crypto/zstd.js`, use `new fzstdLib.Decompress(callback)` with streaming API (`push()` method)
+
+- **Problem**: Node.js `zstd-codec` package doesn't export `ZstdDecompressor` as constructor
+  **Solution**: Use `fzstd` instead (same as browser version) - works in both Node.js and browser
+
 ### Browser Usage
 
 Browser HTML files load dependencies:
@@ -54,4 +60,12 @@ Browser HTML files load dependencies:
 Current versions (update this when upgrading):
 - `aes-js`: 3.1.2
 - `fzstd`: 0.1.1 (use ESM version: `fzstd/esm/index.mjs`)
-- `zstd-codec`: ^0.1.5
+- `zstd-codec`: ^0.1.5 (not recommended - use `fzstd` instead)
+
+## Recent Fixes ( streaming decompression)
+
+The NCZ streaming decompression was producing incorrect output (SHA256 mismatch).
+Root cause: `crypto/zstd.js` was using non-existent `fzstd.decompress()` instead of `fzstd.Decompress` class.
+Fix: Use `new fzstdLib.Decompress(callback)` with streaming API (`push()` method).
+
+See commit `334c017` for details.
