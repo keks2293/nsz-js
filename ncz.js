@@ -39,11 +39,6 @@ function readUInt32LE(bytes, offset) {
     return view.getUint32(offset, true);
 }
 
-function readUInt16LE(bytes, offset) {
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    return view.getUint16(offset, true);
-}
-
 function sliceBytes(bytes, start, end) {
     return bytes.slice(start, end);
 }
@@ -263,36 +258,28 @@ class StreamingZstdReader {
         this.data = data;
         this.pos = 0;
         this.buffer = allocByte(0);
-        this._decompressor = null;
-    }
-
-    async _getDecompressor() {
-        if (!this._decompressor) {
-            if (typeof fzstd !== 'undefined' && fzstd.decompress) {
-                this._decompressor = fzstd;
-            } else {
-                throw new Error('fzstd not loaded');
-            }
-        }
-        return this._decompressor;
     }
 
     async read(size) {
         while (this.buffer.length < size && this.pos < this.data.length) {
+            // Find end of current zstd frame
             const frameEnd = this._findFrameEnd(this.pos);
-            if (frameEnd === -1 || frameEnd > this.data.length) {
-                break;
+            
+            let frameData;
+            if (frameEnd === -1) {
+                // Can't find frame end, just use remaining data
+                frameData = sliceBytes(this.data, this.pos);
+                this.pos = this.data.length;
+            } else {
+                frameData = sliceBytes(this.data, this.pos, frameEnd);
+                this.pos = frameEnd;
             }
-
-            const frameData = sliceBytes(this.data, this.pos, frameEnd);
-            const decompressor = await this._getDecompressor();
-
-            try {
-                const decompressed = decompressor.decompress(frameData);
+            
+            // Decompress this frame
+            const decompressed = await this._decompressFrame(frameData);
+            if (decompressed.length > 0) {
                 this.buffer = concatBytes(this.buffer, decompressed);
-                this.pos = frameEnd;
-            } catch (e) {
-                this.pos = frameEnd;
+            } else {
                 break;
             }
         }
@@ -306,6 +293,11 @@ class StreamingZstdReader {
         return result;
     }
 
+    async _decompressFrame(frameData) {
+        const decompressor = new ZstdDecompressor();
+        return await decompressor.decompress(frameData);
+    }
+
     _findFrameEnd(startPos) {
         const magic = new Uint8Array([0x28, 0xB5, 0x2F, 0xFD]);
         let pos = startPos;
@@ -316,15 +308,51 @@ class StreamingZstdReader {
                 this.data[pos + 2] === magic[2] &&
                 this.data[pos + 3] === magic[3]) {
 
-                const headerType = this.data[pos + 4] >> 6;
+                const headerByte = this.data[pos + 4];
+                const headerType = headerByte >> 6;
+                const singleSegment = (headerByte >> 5) & 0x1;
+                const frameContentSizeFlag = headerType;
+                
+                // Determine FCS field size
+                let fcsSize = 0;
+                if (frameContentSizeFlag === 0) {
+                    fcsSize = singleSegment ? 1 : 0;
+                } else if (frameContentSizeFlag === 1) {
+                    fcsSize = 2;
+                } else if (frameContentSizeFlag === 2) {
+                    fcsSize = 4;
+                } else if (frameContentSizeFlag === 3) {
+                    fcsSize = 8;
+                }
 
-                if (headerType === 2) {
-                    const frameSize = readUInt32LE(this.data, pos + 8);
-                    return pos + 18 + frameSize;
-                } else if (headerType === 3) {
-                    const frameSize = readUInt16LE(this.data, pos + 6);
-                    return pos + 10 + frameSize;
+                // Determine if Window_Descriptor is present
+                const hasWindowDescriptor = !singleSegment;
+                
+                // Calculate header size
+                let headerSize = 5; // magic (4) + header descriptor (1)
+                if (hasWindowDescriptor) headerSize += 1;
+                // Dictionary ID size depends on bits 1-0 of header byte
+                const dictIdFlag = headerByte & 0x3;
+                if (dictIdFlag === 1) headerSize += 1;
+                else if (dictIdFlag === 2) headerSize += 2;
+                else if (dictIdFlag === 3) headerSize += 4;
+                headerSize += fcsSize;
+
+                // Read frame content size if present
+                if (fcsSize > 0) {
+                    let frameContentSize = 0;
+                    for (let i = 0; i < fcsSize; i++) {
+                        frameContentSize += this.data[pos + headerSize - fcsSize + i] << (i * 8);
+                    }
+                    
+                    // Frame ends at: start + headerSize + frameContentSize + (checksum if present)
+                    const hasChecksum = (headerByte >> 2) & 0x1;
+                    const checksumSize = hasChecksum ? 4 : 0;
+                    
+                    return pos + headerSize + frameContentSize + checksumSize;
                 } else {
+                    // No frame content size - we can't determine frame end from header alone
+                    // Return -1 to signal we need to find the end differently
                     return -1;
                 }
             }
@@ -343,7 +371,6 @@ class AsyncBlockDecompressorReader {
         this.currentBlock = null;
         this.currentBlockId = -1;
         this.position = 0;
-        this._decompressor = null;
 
         const compressedBlockSizeList = [];
         for (let i = 0; i < numberOfBlocks; i++) {
@@ -360,15 +387,34 @@ class AsyncBlockDecompressorReader {
         this.compressedBlockSizeList = compressedBlockSizeList;
     }
 
-    async _getDecompressor() {
-        if (!this._decompressor) {
-            if (typeof fzstd !== 'undefined' && fzstd.decompress) {
-                this._decompressor = fzstd;
-            } else {
-                throw new Error('fzstd not loaded');
+    async getBlock(blockId) {
+        if (this.currentBlockId === blockId) {
+            return this.currentBlock;
+        }
+
+        const offset = this.compressedBlockOffsetList[blockId];
+        const compressedSize = this.compressedBlockSizeList[blockId];
+
+        let decompressedSize = this.blockSize;
+        if (blockId >= this.numberOfBlocks - 1) {
+            const remainder = this.decompressedSize % this.blockSize;
+            if (remainder > 0) {
+                decompressedSize = Number(remainder);
             }
         }
-        return this._decompressor;
+
+        const compressedData = sliceBytes(this.data, offset, offset + compressedSize);
+
+        if (compressedSize < decompressedSize) {
+            const decompressor = new ZstdDecompressor();
+            await decompressor.load();
+            this.currentBlock = decompressor.decompress(compressedData);
+        } else {
+            this.currentBlock = compressedData;
+        }
+
+        this.currentBlockId = blockId;
+        return this.currentBlock;
     }
 
     async read(size) {
@@ -393,35 +439,7 @@ class AsyncBlockDecompressorReader {
 
         return concatBytes(...buffer);
     }
-
-    async getBlock(blockId) {
-        if (this.currentBlockId === blockId) {
-            return this.currentBlock;
-        }
-
-        const offset = this.compressedBlockOffsetList[blockId];
-        const compressedSize = this.compressedBlockSizeList[blockId];
-
-        let decompressedSize = this.blockSize;
-        if (blockId >= this.numberOfBlocks - 1) {
-            const remainder = this.decompressedSize % this.blockSize;
-            if (remainder > 0) {
-                decompressedSize = Number(remainder);
-            }
-        }
-
-        const compressedData = sliceBytes(this.data, offset, offset + compressedSize);
-
-        if (compressedSize < decompressedSize) {
-            const decompressor = await this._getDecompressor();
-            this.currentBlock = decompressor.decompress(compressedData);
-        } else {
-            this.currentBlock = compressedData;
-        }
-
-        this.currentBlockId = blockId;
-        return this.currentBlock;
-    }
 }
 
-export { NCZDecompressor, UNCOMPRESSABLE_HEADER_SIZE };
+export { NCZDecompressor };
+
