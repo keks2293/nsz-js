@@ -21,3 +21,4 @@ npm-debug.log*
 # Converted files
 *.nsz
 *.nsp
+.DS_Store
