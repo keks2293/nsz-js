@@ -2,10 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import { sha256 } from '../crypto/unified.js';
 import { PFS0 } from './fs/pfs0.js';
-import { NCZ } from './fs/ncz.js';
+import { NCZDecompressor } from '../ncz.js';
 import { Keys } from './keys.js';
-import { FileExistingChecks } from './fileExistingChecks.js';
-import { PathTools } from './pathTools.js';
+import { extractHashes } from './fileExistingChecks.js';
+import { changeExtension } from './pathTools.js';
 
 const CHUNK_SIZE = 0x100000;
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
@@ -29,10 +29,10 @@ export class NSZDecompressor {
         const container = new PFS0(buffer);
         
         if (this.keys) {
-            this.fileHashes = FileExistingChecks.extractHashes(container, this.keys);
+            this.fileHashes = extractHashes(container);
         }
         
-        this.outputPath = PathTools.changeExtension(this.inputPath, '.nsp');
+        this.outputPath = changeExtension(this.inputPath, '.nsp');
         if (this.outputDir) {
             this.outputPath = path.join(this.outputDir, path.basename(this.outputPath));
         }
@@ -42,142 +42,22 @@ export class NSZDecompressor {
         const outputFiles = [];
         
         for (const file of container.files) {
-            if (file.path.endsWith('.ncz')) {
-                this.log(statusCallback, 'info', `Decompressing NCZ: ${file.path}`);
-                const ncaData = await this.decompressNCZ(file.data, statusCallback);
-                const ncaName = file.path.replace(/\.ncz$/i, '.nca');
-                outputFiles.push({ name: ncaName, data: ncaData });
+            if (file.name.endsWith('.ncz')) {
+                this.log(statusCallback, 'info', `Decompressing NCZ: ${file.name}`);
+                // Use the working browser version
+                const ncz = new NCZDecompressor(file.data, null);
+                const ncaData = await ncz.decompress();
+                const ncaName = file.name.replace(/\.ncz$/i, '.nca');
+                outputFiles.push({ name: ncaName, data: Buffer.from(ncaData) });
             } else {
-                this.log(statusCallback, 'info', `Copying: ${file.path}`);
-                outputFiles.push({ name: file.path, data: file.data });
+                this.log(statusCallback, 'info', `Copying: ${file.name}`);
+                outputFiles.push({ name: file.name, data: file.data });
             }
         }
         
         this.writeNSP(outputFiles);
         
         return this.outputPath;
-    }
-
-    async decompressNCZ(data, statusCallback = null) {
-        const magic = data.slice(0, 8).toString('ascii');
-        if (magic !== 'NCZSECTN') {
-            throw new Error('Invalid NCZ file: missing NCZSECTN magic');
-        }
-
-        let offset = 8;
-        const sectionCount = data.readBigUInt64LE(offset);
-        offset += 8;
-
-        const sections = [];
-        for (let i = 0; i < Number(sectionCount); i++) {
-            const sectionOffset = Number(data.readBigUInt64LE(offset));
-            offset += 8;
-            const sectionSize = Number(data.readBigUInt64LE(offset));
-            offset += 8;
-            const cryptoType = Number(data.readBigUInt64LE(offset));
-            offset += 8;
-            offset += 8;
-            const cryptoKey = data.slice(offset, offset + 16);
-            offset += 16;
-            const cryptoCounter = data.slice(offset, offset + 16);
-            offset += 16;
-            
-            sections.push({ offset: sectionOffset, size: sectionSize, cryptoType, cryptoKey, cryptoCounter });
-        }
-
-        if (sections[0].offset - UNCOMPRESSABLE_HEADER_SIZE > 0) {
-            sections.unshift({
-                offset: UNCOMPRESSABLE_HEADER_SIZE,
-                size: sections[0].offset - UNCOMPRESSABLE_HEADER_SIZE,
-                cryptoType: 1
-            });
-        }
-
-        let ncaSize = UNCOMPRESSABLE_HEADER_SIZE;
-        for (const s of sections) {
-            ncaSize += s.size;
-        }
-
-        const header = data.slice(0, UNCOMPRESSABLE_HEADER_SIZE);
-        const output = Buffer.alloc(ncaSize);
-        header.copy(output, 0);
-
-        const compressedData = data.slice(offset);
-        const blockMagic = compressedData.slice(0, 8).toString('ascii');
-        const useBlockCompression = blockMagic === 'NCZBLOCK';
-
-        let decompressedOffset = UNCOMPRESSABLE_HEADER_SIZE;
-
-        for (let sIdx = 0; sIdx < sections.length; sIdx++) {
-            const s = sections[sIdx];
-            let i = s.offset;
-            const end = s.offset + s.size;
-
-            if (sIdx === 0) {
-                const uncompressedSize = UNCOMPRESSABLE_HEADER_SIZE - sections[0].offset;
-                if (uncompressedSize > 0) {
-                    i += uncompressedSize;
-                }
-            }
-
-            let aesCtr = null;
-            if (s.cryptoType === 3 || s.cryptoType === 4) {
-                aesCtr = new (await import('../crypto/aesctr.mjs')).AESCTR(s.cryptoKey, s.cryptoCounter);
-            }
-
-            while (i < end) {
-                const chunkSize = Math.min(0x10000, end - i);
-                
-                let chunk;
-                if (useBlockCompression) {
-                    chunk = await this.decompressBlock(compressedData, chunkSize);
-                } else {
-                    chunk = await this.decompressZstd(compressedData, chunkSize);
-                }
-                
-                if (chunk.length === 0) break;
-
-                if (aesCtr) {
-                    const decrypted = aesCtr.decrypt(new Uint8Array(chunk), i);
-                    chunk = Buffer.from(decrypted);
-                }
-
-                chunk.copy(output, i);
-                i += chunk.length;
-                decompressedOffset += chunk.length;
-
-                if (statusCallback) {
-                    statusCallback(decompressedOffset / ncaSize, `Decompressing: ${Math.round(decompressedOffset / ncaSize * 100)}%`);
-                }
-            }
-        }
-
-        const hash = sha256(output);
-        this.log(statusCallback, 'info', `NCA SHA256: ${hash}`);
-
-        return output;
-    }
-
-    async decompressZstd(data, maxSize) {
-        try {
-            const zstd = await import('zstd-codec');
-            const decompressor = new zstd.ZstdDecompressor();
-            decompressor.init();
-            return decompressor.decompress(data);
-        } catch (e) {
-            return Buffer.alloc(0);
-        }
-    }
-
-    async decompressBlock(data, maxSize) {
-        try {
-            const zstd = await import('zstd-codec');
-            const decompressor = new zstd.ZstdDecompressor();
-            decompressor.init();
-            return decompressor.decompress(data);
-        } catch (e) {
-            return Buffer.alloc(0);
-        }
     }
 
     writeNSP(files) {
@@ -209,7 +89,7 @@ export class NSZDecompressor {
             const entry = fileEntries[i];
             const pos = 0x10 + i * 0x18;
             
-            output.writeBigUInt64LE(BigInt(entry.offset - 0x10 - files.length * 0x18 - paddedStringTableSize + 0x10 + files.length * 0x18), pos);
+            output.writeBigUInt64LE(BigInt(entry.offset), pos);
             output.writeBigUInt64LE(BigInt(entry.size), pos + 8);
             output.writeUInt32LE(stringOffset, pos + 16);
             output.writeUInt32LE(0, pos + 20);
@@ -222,8 +102,8 @@ export class NSZDecompressor {
             output.writeUInt8(0, 0x10 + files.length * 0x18 + stringTable.length + i);
         }
 
-        for (const file of files) {
-            file.data.copy(output, file.offset);
+        for (let i = 0; i < files.length; i++) {
+            files[i].data.copy(output, fileEntries[i].offset);
         }
 
         fs.writeFileSync(this.outputPath, output);

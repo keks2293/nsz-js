@@ -1,5 +1,5 @@
-import { NCA } from './nca.js';
-import { Pfs0 } from './pfs0.js';
+import { NCA } from './fs/nca.js';
+import { PFS0 } from './fs/pfs0.js';
 
 export function extractHashes(container) {
     const fileHashes = new Set();

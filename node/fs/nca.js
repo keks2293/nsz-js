@@ -1,4 +1,4 @@
-import { Keys, AESECB } from './keys.js';
+import { Keys, AESECB } from '../keys.js';
 import { PFS0 } from './pfs0.js';
 
 const MEDIA_SIZE = 0x200;
