@@ -24,7 +24,6 @@ class AESCTR {
     constructor(key, nonce) {
         this.key = key.slice(0, 16);
         this.nonce = nonce.slice(0, 16);
-        this._debugLogged = false;
         // Create AES-128-ECB instance
         this.aes = new AES(this.key);
     }
@@ -52,15 +51,9 @@ class AESCTR {
         const arr = data instanceof Uint8Array ? data : new Uint8Array(data);
         const output = new Uint8Array(len);
 
-        if (!this._debugLogged) {
-            this._debugLogged = true;
-            console.log('AESCTR: key=', Array.from(this.key).map(b=>b.toString(16).padStart(2,'0')).join(''));
-            console.log('AESCTR: nonce=', Array.from(this.nonce).map(b=>b.toString(16).padStart(2,'0')).join(''));
-        }
-
-        for (let i = 0; i < len; i += 16) {
+        for (let i =0; i < len; i += 16) {
             const blockIdx = this.blockIndex + Math.floor(i / 16);
-
+            
             // Build counter block: nonce[0:8] + BE64(blockIdx)
             // Python: Counter.new(64, prefix=nonce[0:8], initial_value=blockIdx)
             const ctr = new Uint8Array(16);
@@ -74,28 +67,17 @@ class AESCTR {
                 ctr[j] = tmp & 0xff;
                 tmp >>= 8;
             }
-
-            // Debug: print first counter block
-            if (i === 0) {
-                console.log('Counter block (first):', Array.from(ctr).map(b=>b.toString(16).padStart(2,'0')).join(''));
-                console.log('blockIdx:', blockIdx);
-            }
-
+            
             // Encrypt counter with AES-ECB
             const keystreamBlock = this.aes.encrypt(ctr);
-
-            // Debug: print first keystream block
-            if (i === 0) {
-                console.log('Keystream block (first):', Array.from(keystreamBlock).map(b=>b.toString(16).padStart(2,'0')).join(''));
-            }
-
+            
             // XOR data with keystream block
             const blockLen = Math.min(16, len - i);
             for (let j = 0; j < blockLen; j++) {
                 output[i + j] = arr[i + j] ^ keystreamBlock[j];
             }
         }
-
+        
         this.blockIndex += Math.floor(len / 16);
         return output;
     }

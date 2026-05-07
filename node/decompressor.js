@@ -120,6 +120,11 @@ export class NSZDecompressor {
                 }
             }
 
+            let aesCtr = null;
+            if (s.cryptoType === 3 || s.cryptoType === 4) {
+                aesCtr = new (await import('../crypto/aesctr.mjs')).AESCTR(s.cryptoKey, s.cryptoCounter);
+            }
+
             while (i < end) {
                 const chunkSize = Math.min(0x10000, end - i);
                 
@@ -129,13 +134,13 @@ export class NSZDecompressor {
                 } else {
                     chunk = await this.decompressZstd(compressedData, chunkSize);
                 }
-
+                
                 if (chunk.length === 0) break;
 
-        if (s.cryptoType === 3 || s.cryptoType === 4) {
-            const aesCtr = new (await import('../crypto/aesctr.mjs')).AESCTR(s.cryptoKey, s.cryptoCounter);
-            chunk = Buffer.from(aesCtr.decrypt(new Uint8Array(chunk), i));
-        }
+                if (aesCtr) {
+                    const decrypted = aesCtr.decrypt(new Uint8Array(chunk), i);
+                    chunk = Buffer.from(decrypted);
+                }
 
                 chunk.copy(output, i);
                 i += chunk.length;
