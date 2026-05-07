@@ -9,14 +9,10 @@ class ZstdDecompressor {
         if (globalReady) return;
 
         try {
-            console.log('[ZSTD] Loading fzstd from static (ESM)...');
-
             // ESM version - import directly (path relative to crypto/ folder)
             const module = await import('../static/fzstd.mjs');
             fzstdLib = module;
             globalReady = true;
-
-            console.log('[ZSTD] fzstd loaded:', typeof fzstdLib.decompress);
         } catch(error) {
             console.error('[ZSTD] Failed to load fzstd:', error);
             throw error;
@@ -26,20 +22,40 @@ class ZstdDecompressor {
     async decompress(data) {
         await ZstdDecompressor.load();
 
-        console.log('[ZSTD] fzstd decompress input:', data.length, 'bytes');
-        console.log('[ZSTD] first bytes:', Array.from(data.slice(0, 8)));
-
         try {
-            if (fzstdLib && fzstdLib.decompress) {
-                const result = fzstdLib.decompress(data);
-                console.log('[ZSTD] fzstd result:', result ? result.length + ' bytes' : 'null');
-                return result || new Uint8Array(0);
+            if (fzstdLib && fzstdLib.Decompress) {
+                // fzstd ESM exports Decompress class
+                const chunks = [];
+                const decompressor = new fzstdLib.Decompress((chunk) => {
+                    chunks.push(chunk);
+                });
+                decompressor.push(data, true); // true = final chunk
+                const result = new Uint8Array(chunks.reduce((acc, chunk) => acc + chunk.length, 0));
+                let offset = 0;
+                for (const chunk of chunks) {
+                    result.set(chunk, offset);
+                    offset += chunk.length;
+                }
+                return result;
             }
         } catch(e) {
             console.log('[ZSTD] fzstd error:', e.message);
         }
 
         return new Uint8Array(0);
+    }
+
+    static async decompressStreaming(data, callback) {
+        await ZstdDecompressor.load();
+
+        try {
+            if (fzstdLib && fzstdLib.Decompress) {
+                const decompressor = new fzstdLib.Decompress(callback);
+                decompressor.push(data, true);
+            }
+        } catch(e) {
+            console.log('[ZSTD] fzstd streaming error:', e.message);
+        }
     }
 }
 
