@@ -4,7 +4,7 @@ import { NCZDecompressor } from './ncz.js';
 import { KeysParser } from './keys.js';
 import { sha256 } from './crypto/sha256.js';
 import { extractHashesFromCnmt, Cnmt, ContentEntry, NCAHeader } from './ticket.js';
-import { XCIReader, HFS0Writer } from './xci.js';
+import { XCIReader, HFS0Writer, XCIWriter } from './xci.js';
 
 class NSZConverter {
     constructor() {
@@ -247,10 +247,15 @@ class NSZConverter {
         const hfs0Data = hfs0Writer.build();
         onLog('info', `HFS0 partition built: ${hfs0Data.length} bytes`);
 
+        const xciWriter = new XCIWriter(buffer);
+        xciWriter.setHFS0Data(hfs0Data);
+        const xciData = xciWriter.build();
+        onLog('info', `XCI built: ${xciData.length} bytes`);
+
         onProgress(1.0, 'Done!');
         const outputName = file.name.replace(/\.xcz$/i, '.xci');
-        const blob = new Blob([hfs0Data], { type: 'application/octet-stream' });
-        return { blob, name: outputName, size: hfs0Data.length };
+        const blob = new Blob([xciData], { type: 'application/octet-stream' });
+        return { blob, name: outputName, size: xciData.length };
     }
 
     async extractCnmtHashes(cnmtData) {
