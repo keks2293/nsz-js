@@ -41,9 +41,9 @@ async function main() {
         console.log('Usage: node nsz-convert.js <input> [output] [keys.txt] [options]');
         console.log('');
         console.log('Input formats:');
-        console.log('  .nsz, .nspz, .nsx   -> .nsp (NSZ compressed NSP)');
-        console.log('  .ncz                -> .nca (standalone compressed NCA)');
-        console.log('  .xcz                -> .xci (compressed XCI)');
+        console.log('  .nsz, .nspz, .nsx   -> .nsp  (decompressed NSP with proper PFS0)');
+        console.log('  .ncz                -> .nca  (decompressed NCA)');
+        console.log('  .xcz                -> .xci  (decompressed XCI with proper header)');
         console.log('');
         console.log('Options:');
         console.log('  --fix-padding, -p    Pad PFS0 header to 16-byte boundary (match Python nsz)');
