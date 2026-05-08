@@ -1,52 +1,23 @@
-# NSZ to NSP Converter - Action Plan
+# NSZ to NSP Converter - Historical Plan
 
-## Goal
-Сделать корректный AES-CTR decryption для NCZ секций, чтобы выходной NSP совпадал с референсом.
+This document is kept for historical reference only. All tasks have been completed.
 
-## Problem
-Текущая реализация AES-CTR не давала правильный keystream. Нужно было понять, как PyCryptodome строит counter.
+## ✅ Completed: AES-CTR Decryption Fix
 
-## ✅ Steps Completed
+The original goal was to implement correct AES-CTR decryption for NCZ sections so that the output NSP matches the Python nsz reference. This was achieved:
 
-### 1. Изучена PyCryptodome реализация ✅
-- Counter.new(64, prefix=nonce[0:8], initial_value=blockIndex)
-- Counter block = nonce[0:8] + BE64(blockIndex)
-- PyCryptodome использует big-endian для block index
+1. **AES-CTR counter format** — Matches PyCryptodome: `Counter.new(64, prefix=nonce[0:8], initial_value=blockIndex)`
+2. **Counter block** — `nonce[0:8] + BE64(blockIndex)`
+3. **AES-ECB encryption** — Uses `aes-js` library (pure JS, works in Node and browser)
 
-### 2. Протестированы варианты counter format ✅
-- BE64 (big-endian) в байтах 8-15 - ПРАВИЛЬНЫЙ вариант
-- LE64 (little-endian) - не подходит
+## Current Status
 
-### 3. Исправлена реализация AES-CTR ✅
-- Загружена библиотека `aes-js` (https://github.com/ricmoo/aes-js)
-- `aesctr.js` теперь использует `aesjs.AES` для шифрования counter блока через AES-ECB
-- Counter block строится как: nonce[0:8] + BE64(blockIndex)
-- Исправлена обработка данных: шифруется counter через AES-ECB, затем результат XOR'ится с данными
+The project now supports:
+- **Input formats**: `.nsz`, `.ncz`, `.xcz`
+- **Output formats**: `.nsp`, `.nca`, `.xci`
+- **Compression**: zstd streaming and NCZBLOCK block
+- **Crypto**: AES-CTR (types 3, 4/BKTR), AES-XTS, key derivation from prod.keys
+- **Decompression**: zstddec WASM (browser), zstd CLI (Node.js streaming)
+- **Verification**: SHA256 hash matching, CNMT hash extraction
 
-### 4. Исправлена обработка BKTR секций ✅
-- `AESCTR_BKTR` теперь работает так же, как `AESCTR` (использует правильный counter)
-- Исправлено использование nonce (теперь используется весь 16-байтный counter из заголовка)
-
-### 5. Исправлены вызовы в ncz.js ✅
-- Удалено двойное добавление `UNCOMPRESSABLE_HEADER_SIZE` в `decryptSection`
-- Исправлено использование `decryptSection` для всех типов секций
-- Удалено условие `&& this.keys` которое блокировало дешифровку
-
-## Files Modified
-- `browser/crypto/aesctr.js` - Полностью переписан: использует aes-js, правильный counter (BE64)
-- `browser/crypto/aes-js.js` - Загружен из GitHub (803 строки)
-- `browser/index.html` - Добавлен `<script src="crypto/aes-js.js"></script>`
-- `browser/ncz.js` - Исправлен `decryptSection`, удалено лишнее условие
-
-## Remaining Tasks
-1. Протестировать в браузере с реальным NSZ файлом
-2. Сравнить SHA256 выходного файла с ожидаемым
-3. Если не совпадает - отладить offset calculation
-
-## Success Criteria
-SHA256 выходного файла совпадает с `b46dffff5d030f22bb7cfd1e28459ab6fca52145f187b332e8a09e20279e7511`
-
-## Test Files
-- Input: `Super Chicken Jumper [01001DC018566000][v0] (0.05 GB).nsz`
-- Reference: `Super Chicken Jumper [01001DC018566000][v0] (0.05 GB).nsp`
-- Expected SHA256: `b46dffff5d030f22bb7cfd1e28459ab6fca52145f187b332e8a09e20279e7511`
+See `CHANGELOG.md` for the full status report.
