@@ -4,6 +4,7 @@ import { NCZDecompressor } from './ncz.js';
 import { KeysParser } from './keys.js';
 import { sha256 } from './crypto/sha256.js';
 import { extractHashesFromCnmt, Cnmt, ContentEntry, NCAHeader } from './ticket.js';
+import { XCIReader, HFS0Writer } from './xci.js';
 
 class NSZConverter {
     constructor() {
@@ -198,6 +199,58 @@ class NSZConverter {
             console.error('NCZ decompression error:', e);
             throw e;
         }
+    }
+
+    async decompressNCZtoNCA(file, options = {}) {
+        const { onProgress = () => {}, onLog = () => {} } = options;
+        const buffer = await file.arrayBuffer();
+        const decompressor = new NCZDecompressor(new Uint8Array(buffer), this.keys);
+        const ncaData = await decompressor.decompress();
+        const hash = sha256(ncaData);
+        onLog('info', `NCA SHA256: ${hash}`);
+        onProgress(1.0, 'Done!');
+        const outputName = file.name.replace(/\.ncz$/i, '.nca');
+        const blob = new Blob([ncaData], { type: 'application/octet-stream' });
+        return { blob, name: outputName, size: ncaData.length };
+    }
+
+    async decompressXCZtoXCI(file, options = {}) {
+        const { onProgress = () => {}, onLog = () => {} } = options;
+        onLog('info', 'Parsing XCI container...');
+        const buffer = await file.arrayBuffer();
+        const xci = new XCIReader(buffer);
+        const files = xci.getSecurePartition();
+        onLog('info', `Found ${files.length} files in secure partition`);
+
+        const hfs0Writer = new HFS0Writer();
+        for (let idx = 0; idx < files.length; idx++) {
+            const f = files[idx];
+            const isNcz = f.name.toLowerCase().endsWith('.ncz');
+            const outputName = isNcz ? f.name.replace(/\.ncz$/i, '.nca') : f.name;
+            onLog('info', `${isNcz ? 'Decompressing' : 'Copying'}: ${f.name} -> ${outputName}`);
+
+            const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
+            if (isNcz) {
+                const decompressor = new NCZDecompressor(new Uint8Array(data), this.keys);
+                const ncaData = await decompressor.decompress();
+                const hash = sha256(ncaData);
+                onLog('info', `  SHA256: ${hash}`);
+                hfs0Writer.addFile(outputName, ncaData);
+            } else {
+                onLog('info', `  Size: ${data.byteLength} bytes`);
+                hfs0Writer.addFile(outputName, new Uint8Array(data));
+            }
+            onProgress(0.1 + 0.8 * ((idx + 1) / files.length), `Processing file ${idx + 1}/${files.length}...`);
+        }
+
+        onProgress(0.9, 'Building XCI...');
+        const hfs0Data = hfs0Writer.build();
+        onLog('info', `HFS0 partition built: ${hfs0Data.length} bytes`);
+
+        onProgress(1.0, 'Done!');
+        const outputName = file.name.replace(/\.xcz$/i, '.xci');
+        const blob = new Blob([hfs0Data], { type: 'application/octet-stream' });
+        return { blob, name: outputName, size: hfs0Data.length };
     }
 
     async extractCnmtHashes(cnmtData) {

@@ -6,7 +6,7 @@
     <title>NSZ to NSP Converter</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <script src="./static/aes-js.js"></script>
-    <!-- fzstd.mjs is imported via ES module in crypto/zstd.js -->
+    <!-- zstddec.mjs is imported via ES module in crypto/zstd.js and ncz.js -->
     <style>
         * {
             box-sizing: border-box;
@@ -309,8 +309,8 @@
         <div class="drop-zone" id="dropZone">
             <div class="drop-zone-icon">📦</div>
             <div class="drop-zone-text">Drop NSZ files here or click to select</div>
-            <div class="drop-zone-hint">Supports .nsz files (multi-file selection enabled)</div>
-            <input type="file" id="fileInput" multiple accept=".nsz">
+            <div class="drop-zone-hint">Supports .nsz, .ncz, .xcz files (multi-file selection enabled)</div>
+            <input type="file" id="fileInput" multiple accept=".nsz,.ncz,.xcz">
         </div>
         
         <div class="file-list" id="fileList"></div>

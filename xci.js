@@ -13,7 +13,7 @@ export class HFS0Reader {
             this.view.getUint8(2),
             this.view.getUint8(3)
         );
-        
+
         if (magic !== 'HFS0') {
             throw new Error(`Invalid HFS0 magic: ${magic}`);
         }
@@ -30,7 +30,7 @@ export class HFS0Reader {
 
         for (let i = 0; i < fileCount; i++) {
             const entryOffset = 0x10 + i * 0x40;
-            
+
             const offset = Number(this.view.getBigUint64(entryOffset, true));
             const size = Number(this.view.getBigUint64(entryOffset + 8, true));
             const nameOffset = this.view.getUint32(entryOffset + 16, true);
@@ -58,6 +58,75 @@ export class HFS0Reader {
         const fileCount = this.view.getUint32(4, true);
         const stringTableSize = this.view.getUint32(8, true);
         return 0x10 + fileCount * 0x40 + stringTableSize;
+    }
+}
+
+export class HFS0Writer {
+    constructor() {
+        this.files = [];
+    }
+
+    addFile(name, data) {
+        this.files.push({ name, data });
+    }
+
+    build() {
+        const stringTable = this.files.map(f => f.name).join('\0') + '\0';
+        const stringTableBytes = new TextEncoder().encode(stringTable);
+
+        const headerBase = 0x10 + this.files.length * 0x40;
+        const totalHeaderSize = headerBase + stringTableBytes.length;
+
+        let fileOffset = 0;
+        const fileEntries = this.files.map(f => {
+            const entry = {
+                name: f.name,
+                offset: fileOffset,
+                size: f.data.byteLength || f.data.length
+            };
+            fileOffset += entry.size;
+            return entry;
+        });
+
+        const totalSize = totalHeaderSize + fileOffset;
+        const output = new Uint8Array(totalSize);
+        const view = new DataView(output.buffer);
+
+        output[0] = 0x48; output[1] = 0x46; output[2] = 0x53; output[3] = 0x30;
+        view.setUint32(4, this.files.length, true);
+        view.setUint32(8, stringTableBytes.length, true);
+        view.setUint32(12, 0, true);
+
+        output.set(stringTableBytes, headerBase);
+
+        const nameBytes = new TextEncoder();
+        let stringOffset = 0;
+        for (let i = 0; i < this.files.length; i++) {
+            const entry = fileEntries[i];
+            const pos = 0x10 + i * 0x40;
+
+            view.setBigUint64(pos, BigInt(entry.offset), true);
+            view.setBigUint64(pos + 8, BigInt(entry.size), true);
+            view.setUint32(pos + 16, stringOffset, true);
+            view.setUint32(pos + 20, 0, true);
+            view.setUint32(pos + 24, 0, true);
+            view.setUint32(pos + 28, 0, true);
+            view.setBigUint64(pos + 32, 0n, true);
+
+            const encoded = nameBytes.encode(entry.name);
+            output.set(encoded, headerBase + stringOffset);
+            stringOffset += encoded.length + 1;
+        }
+
+        let dataPos = totalHeaderSize;
+        for (let i = 0; i < this.files.length; i++) {
+            const data = this.files[i].data;
+            const arr = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
+            output.set(arr, dataPos);
+            dataPos += arr.length;
+        }
+
+        return output;
     }
 }
 

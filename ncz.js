@@ -43,18 +43,6 @@ function sliceBytes(bytes, start, end) {
     return bytes.slice(start, end);
 }
 
-function getZstdWindowSize(data) {
-    if (data.length < 6) return 0;
-    const n3 = data[0] | (data[1] << 8) | (data[2] << 16);
-    if (n3 !== 0x2FB528 || data[3] !== 0xFD) return 0;
-    const singleSegment = (data[4] >> 5) & 1;
-    if (singleSegment) return 0;
-    const windowLog = data[5] >> 3;
-    const windowBase = 1 << (10 + windowLog);
-    const mantissa = data[5] & 7;
-    return windowBase + (windowBase >> 3) * mantissa;
-}
-
 class NCZSection {
     constructor(data, offset) {
         this.offset = Number(readBigUInt64LE(data, offset));
@@ -192,36 +180,12 @@ class NCZDecompressor {
             const decompressed = new Uint8Array(result.buffer, result.byteOffset, result.byteLength);
             output.set(decompressed, UNCOMPRESSABLE_HEADER_SIZE);
         } else {
-            const windowSize = getZstdWindowSize(compressedData);
-            if (windowSize > 32 * 1024 * 1024) {
-                throw new Error(
-                    `Browser zstd decompression not available: frame uses ${(windowSize / 1024 / 1024).toFixed(0)}MB zstd window, ` +
-                    `but fzstd (browser JS library) only supports up to 32MB. ` +
-                    `Use the Node.js CLI (nsz-convert.js) which uses the native zstd tool.`
-                );
-            }
-            console.log('[ZSTD] Using fzstd (chunked) for browser');
-            try {
-                const fzstd = await import('./static/fzstd.mjs');
-                let writePos = UNCOMPRESSABLE_HEADER_SIZE;
-                const d = new fzstd.Decompress(chunk => {
-                    output.set(chunk, writePos);
-                    writePos += chunk.length;
-                });
-                const CHUNK = 0x10000;
-                let pos = 0;
-                while (pos < compressedData.length) {
-                    const end = Math.min(pos + CHUNK, compressedData.length);
-                    d.push(compressedData.subarray(pos, end), end >= compressedData.length);
-                    pos = end;
-                }
-            } catch (e) {
-                throw new Error(
-                    `Browser zstd decompression failed: ${e.message}. ` +
-                    `This NCZ file uses a large zstd window (>32MB) which the browser's fzstd library cannot handle. ` +
-                    `Use the Node.js CLI (nsz-convert.js) instead, which uses the native zstd tool.`
-                );
-            }
+            console.log('[ZSTD] Using zstddec WASM for browser');
+            const { ZSTDDecoder } = await import('./static/zstddec.mjs');
+            const decoder = new ZSTDDecoder();
+            await decoder.init();
+            const decompressed = decoder.decode(compressedData, 0);
+            output.set(decompressed, UNCOMPRESSABLE_HEADER_SIZE);
         }
 
         let decompressedOffset = UNCOMPRESSABLE_HEADER_SIZE;
