@@ -25,9 +25,9 @@ python3 test_aes_ctr.py
 
 ---
 
-### test_aes_node.mjs (Node.js)
-**Location:** `/test_aes_node.mjs`
-**Purpose:** Test AES-CTR in Node.js using aes-js library
+### test_vector.mjs (Node.js)
+**Location:** `/test_vector.mjs`
+**Purpose:** AES-CTR test vector verification matching Python nsz
 **What it tests:**
 - AES-CTR keystream matches Python output
 - Counter block construction (nonce[0:8] + BE64 blockIndex)
@@ -35,10 +35,29 @@ python3 test_aes_ctr.py
 
 **How to run:**
 ```bash
-node --experimental-vm-modules test_aes_node.mjs
+node test_vector.mjs
 ```
 
-**Expected output:** Keystream starting with `e95fed2b7d0afca982d145a0ddea1c84...`
+**Expected output:**
+```
+Result: ✅ PASS
+```
+
+---
+
+### test_aesctr.mjs (Node.js)
+**Location:** `/test_aesctr.mjs`
+**Purpose:** AES-CTR with explicit seek and encrypt
+**What it tests:**
+- AES-CTR seek to specific offset
+- Encrypt known plaintext and compare with expected output
+
+**How to run:**
+```bash
+node test_aesctr.mjs
+```
+
+**Expected output:** Shows encrypted zstd magic matching `874786d3`
 
 ---
 
@@ -69,25 +88,77 @@ node test_aes_manual.cjs
 
 ---
 
-## 3. NSZ Conversion Test
+## 3. Conversion & Analysis Tests
 
-### test_convert.cjs (Node.js)
-**Location:** `/test_convert.cjs`
-**Purpose:** Quick NSZ to NSP converter using fixed crypto modules
+### test_convert.mjs (Node.js)
+**Location:** `/test_convert.mjs`
+**Purpose:** Full NSZ to NSP conversion pipeline
 **What it tests:**
-- Full NSZ decompression pipeline
 - PFS0 parsing
 - NCZ decompression with AES-CTR
-- NCA output verification
+- SHA256 hashing of output
 
 **How to run:**
 ```bash
-node test_convert.cjs
+node test_convert.mjs path/to/file.nsz
 ```
 
 **Prerequisites:**
 - Requires NSZ file input
-- Requires `crypto/aesctr.mjs`
+
+---
+
+### test_decompress.mjs (Node.js)
+**Location:** `/test_decompress.mjs`
+**Purpose:** Compare decompressed output against reference NSP
+**What it tests:**
+- NCZ decompression
+- Byte-by-byte comparison with working NSP
+- SHA256 hash comparison
+
+**How to run:**
+```bash
+node test_decompress.mjs input.nsz [working.nsp]
+```
+
+When `working.nsp` is provided, finds and reports the first mismatching byte.
+
+---
+
+### test_ticket_keys.mjs (Node.js)
+**Location:** `/test_ticket_keys.mjs`
+**Purpose:** Analyze ticket keys and AES-CTR decryption in NSZ files
+**What it tests:**
+- NCZSECTN parsing
+- Section key/counter extraction
+- Ticket (.tik) parsing and comparison
+- AES-CTR decryption with various keys (section key, title key, etc.)
+- zstd magic detection in decrypted data
+
+**How to run:**
+```bash
+node test_ticket_keys.mjs input.nsz [working.nsp]
+```
+
+Useful for debugging key derivation and verifying section decryption manually.
+
+---
+
+### test-ncz.mjs (Node.js)
+**Location:** `/test-ncz.mjs`
+**Purpose:** NCZ decompressor component tests
+**What it tests:**
+- AES-CTR encrypt produces correct bytes
+- NCZ section parsing from NSZ container
+- Full NCZ decompression vs working NCA (when files available)
+- Zstd decompressor error handling
+
+**How to run:**
+```bash
+node test-ncz.mjs
+```
+
+Tests with hardcoded paths skip gracefully when files are not present.
 
 ---
 
@@ -97,8 +168,12 @@ node test_convert.cjs
 |-----------|-------------|---------|---------|
 | AES-CTR keystream | ✅ test_aes_ctr.py | ✅ test_vector.mjs | ✅ test_browser.html |
 | Counter format (BE64) | ✅ test_aes_ctr.py | ✅ test_vector.mjs | ✅ test_browser.html |
-| NCZ decompression | - | ✅ test_convert.mjs | - |
+| AES-CTR seek + encrypt | - | ✅ test_aesctr.mjs | - |
+| AES-CTR manual (Node crypto) | - | ✅ test_aes_manual.cjs | - |
+| NCZ decompression | - | ✅ test_convert.mjs, test-ncz.mjs | - |
+| Byte-level decompress verify | - | ✅ test_decompress.mjs | - |
 | PFS0 parsing | - | ✅ test_convert.mjs | - |
+| Ticket key analysis | - | ✅ test_ticket_keys.mjs | - |
 | AES-CTR + zstd | - | ✅ test_convert.mjs | - |
 
 ---
@@ -139,19 +214,31 @@ node test_vector.mjs
 
 ## 6. Running All Tests
 
-### Quick verification:
+### Self-contained (no external files needed):
 ```bash
-# Test AES-CTR test vector (section 5)
+# AES-CTR test vector (section 5)
 node test_vector.mjs
 
-# Test AES-CTR in Node
+# AES-CTR with seek + encrypt
 node test_aesctr.mjs
 
-# Test AES-CTR manual (no deps)
+# AES-CTR manual (uses Node crypto, no aes-js dep)
 node test_aes_manual.cjs
 
-# Test full conversion (requires NSZ file)
-# node test_convert.mjs path/to/file.nsz
+# NCZ component tests (skips file-dependent tests)
+node test-ncz.mjs
+```
+
+### Require NSZ file input:
+```bash
+# Full conversion pipeline
+node test_convert.mjs path/to/file.nsz
+
+# Decompression comparison against reference NSP
+node test_decompress.mjs input.nsz [working.nsp]
+
+# Ticket key and section analysis
+node test_ticket_keys.mjs input.nsz [working.nsp]
 ```
 
 ### Browser tests:
