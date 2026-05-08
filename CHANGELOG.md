@@ -14,8 +14,9 @@
    - Correctly parses 3 sections from section table
 
 4. **zstd Decompression**
-   - Uses fzstd library from CDN
-   - Successfully decompresses ~40MB to ~55MB
+   - Uses zstddec WASM library for all decompression (browser and Node.js block)
+   - Node.js streaming uses system `zstd` CLI via spawn piping
+   - Successfully decompresses files of any size
 
 5. **Section Handling**
    - Correctly calculates NCA size (0x4000 + sections)
@@ -76,32 +77,44 @@
 
 10. **Fixed fzstd decompression bug — 6-byte NCA SHA256 mismatch**
      - Root cause: fzstd (pure JS) produces 6 incorrect bytes at one location when decompressing large zstd streams (~600MB compressed, 1.6GB decompressed)
-     - Fix: Added `PreDecompressedReader` class for serving pre-decompressed data; in Node.js, streaming decompression now uses `zstd` CLI tool via `child_process` instead of fzstd
-     - Browser fallback: retains fzstd streaming for browser usage
-     - Verification: Output NCA SHA256 (`a7c01cd...`) now matches working NSP reference byte-for-byte across all files
+     - Fix: Node.js streaming decompression uses `zstd` CLI via `child_process`; browser uses zstddec WASM
+     - Verification: Output NCA SHA256 matches working NSP reference byte-for-byte
 
-## ✅ Recent Improvements (2026-05-08)
-
-11. **Browser zstd decompression cleanup**
-     - Removed `DecompressionStream` API (not supported in any browser for 'zstd' format)
-     - Removed `StreamingZstdReader` and `PreDecompressedReader` classes
-     - Node.js path writes zstd CLI output directly to NCA output buffer
-     - Both paths share same section loop (reads from output, decrypts AES-CTR in-place)
-
-12. **Node.js zstd CLI improvement: temp files → stdin/stdout piping**
+11. **Node.js zstd CLI improvement: temp files → stdin/stdout piping**
      - Replaced `execSync` with temp files → `spawn('zstd', ['-d', '--no-check'])` with stdin/stdout pipes
-     - No more disk I/O for temp files; faster, cleaner, avoids race conditions
 
-13. **Zstd window size detection (ncz.js)**
-     - Added `getZstdWindowSize()` function that parses the zstd frame header to detect Window_Descriptor window size
-     - Browser path checks window size before decompression: throws immediately if >32MB
-     - Prevents silent 6-byte NCA corruption from fzstd's 32MB backreference limit
-     - Small NSZ files (window ≤ 32MB) work in browser; large files get clear error message
-
-14. **ncz.js code cleanup**
-     - Removed `CompressionStreamZstdReader`, `StreamingZstdReader`, `PreDecompressedReader` classes
-     - Removed unused utility wrapper functions
+12. **ncz.js code cleanup**
+     - Removed dead classes and unused utility functions
      - Unified section decryption loop for both Node.js and browser paths
+
+## ✅ Recent Changes (2026-05-08, continued)
+
+15. **Dropped fzstd dependency entirely**
+     - Replaced fzstd with zstddec WASM in all decompression paths (crypto/zstd.js, node/crypto/zstd.js, node/fs/ncz.js)
+     - Removed `static/fzstd.mjs` and fzstd from `package.json`
+     - All zstd decompression now uses a single library: zstddec (WASM-based, handles any window size)
+     - Node.js streaming still uses system `zstd` CLI via spawn for performance
+     - See `BROWSER-ZSTD-LIMITATION.md` for rationale
+
+
+16. **Added standalone .ncz file support**
+     - Browser: drop .ncz files → decompressed to .nca
+     - CLI: `node nsz-convert.js game.ncz` → outputs game.nca
+     - NCZDecompressor already detected standalone NCZ (NCZSECTN at offset 0); just needed UI/CLI routing
+
+17. **Added XCZ decompression**
+     - New `HFS0Writer` class in `xci.js` for building HFS0 partitions
+     - Browser: drop .xcz files → decompressed to .xci
+     - CLI: `node nsz-convert.js game.xcz` → outputs game.xci
+     - Parses XCI secure partition, decompresses NCZ files inside, rebuilds HFS0
+
+18. **Removed dead code**
+     - Removed `getZstdWindowSize()` from `ncz.js` (no longer needed with zstddec)
+     - Removed orphaned `decompressor.js` (not imported anywhere)
+
+19. **Cleaned up test files**
+     - Removed `test_ticket_keys.mjs` and `test_decompress.mjs` (hardcoded developer paths, not runnable by others)
+     - Remaining tests: `test_vector.mjs`, `test_aesctr.mjs`, `test_convert.mjs`, `test-ncz.mjs`, `test_aes_manual.cjs`
 
 ## ✅ Verified
 
@@ -113,25 +126,6 @@
 
 ## ❌ Remaining Issues
 
-- **Browser zstd decompression**: `DecompressionStream('zstd')` not supported in any browser. Uses non-streaming fzstd (`ZstdDecompressor.decompress()`) for all browsers — the 6-byte corruption bug may appear for large files (>32 MB window). Block decompression (NCZBLOCK) uses fzstd with smaller data chunks, which should work correctly.
-- PFS0 header padding: reference NSP pads header to 16-byte alignment (528 bytes), ours does not (515 bytes). All file data is identical.
-- Tests `test_crypto_key.mjs` and `test_offset.mjs` have incorrect assumptions about AES-CTR offset calculation (they apply decryption to compressed data and look for zstd magic, which is wrong — decryption happens after decompression)
+- PFS0 header padding: reference NSP pads header to 16-byte alignment (528 bytes), ours without fixPadding does not (515 bytes). All file data is identical. Use `--fix-padding` or toggle in UI to match.
+- XCZ output is a flat HFS0 partition without full XCI header/metadata — enough for game loading but not a byte-for-byte copy of the original XCI structure.
 
-## Files Modified
-- `ncz.js` - Added `CompressionStreamZstdReader`, `getFzstd()`, rewritten `StreamingZstdReader`, Node.js path uses spawn piping, NCA detection, ncaSize fix
-- `crypto/zstd.js` - Better error handling
-- `nsz-convert.js` - Complete rewrite
-- `CHANGELOG.md` - This update
-- `test-ncz.mjs` - Fixed NCZ data slicing
-- `AGENTS.md` - Added instructions for AI agents
-
-## Test Files
-- Input: `Little Nightmares II [010097100EDD6800][v262144] (1.56 GB).nsz`
-- Reference: `Little Nightmares II [010097100EDD6800][v262144] (1.56 GB) working.nsp`
-- **All NCA DATA BYTE-IDENTICAL** (only PFS0 header padding differs by 13 bytes)
-
-## Next Steps
-1. **Test in browser** - Open index.html with NSZ file in Chrome 120+ (uses CompressionStream) or other browsers (fzstd fallback for small files)
-2. **PFS0 header padding** - Could add optional 16-byte alignment padding to match Python nsz exactly
-3. **Test other NSZ variants** - Different crypto types (BKTR), block compression (NCZBLOCK), multi-NCZ files
-4. **Add PFS0 header padding** to match reference output (528 vs 515 byte headers)

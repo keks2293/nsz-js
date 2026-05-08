@@ -39,7 +39,14 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     function isCompressedGame(name) {
         const lower = name.toLowerCase();
-        return lower.endsWith('.nsz') || lower.endsWith('.nspz') || lower.endsWith('.xcz');
+        return lower.endsWith('.nsz') || lower.endsWith('.ncz') || lower.endsWith('.xcz');
+    }
+
+    function detectFileType(name) {
+        const lower = name.toLowerCase();
+        if (lower.endsWith('.ncz')) return 'ncz';
+        if (lower.endsWith('.xcz')) return 'xcz';
+        return 'nsp';
     }
 
     function addLog(type, message) {
@@ -215,9 +222,14 @@ window.addEventListener('DOMContentLoaded', async () => {
             updateProgress(i / files.length, 'Starting...');
             
             try {
-                let writable = null;
-                const outputName = file.name.replace(/\.nsz$/i, '.nsp');
+                const fileType = detectFileType(file.name);
+                const outputName = fileType === 'ncz'
+                    ? file.name.replace(/\.ncz$/i, '.nca')
+                    : fileType === 'xcz'
+                        ? file.name.replace(/\.xcz$/i, '.xci')
+                        : file.name.replace(/\.nsz$/i, '.nsp');
 
+                let writable = null;
                 if (directoryHandle) {
                     try {
                         const fileHandle = await directoryHandle.getFileHandle(outputName, { create: true });
@@ -227,16 +239,33 @@ window.addEventListener('DOMContentLoaded', async () => {
                     }
                 }
 
-                const result = await converter.decompressNSZtoNSP(file, {
-                    onProgress: (progress, text) => {
-                        const normalizedProgress = Math.max(0, Math.min(1, (progress - 0.05) / 0.85));
-                        const overall = (i + normalizedProgress) / files.length;
-                        updateProgress(overall, text);
-                    },
-                    onLog: addLog,
-                    writable,
-                    fixPadding
-                });
+                let result;
+                if (fileType === 'ncz') {
+                    result = await converter.decompressNCZtoNCA(file, {
+                        onProgress: (progress, text) => {
+                            updateProgress((i + progress) / files.length, text);
+                        },
+                        onLog: addLog
+                    });
+                } else if (fileType === 'xcz') {
+                    result = await converter.decompressXCZtoXCI(file, {
+                        onProgress: (progress, text) => {
+                            updateProgress((i + progress) / files.length, text);
+                        },
+                        onLog: addLog
+                    });
+                } else {
+                    result = await converter.decompressNSZtoNSP(file, {
+                        onProgress: (progress, text) => {
+                            const normalizedProgress = Math.max(0, Math.min(1, (progress - 0.05) / 0.85));
+                            const overall = (i + normalizedProgress) / files.length;
+                            updateProgress(overall, text);
+                        },
+                        onLog: addLog,
+                        writable,
+                        fixPadding
+                    });
+                }
 
                 if (writable) {
                     await writable.close();

@@ -330,4 +330,4 @@ if hexHash[:32] == fileNameHash:
 - AES-CTR counter (nonce[0:8] + BE64 blockIndex) — ✅ FIXED (big-endian counter)
 - NCA header preservation — ✅ FIXED (detect and prepend when present)
 - AES-XTS support — ✅ implemented in `aesxts.js`
-- Browser zstd decompression — `DecompressionStream('zstd')` NOT supported in any browser. Uses chunked fzstd with direct output buffer write. Window size detection (`getZstdWindowSize()`) prevents silent corruption: throws if >32MB. See `ncz.js:50-59`.
+- Browser zstd decompression — `DecompressionStream('zstd')` NOT supported in any browser. Uses zstddec WASM library via `static/zstddec.mjs`. Handles any window size. See `BROWSER-ZSTD-LIMITATION.md`.

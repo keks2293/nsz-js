@@ -38,7 +38,12 @@ async function main() {
     if (!inputPath) {
         console.log('NSZ to NSP Converter');
         console.log('');
-        console.log('Usage: node nsz-convert.js <input.nsz> [output.nsp] [keys.txt] [options]');
+        console.log('Usage: node nsz-convert.js <input> [output] [keys.txt] [options]');
+        console.log('');
+        console.log('Input formats:');
+        console.log('  .nsz, .nspz, .nsx   -> .nsp (NSZ compressed NSP)');
+        console.log('  .ncz                -> .nca (standalone compressed NCA)');
+        console.log('  .xcz                -> .xci (compressed XCI)');
         console.log('');
         console.log('Options:');
         console.log('  --fix-padding, -p    Pad PFS0 header to 16-byte boundary (match Python nsz)');
@@ -48,6 +53,8 @@ async function main() {
         console.log('  node nsz-convert.js game.nsz output.nsp');
         console.log('  node nsz-convert.js game.nsz output.nsp keys.txt');
         console.log('  node nsz-convert.js game.nsz --fix-padding');
+        console.log('  node nsz-convert.js game.ncz');
+        console.log('  node nsz-convert.js game.xcz');
         process.exit(1);
     }
 
@@ -80,12 +87,69 @@ async function main() {
     const inputBuffer = fs.readFileSync(inputPath);
     console.log(`Input size: ${inputBuffer.length} bytes`);
 
-    // Parse PFS0
+    const isNcz = inputPath.toLowerCase().endsWith('.ncz');
+    const isXcz = inputPath.toLowerCase().endsWith('.xcz');
+
+    if (isNcz) {
+        // Standalone NCZ file — decompress directly to NCA
+        console.log('Detected standalone NCZ file');
+        const outPath = outputPath || inputPath.replace(/\.ncz$/i, '.nca');
+        const ncaData = await decompressNCZ(inputBuffer, { offset: 0, size: inputBuffer.length, name: inputPath }, keys);
+        const hash = sha256(ncaData);
+        console.log(`NCA SHA256: ${hash}`);
+        console.log(`NCA size: ${ncaData.length} bytes`);
+        fs.writeFileSync(outPath, Buffer.from(ncaData));
+        const stat = fs.statSync(outPath);
+        console.log('');
+        console.log('=== DONE ===');
+        console.log(`Output: ${outPath}`);
+        console.log(`Size: ${stat.size} bytes (${(stat.size / 1024 / 1024).toFixed(2)} MB)`);
+        return;
+    }
+
+    if (isXcz) {
+        // XCZ — decompress XCI with NCZ files inside
+        console.log('Detected XCZ file');
+        const { XCIReader, HFS0Writer } = await import('./xci.js');
+        const outPath = outputPath || inputPath.replace(/\.xcz$/i, '.xci');
+        const xci = new XCIReader(inputBuffer);
+        const files = xci.getSecurePartition();
+        console.log(`HFS0 files: ${files.length}`);
+        files.forEach(f => console.log(`  ${f.name} (offset: ${f.offset}, size: ${f.size})`));
+
+        const hfs0Writer = new HFS0Writer();
+        for (const f of files) {
+            const isFileNcz = f.name.toLowerCase().endsWith('.ncz');
+            const outputName = isFileNcz ? f.name.replace(/\.ncz$/i, '.nca') : f.name;
+            console.log(`${isFileNcz ? 'Decompressing' : 'Copying'}: ${f.name} -> ${outputName}`);
+            const data = inputBuffer.slice(f.offset, f.offset + f.size);
+            if (isFileNcz) {
+                const ncaData = await decompressNCZ(inputBuffer, { offset: f.offset, size: f.size, name: f.name }, keys);
+                const hash = sha256(ncaData);
+                console.log(`  SHA256: ${hash}`);
+                hfs0Writer.addFile(outputName, Buffer.from(ncaData));
+            } else {
+                hfs0Writer.addFile(outputName, data);
+            }
+        }
+
+        const hfs0Data = hfs0Writer.build();
+        console.log(`HFS0 built: ${hfs0Data.length} bytes`);
+        fs.writeFileSync(outPath, Buffer.from(hfs0Data));
+        const stat = fs.statSync(outPath);
+        console.log('');
+        console.log('=== DONE ===');
+        console.log(`Output: ${outPath}`);
+        console.log(`Size: ${stat.size} bytes (${(stat.size / 1024 / 1024).toFixed(2)} MB)`);
+        return;
+    }
+
+    // Parse PFS0 (NSZ/NSP/NSPZ/NSX)
     const pfs0Reader = new PFS0Reader(inputBuffer);
     const files = pfs0Reader.getFiles();
     console.log(`PFS0 files: ${files.length}`);
     files.forEach(f => console.log(`  ${f.name} (offset: ${f.offset}, size: ${f.size})`));
-    
+
     // Find NCZ files
     const nczFiles = files.filter(f => f.name.toLowerCase().endsWith('.ncz'));
     console.log(`NCZ files found: ${nczFiles.length}`);
