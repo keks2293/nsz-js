@@ -1,60 +1,34 @@
 # NCZ Decompression & PFS0 Writing Fixes
 
-## 1. Wire up progress callback in browser `ncz.js` `_decompressWithStreaming`
+## ✅ Completed Fixes
 
-**File:** `ncz.js`, line 94, 160
+All four fixes in this document were completed in commit `dac31b6` ("Wire up progress callbacks in browser NCZ decompressor and fix PFS0 writing").
 
-**Problem:** `decompressedOffset` tracks progress (initialized at line 97, incremented at line 196) but the progress callback is never called. Node version (`node/fs/ncz.js:115-117`) has this wired up.
+1. **Progress callback in `_decompressWithStreaming`** ✅ — Done in `ncz.js`
+2. **Progress callback in `_decompressWithBlocks`** ✅ — Done in `ncz.js`  
+3. **Redundant `setUint32`** ✅ — `converter.js` already correct (no duplicate)
+4. **Progress updates in `buildPFS0Memory`** ✅ — Done in `converter.js`
 
-**Fix:**
-```
-- Add `progressCallback = null` parameter to `decompress()` method (line 94)
-- Add `progressCallback` parameter to `_decompressWithStreaming()` (line 160)
-- Add progress callback at end of each chunk loop (after line 196):
-    if (progressCallback) {
-        progressCallback(decompressedOffset / ncaSize);
-    }
-- Pass progressCallback through from `decompress()` to `_decompressWithStreaming()`
-```
+## New Fixes Applied (2026-05-08)
 
----
+### A. Wrong streaming decompression HACK removed from `ncz.js`
+- Was decrypting compressed data BEFORE zstd decompression (wrong order)
+- Correct order (matching Python nsz): decompress first → then decrypt per section
+- Also fixed `ncaSize` scope bug (was undefined in progress callback)
 
-## 2. Wire up progress callback in browser `ncz.js` `_decompressWithBlocks`
+### B. NCA file type detection
+- Added check in `getSections()`: if data starts with non-NCZ magic (e.g., uncompressed NCA), return empty sections for pass-through
 
-**File:** `ncz.js`, line 203
+### C. `crypto/zstd.js` error handling improved
+- Throws on failure instead of returning empty Uint8Array
+- Uses `console.error` instead of `console.log`
+- Checks for empty decompressor output
 
-**Problem:** Same as #1 but for block-based decompression path. `decompressedOffset` is tracked at line 212/245 but never consumed.
+### D. `nsz-convert.js` rewritten
+- No longer downloads fzstd from CDN at runtime
+- Uses proper project modules (NCZDecompressor, PFS0Reader, KeysParser, sha256)
+- Supports optional keys file as third argument
+- Proper PFS0 file entry writing with correct 64-bit offsets
 
-**Fix:**
-```
-- Add `progressCallback = null` parameter to `_decompressWithBlocks()` (line 203)
-- Add progress callback at end of each chunk loop (after line 245):
-    if (progressCallback) {
-        progressCallback(decompressedOffset / ncaSize);
-    }
-- Pass progressCallback through from `decompress()` to `_decompressWithBlocks()`
-```
-
----
-
-## 3. Remove redundant `setUint32` call in `buildPFS0Stream`
-
-**File:** `converter.js`, line 149
-
-**Problem:** `view.setUint32(4, fileEntries.length, true)` is called twice (lines 148 and 149) - second call is redundant.
-
-**Fix:** Remove line 149.
-
----
-
-## 4. Add progress updates during file copy in `buildPFS0Memory`
-
-**File:** `converter.js`, line 303-311
-
-**Problem:** Progress jumps from 0.85 to 1.0 with no intermediate updates during the file copy loop.
-
-**Fix:** Add progress update inside the loop (after line 310):
-```
-const progress = 0.85 + (0.15 * (offset - fullHeaderSize) / totalDataSize);
-onProgress(progress, `Building file ${i + 1}/${fileEntries.length}...`);
-```
+### E. `test-ncz.mjs` test bug fixed
+- Was passing entire NSZ file to NCZDecompressor instead of sliced NCZ data

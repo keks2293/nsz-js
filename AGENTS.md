@@ -1,5 +1,19 @@
 # Rules for AI Agents
 
+## Read All MD Files on Start
+
+**Always read all `*.md` files in the project root before starting work.** These contain critical context about the project:
+
+- `AGENTS.md` — This file (rules, static files, workarounds)
+- `NSZ-FORMAT-ANALYSIS.md` — NCZ/XCZ/NCA format specs, crypto types, Python nsz comparison, known bugs and fixes
+- `PLAN.md` — Action plan, completed steps, success criteria
+- `PROGRESS.md` — Working components, recent fixes, remaining issues
+- `TESTS.md` — Test suite documentation, test vectors, how to run tests
+- `FIXES_PLAN.md` — Planned fixes with file/line references
+- `fix_converter.md` — Quick fix reference
+
+These docs contain format specifications, crypto implementation details, and known issues that are essential for correct development.
+
 ## Static Files
 
 **DO NOT manually edit files in the `static/` folder.**
@@ -41,6 +55,9 @@ When original files from npm don't work directly in the target environment:
 
 - **Problem**: Node.js `zstd-codec` package doesn't export `ZstdDecompressor` as constructor
   **Solution**: Use `fzstd` instead (same as browser version) - works in both Node.js and browser
+
+- **Problem**: `DecompressionStream` API doesn't support `'zstd'` format in any browser — constructor throws `"Failed to construct 'DecompressionStream': Unsupported compression format: 'zstd'"`. Also fzstd (pure JS zstd) has a hard 32MB backreference window limit — large NSZ files use 128MB windows, producing 6 corrupted bytes at NCA offset 0x68793b7.
+  **Solution**: `getZstdWindowSize()` in `ncz.js:50-59` parses the zstd frame header to detect window size. Browser path checks this before decompression and throws immediately if >32MB. Small files (window ≤32MB) work in browser via chunked fzstd. Large files show a clear error telling the user to use `nsz-convert.js` (Node.js CLI with native `zstd` tool).
 
 ### Browser Usage
 

@@ -43,6 +43,18 @@ function sliceBytes(bytes, start, end) {
     return bytes.slice(start, end);
 }
 
+function getZstdWindowSize(data) {
+    if (data.length < 6) return 0;
+    const n3 = data[0] | (data[1] << 8) | (data[2] << 16);
+    if (n3 !== 0x2FB528 || data[3] !== 0xFD) return 0;
+    const singleSegment = (data[4] >> 5) & 1;
+    if (singleSegment) return 0;
+    const windowLog = data[5] >> 3;
+    const windowBase = 1 << (10 + windowLog);
+    const mantissa = data[5] & 7;
+    return windowBase + (windowBase >> 3) * mantissa;
+}
+
 class NCZSection {
     constructor(data, offset) {
         this.offset = Number(readBigUInt64LE(data, offset));
@@ -101,9 +113,9 @@ class NCZDecompressor {
         console.log('[NCZ] compression mode:', useBlockCompression ? 'block' : 'streaming');
 
         if (useBlockCompression) {
-            return await this._decompressWithBlocks(sections, compressedData, output, progressCallback);
+            return await this._decompressWithBlocks(sections, compressedData, output, ncaSize, progressCallback);
         } else {
-            return await this._decompressWithStreaming(sections, compressedData, output, progressCallback);
+            return await this._decompressWithStreaming(sections, compressedData, output, ncaSize, progressCallback);
         }
     }
 
@@ -111,7 +123,7 @@ class NCZDecompressor {
         console.log('[NCZ] data length:', this.data.length, 'first 16 bytes:', Array.from(this.data.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' '));
         const magic = bytesToAscii(this.data, 0, 8);
         console.log('[NCZ] magic at offset 0:', JSON.stringify(magic));
-
+        
         let nczhdrOffset = 0;
         if (magic !== 'NCZSECTN') {
             const magicAt4000 = bytesToAscii(this.data, UNCOMPRESSABLE_HEADER_SIZE, UNCOMPRESSABLE_HEADER_SIZE + 8);
@@ -121,10 +133,16 @@ class NCZDecompressor {
                 this.ncaHeader = sliceBytes(this.data, 0, UNCOMPRESSABLE_HEADER_SIZE);
                 nczhdrOffset = UNCOMPRESSABLE_HEADER_SIZE;
             } else {
+                // Check if this is actually NCA (not NCZ)
+                if (magic.startsWith('\x78') || magic.startsWith('N')) {
+                    console.log('[NCZ] Detected NCA file (not compressed NCZ)');
+                    // Return empty sections - caller should copy as-is
+                    return { sections: [], ncaSize: this.data.length, headerEnd: 0 };
+                }
                 throw new Error(`Invalid NCZ magic: ${magic} (at 0) / ${magicAt4000} (at 0x4000)`);
             }
         }
-
+        
         let offset = nczhdrOffset + 8;
         console.log('[NCZ] Reading sectionCount at offset', offset, 'value:', this.data.slice(offset, offset+8).map(b => b.toString(16).padStart(2,'0')).join(' '));
         const sectionCount = Number(readBigUInt64LE(this.data, offset));
@@ -152,8 +170,59 @@ class NCZDecompressor {
         return { sections, ncaSize, headerEnd: offset };
     }
 
-    async _decompressWithStreaming(sections, compressedData, output, progressCallback = null) {
-        const stream = new StreamingZstdReader(compressedData);
+    async _decompressWithStreaming(sections, compressedData, output, ncaSize, progressCallback = null) {
+        if (typeof process !== 'undefined' && process.versions && process.versions.node) {
+            console.log('[ZSTD] Using zstd CLI for Node.js');
+            const { spawn } = await import('node:child_process');
+            const proc = spawn('zstd', ['-d', '--no-check'], { stdio: ['pipe', 'pipe', 'pipe'] });
+            const chunks = [];
+            proc.stdout.on('data', (chunk) => chunks.push(chunk));
+            let stderr = '';
+            proc.stderr.on('data', (chunk) => stderr += chunk.toString());
+            proc.stdin.write(Buffer.from(compressedData));
+            proc.stdin.end();
+            await new Promise((resolve, reject) => {
+                proc.on('exit', (code) => {
+                    if (code === 0) resolve();
+                    else reject(new Error(`zstd failed with code ${code}: ${stderr}`));
+                });
+                proc.on('error', reject);
+            });
+            const result = Buffer.concat(chunks);
+            const decompressed = new Uint8Array(result.buffer, result.byteOffset, result.byteLength);
+            output.set(decompressed, UNCOMPRESSABLE_HEADER_SIZE);
+        } else {
+            const windowSize = getZstdWindowSize(compressedData);
+            if (windowSize > 32 * 1024 * 1024) {
+                throw new Error(
+                    `Browser zstd decompression not available: frame uses ${(windowSize / 1024 / 1024).toFixed(0)}MB zstd window, ` +
+                    `but fzstd (browser JS library) only supports up to 32MB. ` +
+                    `Use the Node.js CLI (nsz-convert.js) which uses the native zstd tool.`
+                );
+            }
+            console.log('[ZSTD] Using fzstd (chunked) for browser');
+            try {
+                const fzstd = await import('./static/fzstd.mjs');
+                let writePos = UNCOMPRESSABLE_HEADER_SIZE;
+                const d = new fzstd.Decompress(chunk => {
+                    output.set(chunk, writePos);
+                    writePos += chunk.length;
+                });
+                const CHUNK = 0x10000;
+                let pos = 0;
+                while (pos < compressedData.length) {
+                    const end = Math.min(pos + CHUNK, compressedData.length);
+                    d.push(compressedData.subarray(pos, end), end >= compressedData.length);
+                    pos = end;
+                }
+            } catch (e) {
+                throw new Error(
+                    `Browser zstd decompression failed: ${e.message}. ` +
+                    `This NCZ file uses a large zstd window (>32MB) which the browser's fzstd library cannot handle. ` +
+                    `Use the Node.js CLI (nsz-convert.js) instead, which uses the native zstd tool.`
+                );
+            }
+        }
 
         let decompressedOffset = UNCOMPRESSABLE_HEADER_SIZE;
         let firstSection = true;
@@ -177,18 +246,15 @@ class NCZDecompressor {
 
             while (i < end) {
                 const chunkSize = Math.min(0x10000, end - i);
-                const chunk = await stream.read(chunkSize);
-                if (chunk.length === 0) break;
+                const chunk = output.slice(i, i + chunkSize);
 
                 if (aesCtr) {
                     const decrypted = aesCtr.decrypt(chunk, i);
                     output.set(decrypted, i);
-                } else {
-                    output.set(chunk, i);
                 }
 
-                i += chunk.length;
-                decompressedOffset += chunk.length;
+                i += chunkSize;
+                decompressedOffset += chunkSize;
 
                 if (progressCallback) {
                     progressCallback(decompressedOffset / ncaSize);
@@ -199,7 +265,7 @@ class NCZDecompressor {
         return output;
     }
 
-    async _decompressWithBlocks(sections, compressedData, output, progressCallback = null) {
+    async _decompressWithBlocks(sections, compressedData, output, ncaSize, progressCallback = null) {
         const blockHeader = new NCZBlockHeader(compressedData, 0);
         const blockDecompressor = new AsyncBlockDecompressorReader(
             compressedData,
@@ -250,115 +316,6 @@ class NCZDecompressor {
         }
 
         return output;
-    }
-}
-
-class StreamingZstdReader {
-    constructor(data) {
-        this.data = data;
-        this.pos = 0;
-        this.buffer = allocByte(0);
-    }
-
-    async read(size) {
-        while (this.buffer.length < size && this.pos < this.data.length) {
-            // Find end of current zstd frame
-            const frameEnd = this._findFrameEnd(this.pos);
-            
-            let frameData;
-            if (frameEnd === -1) {
-                // Can't find frame end, just use remaining data
-                frameData = sliceBytes(this.data, this.pos);
-                this.pos = this.data.length;
-            } else {
-                frameData = sliceBytes(this.data, this.pos, frameEnd);
-                this.pos = frameEnd;
-            }
-            
-            // Decompress this frame
-            const decompressed = await this._decompressFrame(frameData);
-            if (decompressed.length > 0) {
-                this.buffer = concatBytes(this.buffer, decompressed);
-            } else {
-                break;
-            }
-        }
-
-        if (this.buffer.length === 0 && this.pos >= this.data.length) {
-            return allocByte(0);
-        }
-
-        const result = sliceBytes(this.buffer, 0, size);
-        this.buffer = sliceBytes(this.buffer, size);
-        return result;
-    }
-
-    async _decompressFrame(frameData) {
-        const decompressor = new ZstdDecompressor();
-        return await decompressor.decompress(frameData);
-    }
-
-    _findFrameEnd(startPos) {
-        const magic = new Uint8Array([0x28, 0xB5, 0x2F, 0xFD]);
-        let pos = startPos;
-
-        while (pos + 18 <= this.data.length) {
-            if (this.data[pos] === magic[0] &&
-                this.data[pos + 1] === magic[1] &&
-                this.data[pos + 2] === magic[2] &&
-                this.data[pos + 3] === magic[3]) {
-
-                const headerByte = this.data[pos + 4];
-                const headerType = headerByte >> 6;
-                const singleSegment = (headerByte >> 5) & 0x1;
-                const frameContentSizeFlag = headerType;
-                
-                // Determine FCS field size
-                let fcsSize = 0;
-                if (frameContentSizeFlag === 0) {
-                    fcsSize = singleSegment ? 1 : 0;
-                } else if (frameContentSizeFlag === 1) {
-                    fcsSize = 2;
-                } else if (frameContentSizeFlag === 2) {
-                    fcsSize = 4;
-                } else if (frameContentSizeFlag === 3) {
-                    fcsSize = 8;
-                }
-
-                // Determine if Window_Descriptor is present
-                const hasWindowDescriptor = !singleSegment;
-                
-                // Calculate header size
-                let headerSize = 5; // magic (4) + header descriptor (1)
-                if (hasWindowDescriptor) headerSize += 1;
-                // Dictionary ID size depends on bits 1-0 of header byte
-                const dictIdFlag = headerByte & 0x3;
-                if (dictIdFlag === 1) headerSize += 1;
-                else if (dictIdFlag === 2) headerSize += 2;
-                else if (dictIdFlag === 3) headerSize += 4;
-                headerSize += fcsSize;
-
-                // Read frame content size if present
-                if (fcsSize > 0) {
-                    let frameContentSize = 0;
-                    for (let i = 0; i < fcsSize; i++) {
-                        frameContentSize += this.data[pos + headerSize - fcsSize + i] << (i * 8);
-                    }
-                    
-                    // Frame ends at: start + headerSize + frameContentSize + (checksum if present)
-                    const hasChecksum = (headerByte >> 2) & 0x1;
-                    const checksumSize = hasChecksum ? 4 : 0;
-                    
-                    return pos + headerSize + frameContentSize + checksumSize;
-                } else {
-                    // No frame content size - we can't determine frame end from header alone
-                    // Return -1 to signal we need to find the end differently
-                    return -1;
-                }
-            }
-            pos++;
-        }
-        return -1;
     }
 }
 
@@ -442,4 +399,3 @@ class AsyncBlockDecompressorReader {
 }
 
 export { NCZDecompressor };
-
