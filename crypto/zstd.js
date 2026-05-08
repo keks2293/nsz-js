@@ -9,7 +9,6 @@ class ZstdDecompressor {
         if (globalReady) return;
 
         try {
-            // ESM version - import directly (path relative to crypto/ folder)
             const module = await import('../static/fzstd.mjs');
             fzstdLib = module;
             globalReady = true;
@@ -30,6 +29,9 @@ class ZstdDecompressor {
                     chunks.push(chunk);
                 });
                 decompressor.push(data, true); // true = final chunk
+                if (chunks.length === 0) {
+                    throw new Error('fzstd Decompress produced no output');
+                }
                 const result = new Uint8Array(chunks.reduce((acc, chunk) => acc + chunk.length, 0));
                 let offset = 0;
                 for (const chunk of chunks) {
@@ -39,10 +41,11 @@ class ZstdDecompressor {
                 return result;
             }
         } catch(e) {
-            console.log('[ZSTD] fzstd error:', e.message);
+            console.error('[ZSTD] fzstd error:', e.message);
+            throw e;
         }
 
-        return new Uint8Array(0);
+        throw new Error('fzstd not loaded or Decompress not available');
     }
 
     static async decompressStreaming(data, callback) {
