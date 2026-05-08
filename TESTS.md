@@ -58,46 +58,12 @@ node test_aes_manual.cjs
 
 ## 2. Browser-based AES-CTR Tests
 
-### test_ctr.html
-**Location:** `/test_ctr.html`
-**Purpose:** Basic AES-CTR test in browser
+### test_browser.html
+**Location:** `/test_browser.html`
+**Purpose:** AES-CTR keystream verification in browser
 **What it tests:**
 - AES-CTR with PyCryptodome-compatible counter
 - Uses aes-js library loaded via `<script>` tag
-
-**How to run:** Open in browser
-
----
-
-### test_ctr_browser.html
-**Location:** `/test_ctr_browser.html`
-**Purpose:** Test AES-CTR in browser environment
-**What it tests:**
-- Multiple test cases for AES-CTR
-- PyCryptodome counter format verification
-
-**How to run:** Open in browser
-
----
-
-### test_final.html
-**Location:** `/test_final.html`
-**Purpose:** Final verification of AES-CTR implementation
-**What it tests:**
-- Complete AES-CTR flow matching Python nsz
-- Counter block: nonce[0:8] + BE64(blockIndex)
-- Keystream verification against Python reference
-
-**How to run:** Open in browser
-
----
-
-### test_aes_simple.html
-**Location:** `/test_aes_simple.html`
-**Purpose:** Simplified AES-CTR test
-**What it tests:**
-- Basic AES-CTR functionality
-- PyCryptodome-compatible counter format
 
 **How to run:** Open in browser
 
@@ -129,11 +95,11 @@ node test_convert.cjs
 
 | Component | Python Ref | Node.js | Browser |
 |-----------|-------------|---------|---------|
-| AES-CTR keystream | ✅ test_aes_ctr.py | ✅ test_aes_node.mjs | ✅ test_ctr.html |
-| Counter format (BE64) | ✅ test_aes_ctr.py | ✅ test_aes_node.mjs | ✅ test_final.html |
-| NCZ decompression | - | ✅ test_convert.cjs | - |
-| PFS0 parsing | - | ✅ test_convert.cjs | - |
-| AES-CTR + zstd | - | ✅ test_convert.cjs | - |
+| AES-CTR keystream | ✅ test_aes_ctr.py | ✅ test_vector.mjs | ✅ test_browser.html |
+| Counter format (BE64) | ✅ test_aes_ctr.py | ✅ test_vector.mjs | ✅ test_browser.html |
+| NCZ decompression | - | ✅ test_convert.mjs | - |
+| PFS0 parsing | - | ✅ test_convert.mjs | - |
+| AES-CTR + zstd | - | ✅ test_convert.mjs | - |
 
 ---
 
@@ -175,18 +141,21 @@ node test_vector.mjs
 
 ### Quick verification:
 ```bash
-# Test test vector (section 5)
+# Test AES-CTR test vector (section 5)
 node test_vector.mjs
 
 # Test AES-CTR in Node
-node --experimental-vm-modules test_aes_node.mjs
+node test_aesctr.mjs
+
+# Test AES-CTR manual (no deps)
+node test_aes_manual.cjs
 
 # Test full conversion (requires NSZ file)
-# node test_convert.cjs path/to/file.nsz
+# node test_convert.mjs path/to/file.nsz
 ```
 
 ### Browser tests:
-Open any `test_*html` file in a browser with `crypto/aes-js.js` in the same directory.
+Open `test_browser.html` in a browser.
 
 ---
 
