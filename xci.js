@@ -174,3 +174,48 @@ export class XCIReader {
         return this.hfs0.getFiles();
     }
 }
+
+export class XCIWriter {
+    constructor(originalHeader) {
+        this.header = new Uint8Array(0x200);
+        if (originalHeader && originalHeader.byteLength >= 0x200) {
+            this.header.set(
+                originalHeader instanceof ArrayBuffer
+                    ? new Uint8Array(originalHeader.slice(0, 0x200))
+                    : originalHeader.slice(0, 0x200)
+            );
+        } else {
+            this.header[0x100] = 0x48; this.header[0x101] = 0x45; this.header[0x102] = 0x41; this.header[0x103] = 0x44;
+        }
+        this.hfs0Data = null;
+    }
+
+    setHFS0Data(hfs0Data) {
+        this.hfs0Data = hfs0Data;
+    }
+
+    build() {
+        if (!this.hfs0Data) throw new Error('No HFS0 data set');
+
+        const hfs0Offset = 0x200;
+        const totalSize = hfs0Offset + this.hfs0Data.length;
+
+        const output = new Uint8Array(totalSize);
+        output.set(this.header, 0);
+
+        const view = new DataView(output.buffer, output.byteOffset, output.byteLength);
+
+        const hfs0View = new DataView(this.hfs0Data.buffer, this.hfs0Data.byteOffset, this.hfs0Data.byteLength);
+        const fileCount = hfs0View.getUint32(4, true);
+        const stringTableSize = hfs0View.getUint32(8, true);
+        const hfs0HeaderSize = 0x10 + fileCount * 0x40 + stringTableSize;
+
+        view.setBigUint64(0x118, BigInt(totalSize), true);
+        view.setBigUint64(0x130, BigInt(hfs0Offset), true);
+        view.setBigUint64(0x138, BigInt(hfs0HeaderSize), true);
+
+        output.set(this.hfs0Data, hfs0Offset);
+
+        return output;
+    }
+}
