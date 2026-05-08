@@ -17,8 +17,8 @@ async function convertNSZtoNSP(inputPath) {
         if (file.name.toLowerCase().endsWith('.ncz')) {
             console.log(`Decompressing: ${file.name}`);
             const nczData = data.slice(file.offset, file.offset + file.size);
-            const decompressor = new NCZDecompressor(nczData.buffer, null);
-            const decompressed = decompressor.decompress();
+            const decompressor = new NCZDecompressor(nczData, null);
+            const decompressed = await decompressor.decompress();
             const hash = sha256(decompressed);
             console.log(`  SHA256: ${hash}`);
             const outName = file.name.replace(/\.ncz$/i, '.nca');

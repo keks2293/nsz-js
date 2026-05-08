@@ -22,7 +22,7 @@ async function test() {
     console.log('NCZ first 16 bytes:', Array.from(nczData.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' '));
     
     // Decompress
-    const decompressor = new NCZDecompressor(nczData.buffer, null);
+    const decompressor = new NCZDecompressor(nczData, null);
     const decompressed = new Uint8Array(await decompressor.decompress());
     
     console.log('Decompressed size:', decompressed.length);

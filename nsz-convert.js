@@ -2,51 +2,78 @@
 /**
  * NSZ to NSP Converter - Standalone Node.js CLI
  * 
- * Downloads fzstd from CDN and uses it for zstd decompression
- * Works identically in Node.js and Browser
+ * Uses the proper NCZDecompressor for NCZ files
+ * Works identically to the browser version
  * 
- * Usage: node nsz-convert.js <input.nsz> [output.nsp]
+ * Usage: node nsz-convert.js <input.nsz> [output.nsp] [keys.txt]
  */
 
 import fs from 'fs';
-import https from 'https';
-import { createRequire } from 'module';
 
-const require = createRequire(import.meta.url);
-const zstdModule = require('zstandard');
-
-const FZSTD_URL = 'https://unpkg.com/fzstd@0.1.1/umd/index.js';
-const FZSTD_CACHE = '/tmp/fzstd.mjs';
-
-const PFS0_MAGIC = 0x30534650;
-let fzstd = null;
+// Import from the project modules
+import { PFS0Reader } from './pfs0.js';
+import { NCZDecompressor } from './ncz.js';
+import { KeysParser } from './keys.js';
+import { sha256 } from './crypto/sha256.js';
 
 async function main() {
     const args = process.argv.slice(2);
-    const inputPath = args[0];
-    const outputPath = args[1] || inputPath?.replace(/\.(nsz|nspz|nsx)$/i, '.nsp');
-    
+    let inputPath = null;
+    let outputPath = null;
+    let keysPath = null;
+    let fixPadding = false;
+
+    for (let i = 0; i < args.length; i++) {
+        if (args[i] === '--fix-padding' || args[i] === '-p') {
+            fixPadding = true;
+        } else if (!inputPath) {
+            inputPath = args[i];
+        } else if (!outputPath && !args[i].startsWith('-')) {
+            outputPath = args[i];
+        } else if (!keysPath && !args[i].startsWith('-')) {
+            keysPath = args[i];
+        }
+    }
+
     if (!inputPath) {
         console.log('NSZ to NSP Converter');
         console.log('');
-        console.log('Usage: node nsz-convert.js <input.nsz> [output.nsp]');
+        console.log('Usage: node nsz-convert.js <input.nsz> [output.nsp] [keys.txt] [options]');
+        console.log('');
+        console.log('Options:');
+        console.log('  --fix-padding, -p    Pad PFS0 header to 16-byte boundary (match Python nsz)');
         console.log('');
         console.log('Examples:');
         console.log('  node nsz-convert.js game.nsz');
         console.log('  node nsz-convert.js game.nsz output.nsp');
+        console.log('  node nsz-convert.js game.nsz output.nsp keys.txt');
+        console.log('  node nsz-convert.js game.nsz --fix-padding');
         process.exit(1);
     }
 
     console.log('=== NSZ to NSP Converter ===');
     console.log(`Input: ${inputPath}`);
     
-    // Download fzstd
-    try {
-        fzstd = await loadFzstd();
-        console.log('fzstd loaded');
-    } catch(e) {
-        console.error('Failed to load fzstd:', e.message);
-        process.exit(1);
+    // Load keys from provided path, or default location
+    let keys = null;
+    const keysLocations = [
+        keysPath,
+        './static/prod.keys'
+    ].filter(Boolean);
+    
+    for (const loc of keysLocations) {
+        try {
+            const keyText = fs.readFileSync(loc, 'utf-8');
+            keys = KeysParser.parse(keyText);
+            console.log(`Keys loaded from ${loc}`);
+            break;
+        } catch(e) {
+            // Continue to next location
+        }
+    }
+    
+    if (!keys) {
+        console.log('Warning: No keys loaded - encrypted NCZ files may fail to decrypt');
     }
     
     // Read input
@@ -54,156 +81,140 @@ async function main() {
     console.log(`Input size: ${inputBuffer.length} bytes`);
 
     // Parse PFS0
-    const pfs0 = parsePfs0Header(inputBuffer);
-    console.log(`PFS0 files: ${pfs0.fileCount}`);
+    const pfs0Reader = new PFS0Reader(inputBuffer);
+    const files = pfs0Reader.getFiles();
+    console.log(`PFS0 files: ${files.length}`);
+    files.forEach(f => console.log(`  ${f.name} (offset: ${f.offset}, size: ${f.size})`));
     
     // Find NCZ files
-    const nczFiles = pfs0.files.filter(f => f.name.toLowerCase().endsWith('.ncz'));
+    const nczFiles = files.filter(f => f.name.toLowerCase().endsWith('.ncz'));
     console.log(`NCZ files found: ${nczFiles.length}`);
 
-    // Convert
-    const outPath = outputPath || inputPath.replace(/\.nsz$/i, '.nsp');
-    await convertNszToNsp(inputBuffer, pfs0, nczFiles, outPath);
+    // Decompress NCZ files and prepare output
+    const outputFiles = [];
+    
+    for (let idx = 0; idx < files.length; idx++) {
+        const f = files[idx];
+        const isNcz = f.name.toLowerCase().endsWith('.ncz');
+        const outputName = isNcz ? f.name.slice(0, -4) + '.nca' : f.name;
+        
+        console.log(`${isNcz ? 'Decompressing' : 'Copying'}: ${f.name} -> ${outputName}`);
+        
+        if (isNcz) {
+            try {
+                const nczData = await decompressNCZ(inputBuffer, f, keys);
+                const hash = sha256(nczData);
+                console.log(`  SHA256: ${hash}`);
+                console.log(`  Size: ${nczData.byteLength} bytes`);
+                outputFiles.push({ name: outputName, data: nczData, originalName: f.name });
+            } catch(e) {
+                console.error(`  ERROR: ${e.message}`);
+                console.error(e.stack);
+                process.exit(1);
+            }
+        } else {
+            const data = inputBuffer.slice(f.offset, f.offset + f.size);
+            const hash = sha256(data);
+            console.log(`  SHA256: ${hash}`);
+            outputFiles.push({ name: outputName, data, originalName: f.name });
+        }
+    }
+
+    // Build output NSP
+    const outPath = outputPath || inputPath.replace(/\.(nsz|nspz|nsx)$/i, '.nsp');
+    await buildPFS0(outputFiles, outPath, fixPadding);
     
     const stat = fs.statSync(outPath);
     console.log('');
     console.log('=== DONE ===');
     console.log(`Output: ${outPath}`);
-    console.log(`Size: ${stat.size} bytes`);
+    console.log(`Size: ${stat.size} bytes (${(stat.size / 1024 / 1024).toFixed(2)} MB)`);
 }
 
-async function loadFzstd() {
-    // Try to load from cache first
+async function decompressNCZ(inputBuffer, nczFile, keys) {
+    console.log(`  Reading NCZ: offset=${nczFile.offset}, size=${nczFile.size}`);
+    const buffer = inputBuffer.slice(nczFile.offset, nczFile.offset + nczFile.size);
+    
     try {
-        return await import(FZSTD_CACHE);
+        const decompressor = new NCZDecompressor(buffer, keys);
+        const result = await decompressor.decompress();
+        return result;
     } catch(e) {
-        // Cache miss, download
+        console.error('NCZ decompression error:', e);
+        throw e;
     }
-    
-    console.log('Downloading fzstd from CDN...');
-    
-    // Download to temp file
-    await downloadFile(FZSTD_URL, FZSTD_CACHE);
-    
-    // Dynamic import
-    return import(FZSTD_CACHE);
 }
 
-function downloadFile(url, path) {
-    return new Promise((resolve, reject) => {
-        const file = fs.createWriteStream(path);
-        const protocol = url.startsWith('https') ? https : require('http');
-        
-        protocol.get(url, (res) => {
-            if (res.statusCode === 301 || res.statusCode === 302) {
-                downloadFile(res.headers.location, path).then(resolve).catch(reject);
-                return;
-            }
-            res.pipe(file);
-            file.on('finish', () => { file.close(); resolve(); });
-        }).on('error', reject);
+function writeUInt64LE(buffer, value, offset) {
+    buffer.writeUInt32LE(value & 0xFFFFFFFF, offset);
+    buffer.writeUInt32LE(Math.floor(value / 0x100000000), offset + 4);
+}
+
+async function buildPFS0(files, outPath, fixPadding = false) {
+    console.log(`\nBuilding PFS0 with ${files.length} files...`);
+    
+    // Build string table (null-terminated filenames)
+    let stringTable = '';
+    for (const f of files) {
+        stringTable += f.name + '\0';
+    }
+    const stringTableBytes = Buffer.from(stringTable, 'utf-8');
+    
+    // Calculate sizes
+    const headerSize = 0x10 + files.length * 0x18; // PFS0 header + file entries
+    const rawHeaderSize = headerSize + stringTableBytes.length;
+    const paddingSize = fixPadding ? (16 - (rawHeaderSize % 16)) % 16 : 0;
+    const totalHeaderSize = rawHeaderSize + paddingSize;
+    
+    // File offsets are relative to end of PFS0 header (= start of data area)
+    let fileRelOffset = 0;
+    const fileEntries = files.map(f => {
+        const entry = {
+            name: f.name,
+            offset: fileRelOffset,
+            size: f.data.byteLength || f.data.length
+        };
+        fileRelOffset += entry.size;
+        return entry;
     });
-}
-
-function parsePfs0Header(buffer) {
-    const view = new DataView(buffer.buffer, buffer.byteOffset);
-    const magic = view.getUint32(0, true);
-
-    if (magic !== PFS0_MAGIC) {
-        throw new Error(`Invalid PFS0 magic: 0x${magic.toString(16)}`);
-    }
-
-    const fileCount = view.getUint32(4, true);
-    const stringTableSize = view.getUint32(8, true);
-
-    const files = [];
-    for (let i = 0; i < fileCount; i++) {
-        const entryOffset = 0x10 + i * 0x18;
-        const dataOffset = view.getUint32(entryOffset, true);
-        const dataSize = view.getUint32(entryOffset + 8, true);
-        const nameOffset = view.getUint32(entryOffset + 16, true);
-
-        const nameStart = 0x10 + fileCount * 0x18 + nameOffset;
-        let nameEnd = nameStart;
-        while (buffer[nameEnd] !== 0 && nameEnd < buffer.length) nameEnd++;
-        const name = buffer.slice(nameStart, nameEnd).toString('utf-8');
-
-        files.push({ name, dataOffset, dataSize });
-    }
-
-    return { fileCount, stringTableSize, files };
-}
-
-async function convertNszToNsp(input, pfs0, nczFiles, outPath) {
-    // Decompress NCZ files
-    for (const ncz of nczFiles) {
-        console.log(`Decompressing ${ncz.name}...`);
-        
-        const compressed = input.slice(ncz.dataOffset, ncz.dataOffset + ncz.dataSize);
-        
-        // Decompress using fzstd
-        // fzstd.decompress returns Uint8Array
-        const decompressed = fzstd.decompress(new Uint8Array(compressed));
-        
-        ncz.decompressedSize = decompressed.length;
-        ncz.data = Buffer.from(decompressed);
-        
-        console.log(`  ${ncz.dataSize} -> ${decompressed.length} bytes`);
-    }
-
-    // Calculate output size
-    let outputSize = 16 + pfs0.fileCount * 16 + pfs0.stringTableSize;
-    for (const f of pfs0.files) {
-        const ncz = nczFiles.find(n => n.name === f.name);
-        outputSize += ncz ? ncz.decompressedSize : f.dataSize;
-    }
-
-    console.log(`Creating output (${outputSize} bytes)...`);
     
-    const output = Buffer.alloc(outputSize);
+    // Create output buffer
+    const totalSize = totalHeaderSize + fileRelOffset;
+    const output = Buffer.alloc(totalSize);
     
-    // PFS0 header: magic, version, fileCount, stringTableSize
+    // Write PFS0 header (16 bytes)
     output.write('PFS0', 0);
-    output.writeUInt32LE(0x700, 4);
-    output.writeUInt32LE(pfs0.fileCount, 8);
-    output.writeUInt32LE(pfs0.stringTableSize, 12);
-
-    // String table (filenames)
-    let stringPos = 16 + pfs0.fileCount * 16;
-    for (const f of pfs0.files) {
-        const nameBuf = Buffer.from(f.name);
-        nameBuf.copy(output, stringPos);
-        stringPos += nameBuf.length + 1;
-    }
-
-    // File entries and data
-    const headerSize = 0x10 + pfs0.fileCount * 0x18 + pfs0.stringTableSize;
-    let dataPos = headerSize;
+    output.writeUInt32LE(files.length, 4);
+    output.writeUInt32LE(stringTableBytes.length, 8);
+    output.writeUInt32LE(0, 12);
     
-    for (let i = 0; i < pfs0.files.length; i++) {
-        const file = pfs0.files[i];
+    // Write string table after file entries
+    stringTableBytes.copy(output, headerSize);
+    
+    // Write file entries (24 bytes each) and calculate string offsets
+    for (let i = 0; i < fileEntries.length; i++) {
+        const entry = fileEntries[i];
         const entryOffset = 0x10 + i * 0x18;
-        const ncz = nczFiles.find(n => n.name === file.name);
         
-        // Data offset
-        output.writeUInt32LE(dataPos, entryOffset);
+        const nameOffset = stringTable.indexOf(entry.name);
         
-        // Data size
-        const size = ncz ? ncz.decompressedSize : file.dataSize;
-        output.writeUInt32LE(size, entryOffset + 8);
-        
-        // Copy data
-        if (ncz) {
-            ncz.data.copy(output, dataPos);
-            dataPos += ncz.decompressedSize;
-        } else {
-            input.copy(output, dataPos, file.dataOffset, file.dataOffset + file.dataSize);
-            dataPos += file.dataSize;
-        }
+        writeUInt64LE(output, entry.offset, entryOffset);
+        writeUInt64LE(output, entry.size, entryOffset + 8);
+        output.writeUInt32LE(nameOffset, entryOffset + 16);
+        output.writeUInt32LE(0, entryOffset + 20);
     }
-
+    
+    // Write file data (at absolute offsets = totalHeaderSize + relativeOffset)
+    for (let i = 0; i < fileEntries.length; i++) {
+        const entry = fileEntries[i];
+        const data = files[i].data;
+        const dataBytes = data instanceof Uint8Array ? Buffer.from(data) : Buffer.from(data);
+        dataBytes.copy(output, totalHeaderSize + entry.offset);
+        console.log(`  Written: ${entry.name} (${entry.size} bytes)`);
+    }
+    
     fs.writeFileSync(outPath, output);
-    console.log(`Written: ${dataPos} bytes`);
+    console.log(`PFS0 built: ${totalSize} bytes (padding: ${paddingSize})`);
 }
 
 main().catch(err => {
