@@ -113,8 +113,7 @@
      - Removed orphaned `decompressor.js` (not imported anywhere)
 
 19. **Cleaned up test files**
-     - Removed `test_ticket_keys.mjs` and `test_decompress.mjs` (hardcoded developer paths, not runnable by others)
-     - Remaining tests: `test_vector.mjs`, `test_aesctr.mjs`, `test_convert.mjs`, `test-ncz.mjs`, `test_aes_manual.cjs`
+     - Replaced hardcoded paths in `test_ticket_keys.mjs` and `test_decompress.mjs` with CLI args
 
 ## ✅ Verified
 

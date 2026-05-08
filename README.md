@@ -180,4 +180,4 @@ The implementation includes full key derivation from prod.keys:
 
 ### Node.js
 - Node.js 14+ with ES module support
-- `zstd-codec` package for decompression
+- `zstd` CLI binary in PATH (for streaming decompression) or falls back to zstddec WASM
