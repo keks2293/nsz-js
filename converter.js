@@ -1,6 +1,6 @@
 import { ZstdDecompressor } from './crypto/zstd.js';
 import { PFS0Reader } from './pfs0.js';
-import { NCZDecompressor, DataReader, ChunkedBufferReader, READ_CHUNK_SIZE } from './ncz.js';
+import { NCZDecompressor, DataReader } from './ncz.js';
 import { KeysParser } from './keys.js';
 import { SHA256, sha256 } from './crypto/sha256.js';
 import { extractHashesFromCnmt, Cnmt, ContentEntry, NCAHeader } from './ticket.js';
@@ -53,20 +53,6 @@ class NSZConverter {
         const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    }
-
-    async readFileSliceInChunks(file, offset, size) {
-        const chunks = [];
-        let remaining = size;
-        let pos = offset;
-        while (remaining > 0) {
-            const chunkSize = Math.min(remaining, READ_CHUNK_SIZE);
-            const buf = await file.slice(pos, pos + chunkSize).arrayBuffer();
-            chunks.push(new Uint8Array(buf));
-            pos += chunkSize;
-            remaining -= chunkSize;
-        }
-        return chunks;
     }
 
     async writePFS0HeaderOnly(writable, fileEntries, stringTable, fixPadding) {
@@ -147,10 +133,7 @@ class NSZConverter {
                 const headerReader = new FileSliceReader(file, f.offset, Math.min(f.size, 0x10000));
                 const tmpDecomp = new NCZDecompressor(headerReader, this.keys);
                 const { ncaSize } = await tmpDecomp.getSections();
-                // Read full compressed NCZ data in sub-2GB chunks before writable opens
-                onLog('info', `Caching compressed data: ${f.name} (${this.formatBytes(f.size)})`);
-                const chunks = await this.readFileSliceInChunks(file, f.offset, f.size);
-                outputMeta.push({ name: outputName, size: ncaSize, isNcz: true, nczChunks: chunks, nczLen: f.size });
+                outputMeta.push({ name: outputName, size: ncaSize, isNcz: true, file: file, fileOffset: f.offset, nczLen: f.size });
             } else {
                 outputMeta.push({ name: outputName, size: f.size, isNcz: false, nczChunks: null, nczLen: 0 });
             }
@@ -182,14 +165,12 @@ class NSZConverter {
 
                 if (meta.isNcz) {
                     const hasher = new SHA256();
-                    const reader = new ChunkedBufferReader(meta.nczChunks, meta.nczLen);
+                    const reader = new FileSliceReader(meta.file, meta.fileOffset, meta.nczLen);
                     const decompressor = new NCZDecompressor(reader, this.keys);
                     await decompressor.decompress(null, async (chunk, offset) => {
                         hasher.update(chunk);
                         await writable.write({ type: 'write', position: writePos + offset, data: chunk });
                     });
-                    // Free cached compressed data
-                    meta.nczChunks = null;
                     const hash = hasher.hexdigest();
                     onLog('info', `NCA SHA256: ${hash}`);
 
@@ -399,8 +380,7 @@ class NSZConverter {
                 const headerReader = new FileSliceReader(file, f.offset, Math.min(f.size, 0x10000));
                 const tmpDecomp = new NCZDecompressor(headerReader, this.keys);
                 const { ncaSize } = await tmpDecomp.getSections();
-                const chunks = await this.readFileSliceInChunks(file, f.offset, f.size);
-                outputMeta.push({ name: outputName, size: ncaSize, isNcz: true, nczChunks: chunks, nczLen: f.size, offset: f.offset });
+                outputMeta.push({ name: outputName, size: ncaSize, isNcz: true, file: file, fileOffset: f.offset, nczLen: f.size });
             } else {
                 outputMeta.push({ name: outputName, size: f.size, isNcz: false, offset: f.offset, nczChunks: null, nczLen: 0 });
             }
@@ -466,13 +446,12 @@ class NSZConverter {
 
                 if (meta.isNcz) {
                     const hasher = new SHA256();
-                    const reader = new ChunkedBufferReader(meta.nczChunks, meta.nczLen);
+                    const reader = new FileSliceReader(meta.file, meta.fileOffset, meta.nczLen);
                     const decomp = new NCZDecompressor(reader, this.keys);
                     await decomp.decompress(null, async (chunk, offset) => {
                         hasher.update(chunk);
                         await writable.write({ type: 'write', position: writePos + offset, data: chunk });
                     });
-                    meta.nczChunks = null;
                     onLog('info', `  SHA256: ${hasher.hexdigest()}`);
                 } else {
                     const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
