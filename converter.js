@@ -105,7 +105,7 @@ class NSZConverter {
         onLog('info', `Processing: ${file.name} (${this.formatBytes(file.size)})`);
         await this.init();
 
-        const fileBuffer = await file.slice(0, Math.min(file.size, 4 * 1024 * 1024)).arrayBuffer();
+        const fileBuffer = await file.slice(0, Math.min(file.size, 1024 * 1024)).arrayBuffer();
         const pfs0Reader = new PFS0Reader(fileBuffer);
         const files = pfs0Reader.getFiles();
         onLog('info', `PFS0 header: ${files.length} files`);
