@@ -1,10 +1,29 @@
 import { ZstdDecompressor } from './crypto/zstd.js';
 import { PFS0Reader } from './pfs0.js';
-import { NCZDecompressor } from './ncz.js';
+import { NCZDecompressor, DataReader, ChunkedBufferReader, READ_CHUNK_SIZE } from './ncz.js';
 import { KeysParser } from './keys.js';
-import { sha256 } from './crypto/sha256.js';
+import { SHA256, sha256 } from './crypto/sha256.js';
 import { extractHashesFromCnmt, Cnmt, ContentEntry, NCAHeader } from './ticket.js';
 import { XCIReader, HFS0Writer, XCIWriter } from './xci.js';
+
+class FileSliceReader extends DataReader {
+    constructor(file, baseOffset = 0, totalLength = null) {
+        super();
+        this.file = file;
+        this.baseOffset = baseOffset;
+        this._length = totalLength !== null ? totalLength : file.size - baseOffset;
+    }
+
+    get length() {
+        return this._length;
+    }
+
+    async read(offset, size) {
+        const absOffset = this.baseOffset + offset;
+        const buffer = await this.file.slice(absOffset, absOffset + size).arrayBuffer();
+        return new Uint8Array(buffer);
+    }
+}
 
 class NSZConverter {
     constructor() {
@@ -36,24 +55,79 @@ class NSZConverter {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
+    async readFileSliceInChunks(file, offset, size) {
+        const chunks = [];
+        let remaining = size;
+        let pos = offset;
+        while (remaining > 0) {
+            const chunkSize = Math.min(remaining, READ_CHUNK_SIZE);
+            const buf = await file.slice(pos, pos + chunkSize).arrayBuffer();
+            chunks.push(new Uint8Array(buf));
+            pos += chunkSize;
+            remaining -= chunkSize;
+        }
+        return chunks;
+    }
+
+    async writePFS0HeaderOnly(writable, fileEntries, stringTable, fixPadding) {
+        const headerSize = 0x10 + fileEntries.length * 0x18 + stringTable.length;
+        const paddingSize = fixPadding ? (16 - (headerSize % 16)) % 16 : 0;
+        const encoder = new TextEncoder();
+
+        let paddedStringTable;
+        let paddedHeaderSize;
+        let stringTableSizeInHeader;
+
+        if (fixPadding) {
+            paddedStringTable = stringTable + '\x00'.repeat(paddingSize);
+            paddedHeaderSize = 0x10 + fileEntries.length * 0x18 + paddedStringTable.length;
+            stringTableSizeInHeader = paddedStringTable.length;
+        } else {
+            paddedStringTable = stringTable;
+            paddedHeaderSize = headerSize + paddingSize;
+            stringTableSizeInHeader = stringTable.length + paddingSize;
+        }
+
+        const headerBuffer = new Uint8Array(paddedHeaderSize);
+        const view = new DataView(headerBuffer.buffer);
+
+        headerBuffer[0] = 0x50; headerBuffer[1] = 0x46; headerBuffer[2] = 0x53; headerBuffer[3] = 0x30;
+        view.setUint32(4, fileEntries.length, true);
+        view.setUint32(8, stringTableSizeInHeader, true);
+        view.setUint32(12, 0, true);
+
+        let stringOffset = 0;
+        for (let i = 0; i < fileEntries.length; i++) {
+            const entry = fileEntries[i];
+            const pos = 0x10 + i * 0x18;
+            view.setBigUint64(pos, BigInt(entry.offset), true);
+            view.setBigUint64(pos + 8, BigInt(entry.size), true);
+            view.setUint32(pos + 16, stringOffset, true);
+            view.setUint32(pos + 20, 0, true);
+            const nameBytes = encoder.encode(entry.name);
+            headerBuffer.set(nameBytes, 0x10 + fileEntries.length * 0x18 + stringOffset);
+            stringOffset += nameBytes.length + 1;
+        }
+
+        await writable.write({ type: 'write', position: 0, data: headerBuffer.buffer });
+        return paddedHeaderSize;
+    }
+
     async decompressNSZtoNSP(file, options = {}) {
         const { onProgress = () => {}, onLog = () => {}, writable = null, fixPadding = false } = options;
 
         onLog('info', `Processing: ${file.name} (${this.formatBytes(file.size)})`);
-        
         await this.init();
 
         const fileBuffer = await file.slice(0, Math.min(file.size, 4 * 1024 * 1024)).arrayBuffer();
         const pfs0Reader = new PFS0Reader(fileBuffer);
         const files = pfs0Reader.getFiles();
         onLog('info', `PFS0 header: ${files.length} files`);
-        
         onLog('info', `Found ${files.length} files in container`);
         onProgress(0.05, 'Reading container...');
 
         const cnmtFiles = files.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
         const cnmtHashes = new Set();
-        
         if (cnmtFiles.length > 0) {
             for (const cnmtFile of cnmtFiles) {
                 const cnmtData = await file.slice(cnmtFile.offset, cnmtFile.offset + cnmtFile.size).arrayBuffer();
@@ -63,63 +137,158 @@ class NSZConverter {
             onLog('info', `Found ${cnmtHashes.size} expected NCA hashes from CNMT`);
         }
 
-        const outputFiles = [];
-        
-        for (let idx = 0; idx < files.length; idx++) {
-            const f = files[idx];
-            const progress = 0.05 + (0.65 * (idx / files.length));
-            onProgress(progress, `Processing file ${idx + 1}/${files.length}...`);
-            
+        // First pass: determine output file names, sizes, and cache NCZ compressed data
+        const outputMeta = [];
+        for (const f of files) {
             const isNcz = f.name.toLowerCase().endsWith('.ncz');
             const outputName = isNcz ? f.name.slice(0, -4) + '.nca' : f.name;
-            
-            onLog('info', `${isNcz ? 'Decompressing' : 'Copying'}: ${f.name}`);
-
             if (isNcz) {
-                const nczData = await this.decompressNCZ(file, f);
-                const hash = sha256(nczData);
-                onLog('info', `NCA SHA256: ${hash}`);
-                
-                if (!outputName.endsWith('.cnmt.nca')) {
-                    if (cnmtHashes.size > 0) {
-                        if (cnmtHashes.has(hash)) {
-                            onLog('success', `[VERIFIED]   ${outputName}`);
-                        } else {
-                            onLog('error', `[CORRUPTED]  ${outputName} - hash mismatch!`);
-                        }
-                    } else {
-                        const expectedFromFilename = file.name.toLowerCase().replace(/\.nsz$/i, '.nca');
-                        if (hash.startsWith(expectedFromFilename.substring(0, 32))) {
-                            onLog('success', `[VERIFIED]   ${outputName}`);
-                        }
-                    }
-                }
-                
-                outputFiles.push({ name: outputName, data: nczData });
+                onLog('info', `Reading NCZ header: ${f.name}`);
+                const headerReader = new FileSliceReader(file, f.offset, Math.min(f.size, 0x10000));
+                const tmpDecomp = new NCZDecompressor(headerReader, this.keys);
+                const { ncaSize } = await tmpDecomp.getSections();
+                // Read full compressed NCZ data in sub-2GB chunks before writable opens
+                onLog('info', `Caching compressed data: ${f.name} (${this.formatBytes(f.size)})`);
+                const chunks = await this.readFileSliceInChunks(file, f.offset, f.size);
+                outputMeta.push({ name: outputName, size: ncaSize, isNcz: true, nczChunks: chunks, nczLen: f.size });
             } else {
-                const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
-                const hash = sha256(data);
-                onLog('info', `NCA SHA256: ${hash}`);
-                
-                if (cnmtHashes.size > 0 && !outputName.endsWith('.cnmt.nca')) {
-                    if (cnmtHashes.has(hash)) {
-                        onLog('success', `[VERIFIED]   ${outputName}`);
-                    } else {
-                        if (hash in cnmtHashes) {
-                            onLog('success', `[VERIFIED]   ${outputName}`);
-                        } else {
-                            onLog('error', `[CORRUPTED]  ${outputName} - hash mismatch!`);
-                        }
-                    }
-                }
-                
-                outputFiles.push({ name: outputName, data });
+                outputMeta.push({ name: outputName, size: f.size, isNcz: false, nczChunks: null, nczLen: 0 });
             }
         }
 
-        onProgress(0.7, 'Building PFS0 container...');
-        const stringTable = outputFiles.map(f => f.name).join('\0') + '\0';
-        return this.buildPFS0(outputFiles, writable, { file, onLog, fixPadding, onProgress });
+        // Compute PFS0 file entries with relative offsets
+        let fileDataOffset = 0;
+        const fileEntries = outputMeta.map(m => {
+            const entry = { name: m.name, offset: fileDataOffset, size: m.size };
+            fileDataOffset += m.size;
+            return entry;
+        });
+
+        const stringTable = outputMeta.map(m => m.name).join('\0') + '\0';
+
+        if (writable) {
+            // Streaming path: write header first, then stream decompressed data
+            onLog('info', 'Using streaming output (File System Access)');
+            const paddedHeaderSize = await this.writePFS0HeaderOnly(writable, fileEntries, stringTable, fixPadding);
+            onProgress(0.8, 'Writing output file...');
+
+            let dataWritten = 0;
+            const totalDataSize = outputMeta.reduce((s, m) => s + m.size, 0);
+
+            for (let idx = 0; idx < files.length; idx++) {
+                const meta = outputMeta[idx];
+                const f = files[idx];
+                const writePos = paddedHeaderSize + fileEntries[idx].offset;
+
+                if (meta.isNcz) {
+                    const hasher = new SHA256();
+                    const reader = new ChunkedBufferReader(meta.nczChunks, meta.nczLen);
+                    const decompressor = new NCZDecompressor(reader, this.keys);
+                    await decompressor.decompress(null, async (chunk, offset) => {
+                        hasher.update(chunk);
+                        await writable.write({ type: 'write', position: writePos + offset, data: chunk });
+                    });
+                    // Free cached compressed data
+                    meta.nczChunks = null;
+                    const hash = hasher.hexdigest();
+                    onLog('info', `NCA SHA256: ${hash}`);
+
+                    if (!meta.name.endsWith('.cnmt.nca')) {
+                        if (cnmtHashes.size > 0) {
+                            if (cnmtHashes.has(hash)) {
+                                onLog('success', `[VERIFIED]   ${meta.name}`);
+                            } else {
+                                onLog('error', `[CORRUPTED]  ${meta.name} - hash mismatch!`);
+                            }
+                        } else {
+                            const expectedFromFilename = file.name.toLowerCase().replace(/\.nsz$/i, '.nca');
+                            if (hash.startsWith(expectedFromFilename.substring(0, 32))) {
+                                onLog('success', `[VERIFIED]   ${meta.name}`);
+                            }
+                        }
+                    }
+                } else {
+                    const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
+                    const hash = sha256(data);
+                    onLog('info', `SHA256: ${hash}`);
+                    await writable.write({ type: 'write', position: writePos, data });
+
+                    if (cnmtHashes.size > 0 && !meta.name.endsWith('.cnmt.nca')) {
+                        if (cnmtHashes.has(hash)) {
+                            onLog('success', `[VERIFIED]   ${meta.name}`);
+                        } else if (hash in cnmtHashes) {
+                            onLog('success', `[VERIFIED]   ${meta.name}`);
+                        } else {
+                            onLog('error', `[CORRUPTED]  ${meta.name} - hash mismatch!`);
+                        }
+                    }
+                }
+
+                dataWritten += meta.size;
+                const progress = 0.8 + (0.2 * (dataWritten / totalDataSize));
+                onProgress(progress, `Writing file ${idx + 1}/${files.length}...`);
+            }
+
+            onProgress(1.0, 'Done!');
+            const outputName = file.name.replace(/\.nsz$/i, '.nsp');
+            const totalSize = paddedHeaderSize + totalDataSize;
+            onLog('success', `Output: ${outputName} (${this.formatBytes(totalSize)})`);
+            return { blob: null, name: outputName, size: totalSize, writable: true };
+        } else {
+            // Memory path (no File System Access): collect all data, build PFS0
+            onLog('info', 'Using memory download (no File System Access)');
+            const outputFiles = [];
+
+            for (let idx = 0; idx < files.length; idx++) {
+                const meta = outputMeta[idx];
+                const f = files[idx];
+                const progress = 0.05 + (0.65 * (idx / files.length));
+                onProgress(progress, `Processing file ${idx + 1}/${files.length}...`);
+                onLog('info', `${meta.isNcz ? 'Decompressing' : 'Copying'}: ${f.name}`);
+
+                if (meta.isNcz) {
+                    const nczData = await this.decompressNCZ(file, f);
+                    const hash = sha256(nczData);
+                    onLog('info', `NCA SHA256: ${hash}`);
+
+                    if (!meta.name.endsWith('.cnmt.nca')) {
+                        if (cnmtHashes.size > 0) {
+                            if (cnmtHashes.has(hash)) {
+                                onLog('success', `[VERIFIED]   ${meta.name}`);
+                            } else {
+                                onLog('error', `[CORRUPTED]  ${meta.name} - hash mismatch!`);
+                            }
+                        } else {
+                            const expectedFromFilename = file.name.toLowerCase().replace(/\.nsz$/i, '.nca');
+                            if (hash.startsWith(expectedFromFilename.substring(0, 32))) {
+                                onLog('success', `[VERIFIED]   ${meta.name}`);
+                            }
+                        }
+                    }
+
+                    outputFiles.push({ name: meta.name, data: nczData });
+                } else {
+                    const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
+                    const hash = sha256(data);
+                    onLog('info', `SHA256: ${hash}`);
+
+                    if (cnmtHashes.size > 0 && !meta.name.endsWith('.cnmt.nca')) {
+                        if (cnmtHashes.has(hash)) {
+                            onLog('success', `[VERIFIED]   ${meta.name}`);
+                        } else if (hash in cnmtHashes) {
+                            onLog('success', `[VERIFIED]   ${meta.name}`);
+                        } else {
+                            onLog('error', `[CORRUPTED]  ${meta.name} - hash mismatch!`);
+                        }
+                    }
+
+                    outputFiles.push({ name: meta.name, data });
+                }
+            }
+
+            onProgress(0.7, 'Building PFS0 container...');
+            return this.buildPFS0(outputFiles, null, { file, onLog, fixPadding, onProgress });
+        }
     }
 
     async buildPFS0Stream(writable, fileEntries, fileDataList, headerSize, stringTable, paddingSize, fixPadding = false, onProgress = () => {}) {
@@ -189,12 +358,10 @@ class NSZConverter {
     }
 
     async decompressNCZ(file, nczFile) {
-        const nczSize = nczFile.size;
-        const buffer = await file.slice(nczFile.offset, nczFile.offset + nczSize).arrayBuffer();
-        const uint8 = new Uint8Array(buffer);
+        const reader = new FileSliceReader(file, nczFile.offset, nczFile.size);
         try {
-            const decompressor = new NCZDecompressor(buffer, this.keys);
-            return decompressor.decompress();
+            const decompressor = new NCZDecompressor(reader, this.keys);
+            return await decompressor.decompress();
         } catch(e) {
             console.error('NCZ decompression error:', e);
             throw e;
@@ -203,8 +370,8 @@ class NSZConverter {
 
     async decompressNCZtoNCA(file, options = {}) {
         const { onProgress = () => {}, onLog = () => {} } = options;
-        const buffer = await file.arrayBuffer();
-        const decompressor = new NCZDecompressor(new Uint8Array(buffer), this.keys);
+        const reader = new FileSliceReader(file);
+        const decompressor = new NCZDecompressor(reader, this.keys);
         const ncaData = await decompressor.decompress();
         const hash = sha256(ncaData);
         onLog('info', `NCA SHA256: ${hash}`);
@@ -229,16 +396,17 @@ class NSZConverter {
             const outputName = isNcz ? f.name.replace(/\.ncz$/i, '.nca') : f.name;
             onLog('info', `${isNcz ? 'Decompressing' : 'Copying'}: ${f.name} -> ${outputName}`);
 
-            const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
             if (isNcz) {
-                const decompressor = new NCZDecompressor(new Uint8Array(data), this.keys);
+                const nczReader = new FileSliceReader(file, f.offset, f.size);
+                const decompressor = new NCZDecompressor(nczReader, this.keys);
                 const ncaData = await decompressor.decompress();
                 const hash = sha256(ncaData);
                 onLog('info', `  SHA256: ${hash}`);
                 hfs0Writer.addFile(outputName, ncaData);
             } else {
-                onLog('info', `  Size: ${data.byteLength} bytes`);
-                hfs0Writer.addFile(outputName, new Uint8Array(data));
+                const fileData = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
+                onLog('info', `  Size: ${fileData.byteLength} bytes`);
+                hfs0Writer.addFile(outputName, new Uint8Array(fileData));
             }
             onProgress(0.1 + 0.8 * ((idx + 1) / files.length), `Processing file ${idx + 1}/${files.length}...`);
         }
