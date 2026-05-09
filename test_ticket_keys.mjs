@@ -149,7 +149,7 @@ async function test() {
         ['Working title key (0x130)', workingTitleKey],
     ]) {
         const aesCtr = new AESCTR(keyData, sec0Ctr);
-        const decrypted = aesCtr.decrypt(new Uint8Array(firstChunk), headerEnd + 0x4000);
+        const decrypted = await aesCtr.decrypt(new Uint8Array(firstChunk), headerEnd + 0x4000);
         const hasMagic = decrypted[0] === zstdMagic[0] && decrypted[1] === zstdMagic[1] &&
                          decrypted[2] === zstdMagic[2] && decrypted[3] === zstdMagic[3];
         console.log(`  ${label}: first 16 bytes = ${bytesToHex(decrypted.slice(0, 16))} ${hasMagic ? '✅ zstd magic' : ''}`);
