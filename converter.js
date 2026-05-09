@@ -382,7 +382,7 @@ class NSZConverter {
     }
 
     async decompressXCZtoXCI(file, options = {}) {
-        const { onProgress = () => {}, onLog = () => {} } = options;
+        const { onProgress = () => {}, onLog = () => {}, writable = null } = options;
         onLog('info', 'Parsing XCI container...');
         const fileReader = new FileSliceReader(file);
         const xci = new XCIReader(fileReader);
@@ -390,42 +390,147 @@ class NSZConverter {
         const files = xci.getSecurePartition();
         onLog('info', `Found ${files.length} files in secure partition`);
 
-        const hfs0Writer = new HFS0Writer();
-        for (let idx = 0; idx < files.length; idx++) {
-            const f = files[idx];
+        // First pass: determine sizes, cache compressed NCZ data
+        const outputMeta = [];
+        for (const f of files) {
             const isNcz = f.name.toLowerCase().endsWith('.ncz');
             const outputName = isNcz ? f.name.replace(/\.ncz$/i, '.nca') : f.name;
-            onLog('info', `${isNcz ? 'Decompressing' : 'Copying'}: ${f.name} -> ${outputName}`);
-
             if (isNcz) {
-                const nczReader = new FileSliceReader(file, f.offset, f.size);
-                const decompressor = new NCZDecompressor(nczReader, this.keys);
-                const ncaData = await decompressor.decompress();
-                const hash = sha256(ncaData);
-                onLog('info', `  SHA256: ${hash}`);
-                hfs0Writer.addFile(outputName, ncaData);
+                const headerReader = new FileSliceReader(file, f.offset, Math.min(f.size, 0x10000));
+                const tmpDecomp = new NCZDecompressor(headerReader, this.keys);
+                const { ncaSize } = await tmpDecomp.getSections();
+                const chunks = await this.readFileSliceInChunks(file, f.offset, f.size);
+                outputMeta.push({ name: outputName, size: ncaSize, isNcz: true, nczChunks: chunks, nczLen: f.size, offset: f.offset });
             } else {
-                const fileData = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
-                onLog('info', `  Size: ${fileData.byteLength} bytes`);
-                hfs0Writer.addFile(outputName, new Uint8Array(fileData));
+                outputMeta.push({ name: outputName, size: f.size, isNcz: false, offset: f.offset, nczChunks: null, nczLen: 0 });
             }
-            onProgress(0.1 + 0.8 * ((idx + 1) / files.length), `Processing file ${idx + 1}/${files.length}...`);
         }
 
-        onProgress(0.9, 'Building XCI...');
-        const hfs0Data = hfs0Writer.build();
-        onLog('info', `HFS0 partition built: ${hfs0Data.length} bytes`);
+        // Compute file offsets within HFS0
+        let fileDataOffset = 0;
+        const fileEntries = outputMeta.map(m => {
+            const entry = { name: m.name, offset: fileDataOffset, size: m.size };
+            fileDataOffset += m.size;
+            return entry;
+        });
 
-        const xciHeader = await fileReader.read(0, 0x200);
-        const xciWriter = new XCIWriter(xciHeader);
-        xciWriter.setHFS0Data(hfs0Data);
-        const xciData = xciWriter.build();
-        onLog('info', `XCI built: ${xciData.length} bytes`);
+        const stringTable = outputMeta.map(m => m.name).join('\0') + '\0';
+        const stringTableBytes = new TextEncoder().encode(stringTable);
+        const hfs0HeaderBase = 0x10 + outputMeta.length * 0x40;
+        const hfs0TotalHeader = hfs0HeaderBase + stringTableBytes.length;
 
-        onProgress(1.0, 'Done!');
-        const outputName = file.name.replace(/\.xcz$/i, '.xci');
-        const blob = new Blob([xciData], { type: 'application/octet-stream' });
-        return { blob, name: outputName, size: xciData.length };
+        if (writable) {
+            onLog('info', 'Using streaming output (File System Access)');
+            const xciHeaderBytes = await fileReader.read(0, 0x200);
+            const hfs0Offset = 0x200;
+
+            // Build HFS0 header buffer
+            const hfs0Header = new Uint8Array(hfs0TotalHeader);
+            const hdrView = new DataView(hfs0Header.buffer);
+            hfs0Header[0] = 0x48; hfs0Header[1] = 0x46; hfs0Header[2] = 0x53; hfs0Header[3] = 0x30;
+            hdrView.setUint32(4, outputMeta.length, true);
+            hdrView.setUint32(8, stringTableBytes.length, true);
+            hdrView.setUint32(12, 0, true);
+            hfs0Header.set(stringTableBytes, hfs0HeaderBase);
+
+            for (let i = 0; i < outputMeta.length; i++) {
+                const m = outputMeta[i];
+                const pos = 0x10 + i * 0x40;
+                const nameOffset = stringTable.indexOf(m.name);
+                hdrView.setBigUint64(pos, BigInt(m.offset), true);
+                hdrView.setBigUint64(pos + 8, BigInt(m.size), true);
+                hdrView.setUint32(pos + 16, nameOffset, true);
+                hdrView.setUint32(pos + 20, 0, true);
+                hdrView.setUint32(pos + 24, 0, true);
+                hdrView.setUint32(pos + 28, 0, true);
+                hdrView.setBigUint64(pos + 32, 0n, true);
+            }
+
+            // Update XCI header with correct offsets
+            const xciOut = new Uint8Array(0x200);
+            xciOut.set(xciHeaderBytes, 0);
+            const xciView = new DataView(xciOut.buffer);
+            const hfs0TotalSize = hfs0TotalHeader + fileDataOffset;
+            xciView.setBigUint64(0x118, BigInt(hfs0Offset + hfs0TotalSize), true);
+            xciView.setBigUint64(0x130, BigInt(hfs0Offset), true);
+            const hfs0HeaderSize = 0x10 + outputMeta.length * 0x40 + stringTableBytes.length;
+            xciView.setBigUint64(0x138, BigInt(hfs0HeaderSize), true);
+
+            await writable.write({ type: 'write', position: 0, data: xciOut.buffer });
+            await writable.write({ type: 'write', position: hfs0Offset, data: hfs0Header.buffer });
+
+            let writePos = hfs0Offset + hfs0TotalHeader;
+            for (let idx = 0; idx < files.length; idx++) {
+                const meta = outputMeta[idx];
+                const f = files[idx];
+
+                if (meta.isNcz) {
+                    const hasher = new SHA256();
+                    const reader = new ChunkedBufferReader(meta.nczChunks, meta.nczLen);
+                    const decomp = new NCZDecompressor(reader, this.keys);
+                    await decomp.decompress(null, async (chunk, offset) => {
+                        hasher.update(chunk);
+                        await writable.write({ type: 'write', position: writePos + offset, data: chunk });
+                    });
+                    meta.nczChunks = null;
+                    onLog('info', `  SHA256: ${hasher.hexdigest()}`);
+                } else {
+                    const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
+                    const hash = sha256(data);
+                    onLog('info', `  SHA256: ${hash}`);
+                    await writable.write({ type: 'write', position: writePos, data });
+                }
+                writePos += meta.size;
+                const progress = 0.1 + 0.8 * ((idx + 1) / files.length);
+                onProgress(progress, `Writing file ${idx + 1}/${files.length}...`);
+            }
+
+            onProgress(1.0, 'Done!');
+            const outputName = file.name.replace(/\.xcz$/i, '.xci');
+            const totalSize = hfs0Offset + hfs0TotalSize;
+            onLog('success', `Output: ${outputName} (${this.formatBytes(totalSize)})`);
+            return { blob: null, name: outputName, size: totalSize, writable: true };
+        } else {
+            // Memory path: build in memory for download
+            onLog('info', 'Using memory download');
+            const hfs0Writer = new HFS0Writer();
+            for (let idx = 0; idx < files.length; idx++) {
+                const meta = outputMeta[idx];
+                const f = files[idx];
+                const isNcz = meta.isNcz;
+                const outputName = meta.name;
+                onLog('info', `${isNcz ? 'Decompressing' : 'Copying'}: ${f.name} -> ${outputName}`);
+
+                if (isNcz) {
+                    const nczReader = new FileSliceReader(file, f.offset, f.size);
+                    const decompressor = new NCZDecompressor(nczReader, this.keys);
+                    const ncaData = await decompressor.decompress();
+                    const hash = sha256(ncaData);
+                    onLog('info', `  SHA256: ${hash}`);
+                    hfs0Writer.addFile(outputName, ncaData);
+                } else {
+                    const fileData = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
+                    onLog('info', `  Size: ${fileData.byteLength} bytes`);
+                    hfs0Writer.addFile(outputName, new Uint8Array(fileData));
+                }
+                onProgress(0.1 + 0.8 * ((idx + 1) / files.length), `Processing file ${idx + 1}/${files.length}...`);
+            }
+
+            onProgress(0.9, 'Building XCI...');
+            const hfs0Data = hfs0Writer.build();
+            onLog('info', `HFS0 partition built: ${hfs0Data.length} bytes`);
+
+            const xciHeader = await fileReader.read(0, 0x200);
+            const xciWriter = new XCIWriter(xciHeader);
+            xciWriter.setHFS0Data(hfs0Data);
+            const xciData = xciWriter.build();
+            onLog('info', `XCI built: ${xciData.length} bytes`);
+
+            onProgress(1.0, 'Done!');
+            const outputName = file.name.replace(/\.xcz$/i, '.xci');
+            const blob = new Blob([xciData], { type: 'application/octet-stream' });
+            return { blob, name: outputName, size: xciData.length };
+        }
     }
 
     async extractCnmtHashes(cnmtData) {
