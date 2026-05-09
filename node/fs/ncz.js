@@ -131,7 +131,7 @@ export class NCZ {
                 const chunk = output.slice(i, i + chunkSize);
 
                 if (aesCtr) {
-                    const decrypted = aesCtr.decrypt(new Uint8Array(chunk), i);
+                    const decrypted = await aesCtr.decrypt(new Uint8Array(chunk), i);
                     Buffer.from(decrypted).copy(output, i);
                 }
 
@@ -224,7 +224,7 @@ export class NCZ {
                 let chunk = block.slice(blockOffset, blockOffset + toRead);
 
                 if (aesCtr) {
-                    const decrypted = aesCtr.decrypt(new Uint8Array(chunk), i);
+                    const decrypted = await aesCtr.decrypt(new Uint8Array(chunk), i);
                     chunk = Buffer.from(decrypted);
                 }
 
