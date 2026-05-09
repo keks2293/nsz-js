@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <title>AES-CTR Tests</title>
-    <script src="./static/aes-js.js"></script>
     <style>
         body { font-family: monospace; margin: 20px; }
         .pass { color: green; }
@@ -15,8 +14,6 @@
     <h1>AES-CTR Tests</h1>
     <div id="output"></div>
     <script type="module">
-        // aes-js loads via <script> tag and sets window.aesjs
-        const aesjs = window.aesjs;
         // Import production AESCTR
         const { AESCTR } = await import('./crypto/aesctr.mjs');
 

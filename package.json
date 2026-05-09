@@ -17,7 +17,6 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "aes-js": "^3.1.2",
     "zstddec": "^0.2.0"
   }
 }
