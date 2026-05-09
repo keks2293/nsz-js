@@ -115,6 +115,37 @@ class ChunkedBufferReader extends DataReader {
     }
 }
 
+class FileDescriptorReader extends DataReader {
+    constructor(fd, baseOffset = 0, totalLength = null) {
+        super();
+        this.fd = fd;
+        this.baseOffset = baseOffset;
+        this._length = totalLength;
+        this._fs = null;
+    }
+
+    get length() {
+        return this._length;
+    }
+
+    async _getFs() {
+        if (!this._fs) {
+            this._fs = await import('fs/promises');
+        }
+        return this._fs;
+    }
+
+    async read(offset, size) {
+        const fs = await this._getFs();
+        const buf = Buffer.alloc(size);
+        const { bytesRead } = await fs.read(this.fd, buf, 0, size, this.baseOffset + offset);
+        if (bytesRead < size) {
+            return new Uint8Array(buf.buffer, buf.byteOffset, bytesRead);
+        }
+        return new Uint8Array(buf.buffer, buf.byteOffset, size);
+    }
+}
+
 class NCZSection {
     constructor(data, offset) {
         this.offset = Number(readBigUInt64LE(data, offset));
@@ -409,12 +440,35 @@ class NCZDecompressor {
             toRead -= size;
         }
         const sortedSections = [...sections].sort((a, b) => a.offset - b.offset);
-        const { ZSTDDecoder } = await import('./static/zstddec.mjs');
-        const decoder = new ZSTDDecoder();
-        await decoder.init();
-        let decompOffset = UNCOMPRESSABLE_HEADER_SIZE;
-        for (const decompChunk of decoder.decodeStreaming(compressedChunks)) {
-            decompOffset = await this._processStreamDecompressedChunk(decompChunk, decompOffset, sortedSections, progressCallback, writeChunk, ncaSize);
+        if (typeof process !== 'undefined' && process.versions && process.versions.node) {
+            console.log('[ZSTD] Using zstd CLI for Node.js streaming');
+            const { spawn } = await import('node:child_process');
+            const proc = spawn('zstd', ['-d', '--no-check'], { stdio: ['pipe', 'pipe', 'pipe'] });
+            for (const chunk of compressedChunks) {
+                proc.stdin.write(Buffer.from(chunk));
+            }
+            proc.stdin.end();
+            let stderr = '';
+            proc.stderr.on('data', (c) => stderr += c.toString());
+            const exitPromise = new Promise((resolve, reject) => {
+                proc.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`zstd failed: ${stderr}`)));
+                proc.on('error', reject);
+            });
+            let decompOffset = UNCOMPRESSABLE_HEADER_SIZE;
+            for await (const nodeChunk of proc.stdout) {
+                const dc = new Uint8Array(nodeChunk.buffer, nodeChunk.byteOffset, nodeChunk.byteLength);
+                decompOffset = await this._processStreamDecompressedChunk(dc, decompOffset, sortedSections, progressCallback, writeChunk, ncaSize);
+            }
+            await exitPromise;
+        } else {
+            console.log('[ZSTD] Using zstddec WASM streaming decompression');
+            const { ZSTDDecoder } = await import('./static/zstddec.mjs');
+            const decoder = new ZSTDDecoder();
+            await decoder.init();
+            let decompOffset = UNCOMPRESSABLE_HEADER_SIZE;
+            for (const decompChunk of decoder.decodeStreaming(compressedChunks)) {
+                decompOffset = await this._processStreamDecompressedChunk(decompChunk, decompOffset, sortedSections, progressCallback, writeChunk, ncaSize);
+            }
         }
         return null;
     }
@@ -525,4 +579,4 @@ class AsyncBlockDecompressorReader {
     }
 }
 
-export { NCZDecompressor, DataReader, BufferReader, ChunkedBufferReader, READ_CHUNK_SIZE };
+export { NCZDecompressor, DataReader, BufferReader, ChunkedBufferReader, FileDescriptorReader, READ_CHUNK_SIZE };
