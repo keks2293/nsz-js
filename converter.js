@@ -384,8 +384,9 @@ class NSZConverter {
     async decompressXCZtoXCI(file, options = {}) {
         const { onProgress = () => {}, onLog = () => {} } = options;
         onLog('info', 'Parsing XCI container...');
-        const buffer = await file.arrayBuffer();
-        const xci = new XCIReader(buffer);
+        const fileReader = new FileSliceReader(file);
+        const xci = new XCIReader(fileReader);
+        await xci.parse();
         const files = xci.getSecurePartition();
         onLog('info', `Found ${files.length} files in secure partition`);
 
@@ -415,7 +416,8 @@ class NSZConverter {
         const hfs0Data = hfs0Writer.build();
         onLog('info', `HFS0 partition built: ${hfs0Data.length} bytes`);
 
-        const xciWriter = new XCIWriter(buffer);
+        const xciHeader = await fileReader.read(0, 0x200);
+        const xciWriter = new XCIWriter(xciHeader);
         xciWriter.setHFS0Data(hfs0Data);
         const xciData = xciWriter.build();
         onLog('info', `XCI built: ${xciData.length} bytes`);
