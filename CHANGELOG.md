@@ -116,6 +116,30 @@
 19. **Cleaned up test files**
      - Replaced hardcoded paths in `test_ticket_keys.mjs` and `test_decompress.mjs` with CLI args
 
+## ✅ Recent Changes (2026-05-09)
+
+1. **Fixed streaming (non-block) NCZ decompression for large files**
+   - Replaced the >1.5 GB guard with actual streaming via `zstddec.decodeStreaming()`
+   - Reads compressed data in sub-2GB chunks, feeds to WASM streaming decoder
+   - Per-section AES-CTR decryption during streaming decompression
+   - No single buffer exceeds the 2 GB ArrayBuffer limit
+
+2. **Fixed XCZ path: no longer loads full file into memory**
+   - Refactored `XCIReader` to accept `DataReader` (only reads 0x200-byte header + HFS0 header)
+   - Fixed `HFS0Reader` to correctly handle sliced `Uint8Array` input
+   - Browser: uses `FileSliceReader` instead of `file.arrayBuffer()`
+   - Node.js: wraps input in `BufferReader`
+
+3. **Added DataReader abstraction** for pluggable random-access reading
+   - `BufferReader` — Node.js Uint8Array/Buffer backed
+   - `ChunkedBufferReader` — array of sub-2GB chunks for browser
+   - `FileSliceReader` — browser File object backed
+
+4. **Added streaming write support** for NSZ→NSP conversion
+   - Two-pass mode: cache compressed chunks in pass 1, stream-decompress in pass 2
+   - Incremental SHA256 hashing during streaming writes
+   - Chunked reads via `readFileSliceInChunks()` (sub-2GB per chunk)
+
 ## ⚠️ Known Limitations
 
 1. **Memory download path (no File System Access API)**: Falls back to `Blob` download — builds full output in memory, fails for games >2 GB. Use browser with File System Access API (Chrome/Edge) for large files.
