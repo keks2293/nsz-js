@@ -115,6 +115,14 @@
 19. **Cleaned up test files**
      - Replaced hardcoded paths in `test_ticket_keys.mjs` and `test_decompress.mjs` with CLI args
 
+## ⚠️ Known Limitations
+
+1. **Memory download path (no File System Access API)**: Falls back to `Blob` download — builds full output in memory, fails for games >2 GB. Use browser with File System Access API (Chrome/Edge) for large files.
+
+2. **Node.js CLI (nsz-convert.js)**: Uses `fs.readFileSync` — loads entire file into memory. Large games (>2 GB) will exceed Node.js heap limits. The browser path with streaming writes is the recommended approach for large files.
+
+3. **XCZ→XCI output**: Built entirely in memory (HFS0Writer + XCIWriter). For large XCZ files, the output will still be limited by available RAM. Streaming write support not yet implemented for XCZ.
+
 ## ✅ Verified
 
 - **Full end-to-end NSZ→NSP conversion** tested with `Little Nightmares II` (1.56 GB update NSZ)
