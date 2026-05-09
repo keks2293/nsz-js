@@ -44,7 +44,7 @@ function sliceBytes(bytes, start, end) {
     return bytes.slice(start, end);
 }
 
-const READ_CHUNK_SIZE = 0x60000000; // 1.5 GB per chunk, safe below 2GB ArrayBuffer limit
+const READ_CHUNK_SIZE = 0x1000000; // 16 MB per chunk, streaming decompressor handles any size
 
 class DataReader {
     async read(offset, size) {
