@@ -190,7 +190,7 @@ class AESCTR:
 - Browser environments do NOT support Node.js `crypto` module
 - AES-ECB (required for AES-CTR keystream generation) is NOT available in Web Crypto API (`crypto.subtle` does not support ECB mode)
 - Maintained two separate files (`aesctr.cjs` for Node.js, `aesctr.mjs` for browsers) which increased complexity
-- Solution: Use `crypto/aesctr.mjs` with a pure-JS AES implementation (`aes-js`) for cross-platform compatibility
+- Solution: Use `crypto/aesctr.mjs` with native crypto — Node.js `crypto.createCipheriv('aes-128-ctr')` or browser Web Crypto API `crypto.subtle.encrypt('AES-CTR')`
 - Files `crypto/aesctr.js` and `crypto/aesctr.cjs` have been removed (2026-05-06)
 
 ---
@@ -252,7 +252,7 @@ if hexHash[:32] == fileNameHash:
 
 4. **AES-CTR counter endianness (FIXED)** — Python's `Counter.new(64, prefix=nonce[0:8], initial_value=(offset >> 4))` uses big-endian for counter bytes. Fixed in `crypto/aesctr.mjs` to write counter bytes in big-endian order using `Buffer.writeBigUInt64BE()`.
 
-5. **Node.js crypto dropped** — Removed `crypto/aesctr.js` and `crypto/aesctr.cjs` (Node.js `crypto` module) because they're not supported in browsers. AES-ECB is not available in Web Crypto API. Now using pure-JS AES (aes-js) in `crypto/aesctr.mjs` for cross-platform compatibility. See section 6 for full history.
+5. **Node.js crypto dropped and re-added** — Initially removed `crypto/aesctr.js` and `crypto/aesctr.cjs` because they used Node.js-specific `crypto` module. Now re-added via `crypto.createCipheriv('aes-128-ctr')` in Node.js and `crypto.subtle.encrypt('AES-CTR')` in browsers — both hardware-accelerated. The pure-JS `aes-js` fallback has been removed entirely.
 
 ### Issues still to verify in nsz-js:
 

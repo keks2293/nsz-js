@@ -31,7 +31,7 @@ python3 test_aes_ctr.py
 **What it tests:**
 - AES-CTR keystream matches Python output
 - Counter block construction (nonce[0:8] + BE64 blockIndex)
-- aes-js AES-ECB encryption of counter blocks
+- Native AES-CTR encrypt/decrypt (Node.js `crypto.createCipheriv` or browser Web Crypto API)
 
 **How to run:**
 ```bash
@@ -82,7 +82,7 @@ node test_aes_manual.cjs
 **Purpose:** AES-CTR keystream verification in browser
 **What it tests:**
 - AES-CTR with PyCryptodome-compatible counter
-- Uses aes-js library loaded via `<script>` tag
+- Uses `crypto.subtle.encrypt` (Web Crypto API, hardware-accelerated)
 
 **How to run:** Open in browser
 
@@ -222,7 +222,7 @@ node test_vector.mjs
 # AES-CTR with seek + encrypt
 node test_aesctr.mjs
 
-# AES-CTR manual (uses Node crypto, no aes-js dep)
+# AES-CTR manual (uses Node crypto)
 node test_aes_manual.cjs
 
 # NCZ component tests (skips file-dependent tests)
