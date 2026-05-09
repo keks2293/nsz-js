@@ -1,7 +1,9 @@
+import { DataReader, BufferReader } from './ncz.js';
+
 export class HFS0Reader {
-    constructor(buffer) {
-        this.buffer = buffer instanceof ArrayBuffer ? buffer : buffer.buffer;
-        this.view = new DataView(this.buffer);
+    constructor(data) {
+        this.data = data instanceof Uint8Array ? data : new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer);
+        this.view = new DataView(this.data.buffer, this.data.byteOffset, this.data.byteLength);
         this.files = [];
         this.parse();
     }
@@ -24,7 +26,7 @@ export class HFS0Reader {
         const headerSize = 0x10 + fileCount * 0x40 + stringTableSize;
 
         const stringTableOffset = 0x10 + fileCount * 0x40;
-        const stringTable = new Uint8Array(this.buffer.slice(stringTableOffset, stringTableOffset + stringTableSize));
+        const stringTable = this.data.slice(stringTableOffset, stringTableOffset + stringTableSize);
 
         let stringEndOffset = stringTableSize;
 
@@ -131,59 +133,60 @@ export class HFS0Writer {
 }
 
 export class XCIReader {
-    constructor(buffer) {
-        this.buffer = buffer instanceof ArrayBuffer ? buffer : buffer.buffer;
-        this.view = new DataView(this.buffer);
-        this.parse();
+    constructor(readerOrBuffer) {
+        if (readerOrBuffer instanceof DataReader) {
+            this.reader = readerOrBuffer;
+        } else {
+            this.reader = new BufferReader(readerOrBuffer);
+        }
+        this.hfs0 = null;
     }
 
-    parse() {
-        const signature = this.buffer.slice(0, 0x100);
+    async parse() {
+        const headerBytes = await this.reader.read(0, 0x200);
+        const view = new DataView(headerBytes.buffer, headerBytes.byteOffset, headerBytes.byteLength);
+
         const magic = String.fromCharCode(
-            this.view.getUint8(0x100),
-            this.view.getUint8(0x101),
-            this.view.getUint8(0x102),
-            this.view.getUint8(0x103)
+            view.getUint8(0x100),
+            view.getUint8(0x101),
+            view.getUint8(0x102),
+            view.getUint8(0x103)
         );
 
-        this.secureOffset = this.view.getUint32(0x104, true);
-        this.backupOffset = this.view.getUint32(0x108, true);
-        this.titleKekIndex = this.view.getUint8(0x10C);
-        this.gamecardSize = this.view.getUint8(0x10D);
-        this.gamecardHeaderVersion = this.view.getUint8(0x10E);
-        this.gamecardFlags = this.view.getUint8(0x10F);
-        this.packageId = Number(this.view.getBigUint64(0x110, true));
-        this.validDataEndOffset = Number(this.view.getBigUint64(0x118, true));
-        this.gamecardInfo = this.buffer.slice(0x120, 0x130);
+        this.secureOffset = view.getUint32(0x104, true);
+        this.backupOffset = view.getUint32(0x108, true);
+        this.titleKekIndex = view.getUint8(0x10C);
+        this.gamecardSize = view.getUint8(0x10D);
+        this.gamecardHeaderVersion = view.getUint8(0x10E);
+        this.gamecardFlags = view.getUint8(0x10F);
+        this.packageId = Number(view.getBigUint64(0x110, true));
+        this.validDataEndOffset = Number(view.getBigUint64(0x118, true));
+        this.gamecardInfo = headerBytes.slice(0x120, 0x130);
 
-        this.hfs0Offset = Number(this.view.getBigUint64(0x130, true));
-        this.hfs0HeaderSize = Number(this.view.getBigUint64(0x138, true));
-        this.hfs0HeaderHash = this.buffer.slice(0x140, 0x160);
-        this.hfs0InitialDataHash = this.buffer.slice(0x160, 0x180);
-        this.secureMode = this.view.getUint32(0x180, true);
+        this.hfs0Offset = Number(view.getBigUint64(0x130, true));
+        this.hfs0HeaderSize = Number(view.getBigUint64(0x138, true));
+        this.hfs0HeaderHash = headerBytes.slice(0x140, 0x160);
+        this.hfs0InitialDataHash = headerBytes.slice(0x160, 0x180);
+        this.secureMode = view.getUint32(0x180, true);
 
-        this.titleKeyFlag = this.view.getUint32(0x184, true);
-        this.keyFlag = this.view.getUint32(0x188, true);
-        this.normalAreaEndOffset = this.view.getUint32(0x18C, true);
+        this.titleKeyFlag = view.getUint32(0x184, true);
+        this.keyFlag = view.getUint32(0x188, true);
+        this.normalAreaEndOffset = view.getUint32(0x18C, true);
 
-        const hfs0Data = this.buffer.slice(this.hfs0Offset, this.hfs0Offset + this.hfs0HeaderSize);
+        const hfs0Data = await this.reader.read(this.hfs0Offset, this.hfs0HeaderSize);
         this.hfs0 = new HFS0Reader(hfs0Data);
     }
 
     getSecurePartition() {
-        return this.hfs0.getFiles();
+        return this.hfs0 ? this.hfs0.getFiles() : [];
     }
 }
 
 export class XCIWriter {
-    constructor(originalHeader) {
+    constructor(headerBytes) {
         this.header = new Uint8Array(0x200);
-        if (originalHeader && originalHeader.byteLength >= 0x200) {
-            this.header.set(
-                originalHeader instanceof ArrayBuffer
-                    ? new Uint8Array(originalHeader.slice(0, 0x200))
-                    : originalHeader.slice(0, 0x200)
-            );
+        if (headerBytes && headerBytes.length >= 0x200) {
+            this.header.set(headerBytes.slice(0, 0x200));
         } else {
             this.header[0x100] = 0x48; this.header[0x101] = 0x45; this.header[0x102] = 0x41; this.header[0x103] = 0x44;
         }

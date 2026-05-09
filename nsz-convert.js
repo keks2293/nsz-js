@@ -111,8 +111,10 @@ async function main() {
         // XCZ — decompress XCI with NCZ files inside
         console.log('Detected XCZ file');
         const { XCIReader, HFS0Writer, XCIWriter } = await import('./xci.js');
+        const { BufferReader } = await import('./ncz.js');
         const outPath = outputPath || inputPath.replace(/\.xcz$/i, '.xci');
-        const xci = new XCIReader(inputBuffer);
+        const xci = new XCIReader(new BufferReader(inputBuffer));
+        await xci.parse();
         const files = xci.getSecurePartition();
         console.log(`HFS0 files: ${files.length}`);
         files.forEach(f => console.log(`  ${f.name} (offset: ${f.offset}, size: ${f.size})`));
@@ -136,7 +138,7 @@ async function main() {
         const hfs0Data = hfs0Writer.build();
         console.log(`HFS0 partition built: ${hfs0Data.length} bytes`);
 
-        const xciWriter = new XCIWriter(inputBuffer);
+        const xciWriter = new XCIWriter(new Uint8Array(inputBuffer.buffer, 0, 0x200));
         xciWriter.setHFS0Data(hfs0Data);
         const xciData = xciWriter.build();
         console.log(`XCI built: ${xciData.length} bytes`);
