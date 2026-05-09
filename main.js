@@ -252,7 +252,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                         onProgress: (progress, text) => {
                             updateProgress((i + progress) / files.length, text);
                         },
-                        onLog: addLog
+                        onLog: addLog,
+                        writable
                     });
                 } else {
                     result = await converter.decompressNSZtoNSP(file, {
