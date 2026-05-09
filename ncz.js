@@ -338,7 +338,7 @@ class NCZDecompressor {
                 const chunk = decompressed.slice(relOffset, relOffset + chunkSize);
 
                 if (aesCtr) {
-                    const decrypted = aesCtr.decrypt(chunk, i);
+                    const decrypted = await aesCtr.decrypt(chunk, i);
                     if (streaming) {
                         await writeChunk(decrypted, i);
                     } else {
@@ -405,7 +405,7 @@ class NCZDecompressor {
 
                 let data = chunk;
                 if (aesCtr) {
-                    data = aesCtr.decrypt(chunk, i);
+                    data = await aesCtr.decrypt(chunk, i);
                 }
 
                 if (streaming) {
@@ -496,7 +496,7 @@ class NCZDecompressor {
             }
             const subSize = boundary - offset;
             let data = decompChunk.slice(offset, offset + subSize);
-            if (aesCtr) data = aesCtr.decrypt(data, ncaPos);
+            if (aesCtr) data = await aesCtr.decrypt(data, ncaPos);
             await writeChunk(data, ncaPos);
             offset += subSize;
             if (progressCallback) progressCallback((decompOffset + offset) / ncaSize);

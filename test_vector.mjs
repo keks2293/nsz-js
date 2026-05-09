@@ -13,8 +13,9 @@ console.log('Offset:', offset, '(0x' + offset.toString(16) + ')');
 console.log('BlockIdx:', offset >> 4);
 console.log();
 
+(async () => {
 const aesctr = new AESCTR(key, nonce);
-const keystream = aesctr.decrypt(new Uint8Array(48), offset);
+const keystream = await aesctr.decrypt(new Uint8Array(48), offset);
 
 console.log('Counter block (BE64):', '00000002000000000000000000002000');
 console.log('Keystream:');
@@ -26,3 +27,4 @@ console.log('Expected:');
 console.log(expected);
 console.log();
 console.log('Result:', Buffer.from(keystream).toString('hex') === expected ? '✅ PASS' : '❌ FAIL');
+})();

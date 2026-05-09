@@ -1,49 +1,122 @@
 // AES-CTR - matches Python PyCryptodome: Counter.new(64, prefix=nonce[0:8], initial_value=blockIdx)
 // Counter block = nonce[0:8] + BE64(blockIdx)
-// Uses aes-js (pure JS) for AES-ECB - works in both Node.js and browsers.
+// Node.js: uses crypto.createCipheriv (OpenSSL, hardware-accelerated)
+// Browser: uses Web Crypto API (hardware-accelerated) when available
+// Fallback: aes-js (pure JS)
 // https://github.com/ricmoo/aes-js
 
-// Browser: aes-js loads via <script src="static/aes-js.js"> and sets window.aesjs
-// Node.js: import from 'aes-js' npm package
-// Use top-level await to dynamically import in Node.js
+const isNode = typeof process !== 'undefined' && process.versions?.node;
 
-let aesjs;
-if (typeof window !== 'undefined' && window.aesjs) {
-    // Browser: use global set by script tag
-    aesjs = window.aesjs;
+let useNodeCrypto = false;
+let nodeCrypto = null;
+let useWebCrypto = false;
+
+if (isNode) {
+    try {
+        nodeCrypto = await import('crypto');
+        useNodeCrypto = true;
+    } catch {}
 } else {
-    // Node.js: dynamically import the package
-    const aesjsModule = await import('aes-js');
-    aesjs = aesjsModule.default || aesjsModule;
+    useWebCrypto = typeof crypto !== 'undefined' && crypto.subtle && typeof crypto.subtle.encrypt === 'function';
 }
 
-const AES = aesjs.AES;
-const Counter = aesjs.Counter;
+// Load aes-js for fallback and BKTR
+let aesjs;
+if (typeof window !== 'undefined' && window.aesjs) {
+    aesjs = window.aesjs;
+} else {
+    const m = await import('aes-js');
+    aesjs = m.default || m;
+}
 
 class AESCTR {
     constructor(key, nonce) {
         this.key = key.slice(0, 16);
-        this.nonce = nonce.slice(0, 16);
-        // Create AES-128-ECB instance
-        this.aes = new AES(this.key);
+        this.nonce = nonce.slice(0, 8);
+        if (useNodeCrypto) {
+            this._cipher = null;
+            this._nextBlockIdx = -1;
+        } else if (useWebCrypto) {
+            this._cryptoKey = null;
+        } else {
+            this.aes = new aesjs.AES(this.key);
+        }
     }
 
     seek(offset) {
         this.blockIndex = Math.floor(offset / 16);
     }
 
-    encrypt(data, offset = null) {
-        if (offset !== null) {
-            this.seek(offset);
+    async encrypt(data, offset = null) {
+        return await this._transform(data, offset);
+    }
+
+    async decrypt(data, offset = null) {
+        return await this._transform(data, offset);
+    }
+
+    async _transform(data, offset) {
+        if (useNodeCrypto) {
+            return this._nodeTransform(data, offset);
         }
+        if (useWebCrypto) {
+            return await this._webTransform(data, offset);
+        }
+        if (offset !== null) this.seek(offset);
         return this._xorKeystream(data);
     }
 
-    decrypt(data, offset = null) {
+    _nodeTransform(data, offset) {
+        let blockIdx;
         if (offset !== null) {
-            this.seek(offset);
+            blockIdx = Math.floor(offset / 16);
+        } else {
+            blockIdx = this.blockIndex;
         }
-        return this._xorKeystream(data);
+        if (!this._cipher || blockIdx !== this._nextBlockIdx) {
+            const iv = new Uint8Array(16);
+            for (let j = 0; j < 8; j++) iv[j] = this.nonce[j];
+            let tmp = blockIdx;
+            for (let j = 15; j >= 8; j--) {
+                iv[j] = tmp & 0xff;
+                tmp >>>= 8;
+            }
+            const c = nodeCrypto.default || nodeCrypto;
+            this._cipher = c.createCipheriv('aes-128-ctr', this.key, iv);
+        }
+        this._nextBlockIdx = blockIdx + Math.ceil(data.length / 16);
+        this.blockIndex = this._nextBlockIdx;
+        return new Uint8Array(this._cipher.update(data));
+    }
+
+    async _webTransform(data, offset) {
+        if (!this._cryptoKey) {
+            this._cryptoKey = await crypto.subtle.importKey(
+                'raw', this.key,
+                { name: 'AES-CTR' },
+                false, ['encrypt']
+            );
+        }
+        let blockIdx;
+        if (offset !== null) {
+            blockIdx = Math.floor(offset / 16);
+        } else {
+            blockIdx = this.blockIndex;
+        }
+        const counter = new Uint8Array(16);
+        for (let j = 0; j < 8; j++) counter[j] = this.nonce[j];
+        let tmp = blockIdx;
+        for (let j = 15; j >= 8; j--) {
+            counter[j] = tmp & 0xff;
+            tmp >>>= 8;
+        }
+        const result = await crypto.subtle.encrypt(
+            { name: 'AES-CTR', counter, length: 64 },
+            this._cryptoKey,
+            data
+        );
+        this.blockIndex = blockIdx + Math.ceil(data.length / 16);
+        return new Uint8Array(result);
     }
 
     _xorKeystream(data) {
@@ -54,24 +127,16 @@ class AESCTR {
         for (let i =0; i < len; i += 16) {
             const blockIdx = this.blockIndex + Math.floor(i / 16);
             
-            // Build counter block: nonce[0:8] + BE64(blockIdx)
-            // Python: Counter.new(64, prefix=nonce[0:8], initial_value=blockIdx)
             const ctr = new Uint8Array(16);
-            // First 8 bytes: nonce[0:8]
-            for (let j = 0; j < 8; j++) {
-                ctr[j] = this.nonce[j];
-            }
-            // Last 8 bytes: blockIdx as BIG-endian uint64
+            for (let j = 0; j < 8; j++) ctr[j] = this.nonce[j];
             let tmp = blockIdx;
             for (let j = 15; j >= 8; j--) {
                 ctr[j] = tmp & 0xff;
                 tmp >>= 8;
             }
             
-            // Encrypt counter with AES-ECB
             const keystreamBlock = this.aes.encrypt(ctr);
             
-            // XOR data with keystream block
             const blockLen = Math.min(16, len - i);
             for (let j = 0; j < blockLen; j++) {
                 output[i + j] = arr[i + j] ^ keystreamBlock[j];
@@ -88,7 +153,7 @@ class AESCTR_BKTR {
         this.key = key.slice(0, 16);
         this.nonce = nonce.slice(0, 16);
         this.ctrVal = ctrVal;
-        this.aes = new AES(this.key);
+        this.aes = new aesjs.AES(this.key);
     }
 
     seek(offset) {
@@ -96,16 +161,12 @@ class AESCTR_BKTR {
     }
 
     encrypt(data, offset = null) {
-        if (offset !== null) {
-            this.seek(offset);
-        }
+        if (offset !== null) this.seek(offset);
         return this._xorKeystream(data);
     }
 
     decrypt(data, offset = null) {
-        if (offset !== null) {
-            this.seek(offset);
-        }
+        if (offset !== null) this.seek(offset);
         return this._xorKeystream(data);
     }
 
@@ -117,12 +178,8 @@ class AESCTR_BKTR {
         for (let i = 0; i < len; i += 16) {
             const blockIdx = this.blockIndex + Math.floor(i / 16);
 
-            // BKTR uses full 16-byte counter
             const ctr = new Uint8Array(16);
-            for (let j = 0; j < 16; j++) {
-                ctr[j] = this.nonce[j];
-            }
-            // Add blockIdx to last 8 bytes
+            for (let j = 0; j < 16; j++) ctr[j] = this.nonce[j];
             let tmp = blockIdx;
             for (let j = 15; j >= 8; j--) {
                 ctr[j] ^= (tmp & 0xff);

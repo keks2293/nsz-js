@@ -62,7 +62,7 @@ async function testAESCTR() {
     aesCtr.seek(0x4000);
     
     const testData = new Uint8Array([0x28, 0xB5, 0x2F, 0xFD]); // zstd magic
-    const encrypted = aesCtr.encrypt(testData);
+    const encrypted = await aesCtr.encrypt(testData);
     
     assertEqual(encrypted[0], 0x87, 'AES-CTR encrypt byte 0');
     assertEqual(encrypted[1], 0x47, 'AES-CTR encrypt byte 1');
