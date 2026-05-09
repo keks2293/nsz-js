@@ -331,3 +331,16 @@ if hexHash[:32] == fileNameHash:
 - NCA header preservation — ✅ FIXED (detect and prepend when present)
 - AES-XTS support — ✅ implemented in `aesxts.js`
 - Browser zstd decompression — `DecompressionStream('zstd')` NOT supported in any browser. Uses zstddec WASM library via `static/zstddec.mjs`. Handles any window size. See `BROWSER-ZSTD-LIMITATION.md`.
+
+### Chunk size comparison (nsz v4.6.1):
+
+| Context | Python nsz | nsz-js | Notes |
+|---------|-----------|--------|-------|
+| Per-section zstd read | `0x10000` (64KB) | `0x100000` (1MB) | nsz-js 16x larger — fewer write() syscalls, native AES is fast enough |
+| Container non-compressed copy | `0x100000` (1MB) | full `file.slice().arrayBuffer()` | nsz-js reads whole file; fine for small CNMT/ticket files |
+| NCZBLOCK compression | `0x100000` (1MB) | `0x100000` (1MB) | ✅ match |
+| Solid compression | `0x1000000` (16MB) | n/a (no compress) | Not applicable — nsz-js doesn't compress |
+| PFS0/HFS0 page flush | `0x100000` (1MB) | `0x10000` (64KB, header reads) | nsz-js only reads headers, no page flush |
+| XCI extract to dir copy | `0x10000` (64KB) | n/a | Buffer for extracting XCI files to disk, not compression |
+| Compressed data read chunk | n/a (Python no ArrayBuffer limit) | `0x1000000` (16MB) | nsz-js avoids 2GB ArrayBuffer limit |
+| Block compressor | `0x100000` (1MB) | `0x100000` (1MB) | ✅ match |
