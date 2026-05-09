@@ -14,6 +14,14 @@
 
 These docs contain format specifications, crypto implementation details, and known issues that are essential for correct development.
 
+## Update PROGRESS.md After Changes
+
+**Always update PROGRESS.md after making functional changes.** Add entries under the appropriate section:
+- New features or fixes → add to "Recent Changes" with date and description
+- When sections grow long, move older entries to a collapsed `<details>` block
+
+PROGRESS.md is the single source of truth for what works and what doesn't.
+
 ## Static Files
 
 **DO NOT manually edit files in the `static/` folder.**
