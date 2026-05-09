@@ -1,5 +1,17 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-05-09)
+
+1. **Added FileDescriptorReader** for Node.js file descriptor based random-access reads
+
+2. **NSZ→NSP streaming decompression for large files** — Replaced the >1.5 GB guard with actual streaming via `zstddec.decodeStreaming()`. Reads compressed data in sub-2GB chunks, per-section AES-CTR decryption during streaming.
+
+3. **XCZ path refactored** — `XCIReader` now uses `DataReader`, only reads 0x200-byte header + HFS0 header. Browser: added streaming write support (File System Access API) for large XCZ→XCI conversion. Memory path preserved as fallback.
+
+4. **Node.js CLI rewritten** — No more `fs.readFileSync` for input. Uses `FileDescriptorReader` + `FileDescriptorReader` for random access reads from file descriptor. Output written via `fs.writeSync` with positional writes. Works for files of any size (limited only by disk space).
+
+5. **Known limitations documented** memory download path (no writable) and Node.js CLI memory usage.
+
 ## ✅ Working Components
 
 1. **PFS0 Container Parsing**
