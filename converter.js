@@ -133,7 +133,7 @@ class NSZConverter {
             // Padding added to string table itself (like Python fix_padding=True)
             paddedStringTable = stringTable + '\x00'.repeat(paddingSize);
             paddedHeaderSize = 0x10 + fileEntries.length * 0x18 + paddedStringTable.length;
-            stringTableSizeInHeader = stringTable.length;
+            stringTableSizeInHeader = paddedStringTable.length;
         } else {
             // No padding in string table, separate padding after
             paddedStringTable = stringTable;
@@ -289,7 +289,7 @@ class NSZConverter {
         
         const stringTable = files.map(f => f.name).join('\0') + '\0';
         const headerSize = 0x10 + files.length * 0x18 + stringTable.length;
-        const paddingSize = (16 - (headerSize % 16)) % 16;
+        const paddingSize = fixPadding ? (16 - (headerSize % 16)) % 16 : 0;
 
         let fileOffset = 0;
         
