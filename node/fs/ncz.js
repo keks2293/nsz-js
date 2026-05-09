@@ -1,6 +1,7 @@
 import { AESCTR } from '../../crypto/aesctr.mjs';
 
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
+const SECTION_CHUNK_SIZE = 0x100000;
 
 class ZstdDecompressor {
     static async load() {
@@ -127,7 +128,7 @@ export class NCZ {
             }
 
             while (i < end) {
-                const chunkSize = Math.min(0x10000, end - i);
+                const chunkSize = Math.min(SECTION_CHUNK_SIZE, end - i);
                 const chunk = output.slice(i, i + chunkSize);
 
                 if (aesCtr) {
