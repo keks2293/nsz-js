@@ -440,6 +440,12 @@ class NCZDecompressor {
             toRead -= size;
         }
         const sortedSections = [...sections].sort((a, b) => a.offset - b.offset);
+        const sectionAesCtrs = new Map();
+        for (const s of sortedSections) {
+            if (s.cryptoType === 3 || s.cryptoType === 4) {
+                sectionAesCtrs.set(s, new AESCTR(s.cryptoKey, s.cryptoCounter));
+            }
+        }
         if (typeof process !== 'undefined' && process.versions && process.versions.node) {
             console.log('[ZSTD] Using zstd CLI for Node.js streaming');
             const { spawn } = await import('node:child_process');
@@ -457,7 +463,7 @@ class NCZDecompressor {
             let decompOffset = UNCOMPRESSABLE_HEADER_SIZE;
             for await (const nodeChunk of proc.stdout) {
                 const dc = new Uint8Array(nodeChunk.buffer, nodeChunk.byteOffset, nodeChunk.byteLength);
-                decompOffset = await this._processStreamDecompressedChunk(dc, decompOffset, sortedSections, progressCallback, writeChunk, ncaSize);
+                decompOffset = await this._processStreamDecompressedChunk(dc, decompOffset, sortedSections, sectionAesCtrs, progressCallback, writeChunk, ncaSize);
             }
             await exitPromise;
         } else {
@@ -467,13 +473,13 @@ class NCZDecompressor {
             await decoder.init();
             let decompOffset = UNCOMPRESSABLE_HEADER_SIZE;
             for (const decompChunk of decoder.decodeStreaming(compressedChunks)) {
-                decompOffset = await this._processStreamDecompressedChunk(decompChunk, decompOffset, sortedSections, progressCallback, writeChunk, ncaSize);
+                decompOffset = await this._processStreamDecompressedChunk(decompChunk, decompOffset, sortedSections, sectionAesCtrs, progressCallback, writeChunk, ncaSize);
             }
         }
         return null;
     }
 
-    async _processStreamDecompressedChunk(decompChunk, decompOffset, sortedSections, progressCallback, writeChunk, ncaSize) {
+    async _processStreamDecompressedChunk(decompChunk, decompOffset, sortedSections, sectionAesCtrs, progressCallback, writeChunk, ncaSize) {
         let offset = 0;
         while (offset < decompChunk.length) {
             const ncaPos = decompOffset + offset;
@@ -481,8 +487,8 @@ class NCZDecompressor {
             let boundary = decompChunk.length;
             for (const section of sortedSections) {
                 if (ncaPos >= section.offset && ncaPos < section.offset + section.size) {
-                    if (section.cryptoType === 3 || section.cryptoType === 4) {
-                        aesCtr = new AESCTR(section.cryptoKey, section.cryptoCounter);
+                    if (sectionAesCtrs.has(section)) {
+                        aesCtr = sectionAesCtrs.get(section);
                     }
                     boundary = Math.min(boundary, offset + (section.offset + section.size - ncaPos));
                     break;
