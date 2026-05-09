@@ -27,7 +27,6 @@ PROGRESS.md is the single source of truth for what works and what doesn't.
 **DO NOT manually edit files in the `static/` folder.**
 
 The `static/` folder contains downloaded/copied dependencies for browser use:
-- `static/aes-js.js` - Copied from `node_modules/aes-js/index.js` (UMD format, sets `window.aesjs` when loaded via `<script>` tag)
 - `static/zstddec.mjs` - Copied from `node_modules/zstddec/dist/zstddec-stream.modern.js` (ES Module, imports directly). WASM-based native zstd decoder. Used for streaming decompression in browser. Handles any window size.
 - `static/prod.keys` - User-provided Nintendo Switch keys file
 
@@ -35,13 +34,12 @@ The `static/` folder contains downloaded/copied dependencies for browser use:
 
 1. Update the npm packages:
    ```bash
-    npm install aes-js@x.x.x zstddec@x.x.x
+   npm install zstddec@x.x.x
    ```
 
 2. Copy the files to `static/` **WITHOUT ANY MODIFICATIONS**:
    ```bash
-   cp node_modules/aes-js/index.js static/aes-js.js
-    cp node_modules/zstddec/dist/zstddec-stream.modern.js static/zstddec.mjs
+   cp node_modules/zstddec/dist/zstddec-stream.modern.js static/zstddec.mjs
    ```
 
 3. **NO manual editing of static files** - If the original files don't work as-is:
@@ -51,9 +49,6 @@ The `static/` folder contains downloaded/copied dependencies for browser use:
 ### Workarounds
 
 When original files from npm don't work directly in the target environment:
-
-- **Problem**: `aes-js` (UMD) sets `window.aesjs` global in browsers
-  **Solution**: In `crypto/aesctr.mjs`, access via `globalThis.aesjs` for browser, `import from 'aes-js'` for Node.js
 
 - **Problem**: `DecompressionStream` API doesn't support `'zstd'` format in any browser — constructor throws `"Failed to construct 'DecompressionStream': Unsupported compression format: 'zstd'"`.
   **Solution**: Use `zstddec` (WASM-based native zstd) for all decompression in browser via `static/zstddec.mjs`. Imported in `crypto/zstd.js` and `ncz.js`.
@@ -65,11 +60,9 @@ When original files from npm don't work directly in the target environment:
 
 Browser HTML files load dependencies:
 ```html
-<script src="./static/aes-js.js"></script>
 <!-- zstddec.mjs is imported via ES module in crypto/zstd.js and ncz.js -->
 ```
 
-`aes-js.js` sets global variable `window.aesjs` accessed via `globalThis` in ES modules.
 `zstddec.mjs` is imported directly as ES module (WASM binary is base64-embedded in the JS).
 
 **DO NOT use import maps or CDN URLs** - the whole point of the `static/` folder is to enable offline use.
@@ -77,7 +70,6 @@ Browser HTML files load dependencies:
 ## Package Versions
 
 Current versions (update this when upgrading):
-- `aes-js`: 3.1.2
 - `zstddec`: 0.2.0 (use streaming ESM version: `zstddec/dist/zstddec-stream.modern.js`)
 
 
