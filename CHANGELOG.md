@@ -2,15 +2,15 @@
 
 ## ✅ Recent Changes (2026-05-09)
 
-1. **Added FileDescriptorReader** for Node.js file descriptor based random-access reads
+1. **Node.js CLI rewritten for large files** — No more `fs.readFileSync`. Uses `FileDescriptorReader` for random access reads from file descriptor. Output written via `fs.writeSync` with positional writes. Works for files of any size (limited only by disk space). Handles NCZ, XCZ, and NSZ formats.
 
-2. **NSZ→NSP streaming decompression for large files** — Replaced the >1.5 GB guard with actual streaming via `zstddec.decodeStreaming()`. Reads compressed data in sub-2GB chunks, per-section AES-CTR decryption during streaming.
+2. **XCZ browser path: streaming write support** — Caches compressed NCZ chunks in pass 1, stream-decompresses with `writeChunk` in pass 2. Uses File System Access API for large XCZ→XCI conversion. Memory path preserved as fallback.
 
-3. **XCZ path refactored** — `XCIReader` now uses `DataReader`, only reads 0x200-byte header + HFS0 header. Browser: added streaming write support (File System Access API) for large XCZ→XCI conversion. Memory path preserved as fallback.
+3. **NSZ→NSP streaming decompression for large files** — Replaced the >1.5 GB guard with `zstddec.decodeStreaming()`. Reads compressed data in sub-2GB chunks, per-section AES-CTR decryption during streaming.
 
-4. **Node.js CLI rewritten** — No more `fs.readFileSync` for input. Uses `FileDescriptorReader` + `FileDescriptorReader` for random access reads from file descriptor. Output written via `fs.writeSync` with positional writes. Works for files of any size (limited only by disk space).
+4. **XCZ input refactored** — `XCIReader` now uses `DataReader`, only reads 0x200-byte header + HFS0 header. `HFS0Reader` handles sliced `Uint8Array` correctly.
 
-5. **Known limitations documented** memory download path (no writable) and Node.js CLI memory usage.
+5. **DataReader abstraction** — `BufferReader`, `ChunkedBufferReader`, `FileSliceReader`, `FileDescriptorReader` for pluggable random-access reading.
 
 ## ✅ Working Components
 
@@ -127,37 +127,9 @@
 19. **Cleaned up test files**
      - Replaced hardcoded paths in `test_ticket_keys.mjs` and `test_decompress.mjs` with CLI args
 
-## ✅ Recent Changes (2026-05-09)
-
-1. **Fixed streaming (non-block) NCZ decompression for large files**
-   - Replaced the >1.5 GB guard with actual streaming via `zstddec.decodeStreaming()`
-   - Reads compressed data in sub-2GB chunks, feeds to WASM streaming decoder
-   - Per-section AES-CTR decryption during streaming decompression
-   - No single buffer exceeds the 2 GB ArrayBuffer limit
-
-2. **Fixed XCZ path: no longer loads full file into memory**
-   - Refactored `XCIReader` to accept `DataReader` (only reads 0x200-byte header + HFS0 header)
-   - Fixed `HFS0Reader` to correctly handle sliced `Uint8Array` input
-   - Browser: uses `FileSliceReader` instead of `file.arrayBuffer()`
-   - Node.js: wraps input in `BufferReader`
-
-3. **Added DataReader abstraction** for pluggable random-access reading
-   - `BufferReader` — Node.js Uint8Array/Buffer backed
-   - `ChunkedBufferReader` — array of sub-2GB chunks for browser
-   - `FileSliceReader` — browser File object backed
-
-4. **Added streaming write support** for NSZ→NSP conversion
-   - Two-pass mode: cache compressed chunks in pass 1, stream-decompress in pass 2
-   - Incremental SHA256 hashing during streaming writes
-   - Chunked reads via `readFileSliceInChunks()` (sub-2GB per chunk)
-
 ## ⚠️ Known Limitations
 
 1. **Memory download path (no File System Access API)**: Falls back to `Blob` download — builds full output in memory, fails for games >2 GB. Use browser with File System Access API (Chrome/Edge) for large files.
-
-2. **Node.js CLI (nsz-convert.js)**: Uses `fs.readFileSync` — loads entire file into memory. Large games (>2 GB) will exceed Node.js heap limits. The browser path with streaming writes is the recommended approach for large files.
-
-3. **XCZ→XCI output**: Built entirely in memory (HFS0Writer + XCIWriter). For large XCZ files, the output will still be limited by available RAM. Streaming write support not yet implemented for XCZ.
 
 ## ✅ Verified
 
