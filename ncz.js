@@ -2,6 +2,7 @@ import { ZstdDecompressor } from './crypto/zstd.js';
 import { AESCTR } from './crypto/aesctr.mjs';
 
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
+const SECTION_CHUNK_SIZE = 0x100000; // 1MB - larger chunks reduce write calls, native AES is fast
 
 function allocByte(n) {
     return new Uint8Array(n);
@@ -333,7 +334,7 @@ class NCZDecompressor {
             }
 
             while (i < end) {
-                const chunkSize = Math.min(0x10000, end - i);
+                const chunkSize = Math.min(SECTION_CHUNK_SIZE, end - i);
                 const relOffset = i - UNCOMPRESSABLE_HEADER_SIZE;
                 const chunk = decompressed.slice(relOffset, relOffset + chunkSize);
 
@@ -399,7 +400,7 @@ class NCZDecompressor {
             }
 
             while (i < end) {
-                const chunkSize = Math.min(0x10000, end - i);
+                const chunkSize = Math.min(SECTION_CHUNK_SIZE, end - i);
                 const chunk = await blockDecompressor.read(chunkSize);
                 if (chunk.length === 0) break;
 
