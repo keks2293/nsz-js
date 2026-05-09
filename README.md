@@ -44,12 +44,11 @@ nsz-js/
 ├── xci.js              # XCI (game card) container support
 ├── crypto/             # Cryptographic utilities
 │   ├── aes128.js      # AES-128 ECB/CBC implementation
-│   ├── aesctr.js      # AES CTR and BKTR mode encryption (uses aes-js from static/)
+│   ├── aesctr.mjs     # AES-CTR mode (Node.js native crypto / Web Crypto API)
 │   ├── aesxts.js      # AES XTS mode encryption
 │   ├── sha256.js      # SHA-256 hash function
 │   └── zstd.js        # Zstandard decompression (uses zstddec WASM)
 ├── static/             # Static dependencies for browser (offline use)
-│   ├── aes-js.js      # AES implementation from npm (aes-js package)
 │   ├── zstddec.mjs    # WASM-based zstd decompression from npm (zstddec package)
 │   └── prod.keys      # Nintendo Switch keys file (user-provided)
 ├── node/               # Node.js specific implementation
@@ -95,7 +94,7 @@ nsz-js/
 ### Crypto Files
 
 - **crypto/aes128.js** - Lightweight AES-128 implementation with ECB and CBC modes
-- **crypto/aesctr.js** - AES-CTR and AES-CTR-BKTR encryption/decryption (uses `aes-js` npm package)
+- **crypto/aesctr.mjs** - AES-CTR encryption/decryption (Node.js native `crypto.createCipheriv` or browser Web Crypto API)
 - **crypto/aesxts.js** - AES-XTS mode for NCA section decryption
 - **crypto/sha256.js** - Pure JavaScript SHA-256 implementation
 - **crypto/zstd.js** - Zstandard decompression using zstddec WASM library
@@ -103,7 +102,6 @@ nsz-js/
 ### Dependencies
 
 **Browser (served from `static/` folder):**
-- **aes-js** ([GitHub](https://github.com/ricmoo/aes-js), [npm](https://www.npmjs.com/package/aes-js)) - Pure JavaScript AES implementation for ECB mode. Required for AES-CTR keystream generation since Web Crypto API doesn't support AES-ECB. Downloaded from npm, served from `static/aes-js.js`.
 - **zstddec** ([GitHub](https://github.com/StadiA/zstddec), [npm](https://www.npmjs.com/package/zstddec)) - WASM-based zstd decompression. Handles any window size. Served from `static/zstddec.mjs`.
 
 ### Static Folder
@@ -112,11 +110,12 @@ The `static/` folder contains downloaded copies of browser dependencies for offl
 
 | File | Package | Version | Source |
 |------|---------|---------|--------|
-| `static/aes-js.js` | aes-js | 3.1.2 | Copied from `node_modules/aes-js/index.js` |
 | `static/zstddec.mjs` | zstddec | 0.2.0 | Copied from `node_modules/zstddec/dist/zstddec-stream.modern.js` |
 | `static/prod.keys` | - | - | Nintendo Switch keys file (user-provided) |
 
-To update dependencies: `npm install aes-js@x.x.x zstddec@x.x.x` then copy files to `static/`
+AES-CTR uses native crypto — Node.js `crypto.createCipheriv` or browser Web Crypto API. No external AES library needed.
+
+To update dependencies: `npm install zstddec@x.x.x` then copy files to `static/`
 
 ### Node.js Files
 
