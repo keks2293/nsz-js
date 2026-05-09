@@ -4,13 +4,17 @@
 
 1. **Node.js CLI rewritten for large files** — No more `fs.readFileSync`. Uses `FileDescriptorReader` for random access reads from file descriptor. Output written via `fs.writeSync` with positional writes. Works for files of any size (limited only by disk space). Handles NCZ, XCZ, and NSZ formats.
 
-2. **XCZ browser path: streaming write support** — Caches compressed NCZ chunks in pass 1, stream-decompresses with `writeChunk` in pass 2. Uses File System Access API for large XCZ→XCI conversion. Memory path preserved as fallback.
+2. **XCZ browser path: streaming write support** — Stream-decompresses with `writeChunk` in pass 2. Uses File System Access API for large XCZ→XCI conversion. Memory path preserved as fallback.
 
 3. **NSZ→NSP streaming decompression for large files** — Replaced the >1.5 GB guard with `zstddec.decodeStreaming()`. Reads compressed data in sub-2GB chunks, per-section AES-CTR decryption during streaming.
 
 4. **XCZ input refactored** — `XCIReader` now uses `DataReader`, only reads 0x200-byte header + HFS0 header. `HFS0Reader` handles sliced `Uint8Array` correctly.
 
 5. **DataReader abstraction** — `BufferReader`, `ChunkedBufferReader`, `FileSliceReader`, `FileDescriptorReader` for pluggable random-access reading.
+
+6. **Native AES-CTR acceleration** — Node.js uses `crypto.createCipheriv('aes-128-ctr')` (OpenSSL/AES-NI), browser uses `crypto.subtle.encrypt('AES-CTR')` (Web Crypto API). ~2.3x speedup in browser (3min → 1m17s for 5GB NSZ). Dropped `aes-js` dependency entirely — no more pure-JS AES. Removed `AESCTR_BKTR` (dead code) and stale `node/crypto/` directory. Removed static `aes-js.js` from HTML.
+
+7. **Removed compressed NCZ memory cache** — No longer caches 2GB+ compressed NCZ data in RAM. Pass 2 reads directly from the dropped File via `FileSliceReader`. Zero speed impact, eliminates peak memory bottleneck.
 
 ## ✅ Working Components
 
@@ -34,11 +38,11 @@
    - Correctly calculates NCA size (0x4000 + sections)
    - Handles cryptoType: 1 (none), 3 (CTR), 4 (BKTR)
 
-6. **AES-CTR Encryption (Fixed!)**
-   - Now uses `aes-js` library for correct AES-ECB encryption
+6. **AES-CTR Encryption**
    - Counter block: nonce[0:8] + BE64(blockIndex) matching PyCryptodome
-   - Counter.new(64, prefix=nonce[0:8], initial_value=blockIndex)
-   - aes-js loaded globally via `<script>` tag before main.js
+   - Node.js: `crypto.createCipheriv('aes-128-ctr')` (OpenSSL/AES-NI)
+   - Browser: `crypto.subtle.encrypt('AES-CTR')` (Web Crypto API)
+   - Hardware-accelerated, ~2.3x faster than pure-JS aes-js
 
 ## ✅ Recent Fixes (2026-04-29)
 
@@ -47,19 +51,14 @@
    - Now properly encrypts counter block with AES-ECB using aes-js
    - Counter format: nonce[0:8] + BE64(blockIndex) - matches Python PyCryptodome
 
-2. **Fixed AESCTR_BKTR class**
-   - Was using wrong logic (XOR with key bytes)
-   - Now uses same correct AES-CTR logic as AESCTR
+2. **Fixed AESCTR_BKTR class** (since removed — dead code, BKTR uses AESCTR)
 
 3. **Fixed decryptSection in ncz.js**
    - Removed double addition of UNCOMPRESSABLE_HEADER_SIZE
    - Removed `&& this.keys` condition that was blocking decryption
    - Now properly calls AESCTR/AESCTR_BKTR with correct offset
 
-4. **Added aes-js library**
-   - Downloaded from https://github.com/ricmoo/aes-js
-   - Added to HTML before main.js as global script
-   - Provides proven AES-ECB implementation
+4. **Added aes-js library** (since removed — replaced by native crypto)
 
 ## ✅ Recent Fixes (2026-05-08)
 

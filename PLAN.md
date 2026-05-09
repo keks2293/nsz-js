@@ -8,7 +8,7 @@ The original goal was to implement correct AES-CTR decryption for NCZ sections s
 
 1. **AES-CTR counter format** — Matches PyCryptodome: `Counter.new(64, prefix=nonce[0:8], initial_value=blockIndex)`
 2. **Counter block** — `nonce[0:8] + BE64(blockIndex)`
-3. **AES-ECB encryption** — Uses `aes-js` library (pure JS, works in Node and browser)
+3. **AES-CTR encryption** — Uses native crypto: `crypto.createCipheriv` (Node.js) or `crypto.subtle.encrypt` (browser)
 
 ## Current Status
 
