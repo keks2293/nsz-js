@@ -121,10 +121,6 @@
 - **All NCA data byte-identical** to Python nsz reference output
 - **AES-CTR implementation** verified against Node.js native `crypto.createCipheriv('aes-128-ctr')` — both are correct
 - **zstd CLI piping + Node.js native AES-CTR** confirmed to produce byte-identical output to the reference
-- **Output NSP size difference**: 13 bytes (PFS0 header padding only) — reference pads header to 16-byte alignment; our unpadded header is also valid
-
-## ❌ Remaining Issues
-
-- PFS0 header padding: reference NSP pads header to 16-byte alignment (528 bytes), ours without fixPadding does not (515 bytes). All file data is identical. Use `--fix-padding` or toggle in UI to match.
+- **PFS0 header padding**: `--fix-padding` pads header to 16-byte boundary (528 bytes, matches reference); without it, header is minimal unpadded size (515 bytes). All file data is identical between modes. Use `--fix-padding` or toggle in UI to match Python nsz output size.
 - XCZ output is a flat HFS0 partition without full XCI header/metadata — enough for game loading but not a byte-for-byte copy of the original XCI structure.
 
