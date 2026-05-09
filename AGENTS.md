@@ -59,7 +59,7 @@ When original files from npm don't work directly in the target environment:
   **Solution**: Use `zstddec` (WASM-based native zstd) for all decompression in browser via `static/zstddec.mjs`. Imported in `crypto/zstd.js` and `ncz.js`.
 
 - **Problem**: `zstddec` streaming ESM build has a bug in `decode()` when passing explicit `uncompressedSize` — produces truncated/all-zeros output for large streams (>1GB).
-  **Solution**: In `ncz.js:203-207`, call `decoder.decode(compressedData, 0)` (auto-detect size). This works correctly: calls `ZSTD_findDecompressedSize` internally, falls back to streaming API if size is unknown.
+  **Solution**: In `ncz.js:310`, call `decoder.decode(compressedData, 0)` (auto-detect size). This works correctly: calls `ZSTD_findDecompressedSize` internally, falls back to streaming API if size is unknown.
 
 ### Browser Usage
 
