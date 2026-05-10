@@ -14,11 +14,13 @@
 
 6. **Moved modules to `fs/` directory** — `pfs0.js`, `ncz.js`, `xci.js`, `ticket.js` moved from root to `fs/` matching Python nsz's `Fs/` layout. Removed unused `node/fs/` directory. All imports updated.
 
-7. **Cleanup: removed dead code** — Removed `crypto/aesxts.js` (never imported), `node/nsz.js` + `node/decompressor.js` + `node/fileExistingChecks.js` (broken CLI chain referencing deleted `node/fs/`). Trimmed `node/pathTools.js` from 10 exports to 1 (`changeExtension` only). Removed dead `sha256` import/export from `fs/ticket.js`. Updated `package.json` — `main` → `nsz-cli.js`, scripts use `nsz-cli.js`.
+7. **Cleanup: removed dead code** — Removed `crypto/aesxts.js` (never imported), `node/nsz.js` + `node/decompressor.js` + `node/fileExistingChecks.js` (broken CLI chain referencing deleted `node/fs/`), `node/pathTools.js` + `node/parseArguments.js` (both never imported). Removed dead `sha256` import/export from `fs/ticket.js`. Updated `package.json` — `main` → `nsz-cli.js`, scripts use `nsz-cli.js`.
 
 8. **Added `--help`/`-h` flag to CLI** — `nsz-cli.js` now handles `--help` and `-h` flags to display usage. Previously fell through to `stat()` call and crashed with ENOENT.
 
 9. **Renamed `nsz-convert.js` → `nsz-cli.js`** — Clearer name for the Node.js CLI entry point. Updated all references in `package.json`, `README.md`, `PROGRESS.md`, `BROWSER-ZSTD-LIMITATION.md`, `FIXES_PLAN.md`, and usage string.
+
+10. **Removed `node/keys.js`** — Dead code; nothing imported it. Functionality superseded by `keys.js` (KeysParser) and `crypto/` modules.
 
 ## ✅ Recent Changes (2026-05-09)
 
