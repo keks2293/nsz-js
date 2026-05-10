@@ -41,7 +41,6 @@ For NCZBLOCK block decompression, Node.js also uses `zstddec` via `crypto/zstd.j
 
 - `ncz.js` — Browser streaming path imports `zstddec` directly
 - `crypto/zstd.js` — Block decompression for both Node.js and browser uses `zstddec`
-- `node/fs/ncz.js` — Legacy Node.js NCZ handler also uses `zstddec`
 
 ## Known zstddec Bug
 

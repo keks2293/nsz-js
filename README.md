@@ -125,10 +125,7 @@ To update dependencies: `npm install zstddec@x.x.x` then copy files to `static/`
 - **node/parseArguments.js** - Command-line argument parser
 - **node/pathTools.js** - Path manipulation utilities
 - **node/fileExistingChecks.js** - File existence and validation checks
-- **node/fs/index.js** - Export wrapper for file system classes
-- **node/fs/pfs0.js** - PFS0 implementation for Node.js
-- **node/fs/ncz.js** - NCZ implementation for Node.js
-- **node/fs/nca.js** - NCA header parsing for Node.js
+(node/fs/ directory removed — unused, all code imports from root-level modules directly)
 
 ### Test Files
 
