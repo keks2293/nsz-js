@@ -1,10 +1,10 @@
 import { ZstdDecompressor } from './crypto/zstd.js';
-import { PFS0, PFS0Writer } from './pfs0.js';
-import { NCZDecompressor, DataReader } from './ncz.js';
+import { PFS0, PFS0Writer } from './fs/pfs0.js';
+import { NCZDecompressor, DataReader } from './fs/ncz.js';
 import { KeysParser } from './keys.js';
 import { SHA256, sha256 } from './crypto/sha256.js';
-import { extractHashesFromCnmt, Cnmt, ContentEntry, NCAHeader } from './ticket.js';
-import { XCIReader, HFS0Writer, XCIWriter } from './xci.js';
+import { extractHashesFromCnmt, Cnmt, ContentEntry, NCAHeader } from './fs/ticket.js';
+import { XCIReader, HFS0Writer, XCIWriter } from './fs/xci.js';
 
 class FileSliceReader extends DataReader {
     constructor(file, baseOffset = 0, totalLength = null) {

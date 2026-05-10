@@ -1,5 +1,5 @@
-import { ZstdDecompressor } from './crypto/zstd.js';
-import { AESCTR } from './crypto/aesctr.mjs';
+import { ZstdDecompressor } from '../crypto/zstd.js';
+import { AESCTR } from '../crypto/aesctr.mjs';
 
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
 const SECTION_CHUNK_SIZE = 0x100000; // 1MB - larger chunks reduce write calls, native AES is fast
@@ -297,7 +297,7 @@ class NCZDecompressor {
             decompressed = new Uint8Array(result.buffer, result.byteOffset, result.byteLength);
         } else {
             console.log('[ZSTD] Using zstddec WASM for browser');
-            const { ZSTDDecoder } = await import('./static/zstddec.mjs');
+            const { ZSTDDecoder } = await import('../static/zstddec.mjs');
             const decoder = new ZSTDDecoder();
             await decoder.init();
             decompressed = decoder.decode(compressedData, 0);
@@ -466,7 +466,7 @@ class NCZDecompressor {
             await exitPromise;
         } else {
             console.log('[ZSTD] Using zstddec WASM streaming decompression');
-            const { ZSTDDecoder } = await import('./static/zstddec.mjs');
+            const { ZSTDDecoder } = await import('../static/zstddec.mjs');
             const decoder = new ZSTDDecoder();
             await decoder.init();
             let decompOffset = UNCOMPRESSABLE_HEADER_SIZE;
