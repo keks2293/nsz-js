@@ -3,10 +3,10 @@
   "version": "4.6.1",
   "description": "Nintendo Switch NSZ to NSP converter - Browser version",
   "type": "module",
-  "main": "node/nsz.js",
+  "main": "nsz-convert.js",
   "scripts": {
-    "start": "node node/nsz.js",
-    "decompress": "node node/nsz.js -d"
+    "start": "node nsz-convert.js",
+    "decompress": "node nsz-convert.js"
   },
   "keywords": [
     "nintendo-switch",

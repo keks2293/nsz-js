@@ -24,6 +24,9 @@ async function main() {
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--fix-padding' || args[i] === '-p') {
             fixPadding = true;
+        } else if (args[i] === '--help' || args[i] === '-h') {
+            printUsage();
+            process.exit(0);
         } else if (!inputPath) {
             inputPath = args[i];
         } else if (!outputPath && !args[i].startsWith('-')) {
@@ -33,7 +36,7 @@ async function main() {
         }
     }
 
-    if (!inputPath) {
+    function printUsage() {
         console.log('NSZ to NSP Converter');
         console.log('');
         console.log('Usage: node nsz-convert.js <input> [output] [keys.txt] [options]');
@@ -46,6 +49,10 @@ async function main() {
         console.log('Options:');
         console.log('  --fix-padding, -p    Use 0x20-byte alignment (default: 16-byte, matching Python nsz)');
         console.log('');
+    }
+
+    if (!inputPath) {
+        printUsage();
         process.exit(1);
     }
 
