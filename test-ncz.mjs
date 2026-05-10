@@ -5,10 +5,10 @@
  */
 
 import fs from 'fs';
-import { NCZDecompressor } from './ncz.js';
+import { NCZDecompressor } from './fs/ncz.js';
 import { AESCTR } from './crypto/aesctr.mjs';
 import { ZstdDecompressor } from './crypto/zstd.js';
-import { PFS0 } from './pfs0.js';
+import { PFS0 } from './fs/pfs0.js';
 import { KeysParser } from './keys.js';
 import { sha256 } from './crypto/sha256.js';
 

@@ -1,5 +1,6 @@
 import { DataReader, BufferReader } from './ncz.js';
 
+
 export class HFS0Reader {
     constructor(data) {
         this.data = data instanceof Uint8Array ? data : new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer);

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import fs from 'fs';
-import { PFS0 } from './pfs0.js';
+import { PFS0 } from './fs/pfs0.js';
 import { AESCTR } from './crypto/aesctr.mjs';
 
 const args = process.argv.slice(2);
