@@ -2,7 +2,7 @@
 
 ## ✅ Recent Changes (2026-05-10)
 
-1. **Consolidated PFS0 writing into `pfs0.js`** — All PFS0 header building logic moved into `PFS0Writer` class. Removed duplicated inline header builders from `converter.js`, `nsz-convert.js`, `node/decompressor.js`.
+1. **Consolidated PFS0 writing into `pfs0.js`** — All PFS0 header building logic moved into `PFS0Writer` class. Removed duplicated inline header builders from `converter.js`, `nsz-cli.js`, `node/decompressor.js`.
 
 2. **PFS0 alignment: two modes matching Python nsz** — Default uses 16-byte alignment `(16 - n%16) % 16` (Python nsz default); `--fix-padding` uses 0x20 alignment via `0x20 - n%0x20` (Python's `align0x20`). Verified: JS default output is byte-identical to Python nsz output.
 
@@ -14,9 +14,11 @@
 
 6. **Moved modules to `fs/` directory** — `pfs0.js`, `ncz.js`, `xci.js`, `ticket.js` moved from root to `fs/` matching Python nsz's `Fs/` layout. Removed unused `node/fs/` directory. All imports updated.
 
-7. **Cleanup: removed dead code** — Removed `crypto/aesxts.js` (never imported), `node/nsz.js` + `node/decompressor.js` + `node/fileExistingChecks.js` (broken CLI chain referencing deleted `node/fs/`). Trimmed `node/pathTools.js` from 10 exports to 1 (`changeExtension` only). Removed dead `sha256` import/export from `fs/ticket.js`. Updated `package.json` — `main` → `nsz-convert.js`, scripts use `nsz-convert.js`.
+7. **Cleanup: removed dead code** — Removed `crypto/aesxts.js` (never imported), `node/nsz.js` + `node/decompressor.js` + `node/fileExistingChecks.js` (broken CLI chain referencing deleted `node/fs/`). Trimmed `node/pathTools.js` from 10 exports to 1 (`changeExtension` only). Removed dead `sha256` import/export from `fs/ticket.js`. Updated `package.json` — `main` → `nsz-cli.js`, scripts use `nsz-cli.js`.
 
-8. **Added `--help`/`-h` flag to CLI** — `nsz-convert.js` now handles `--help` and `-h` flags to display usage. Previously fell through to `stat()` call and crashed with ENOENT.
+8. **Added `--help`/`-h` flag to CLI** — `nsz-cli.js` now handles `--help` and `-h` flags to display usage. Previously fell through to `stat()` call and crashed with ENOENT.
+
+9. **Renamed `nsz-convert.js` → `nsz-cli.js`** — Clearer name for the Node.js CLI entry point. Updated all references in `package.json`, `README.md`, `PROGRESS.md`, `BROWSER-ZSTD-LIMITATION.md`, `FIXES_PLAN.md`, and usage string.
 
 ## ✅ Recent Changes (2026-05-09)
 
@@ -90,7 +92,7 @@
    - Uses console.error for error logging
    - Checks for empty decompressor output
 
-7. **Rewrote nsz-convert.js (Node.js CLI)**
+7. **Rewrote nsz-cli.js (Node.js CLI)**
    - Now uses proper project modules (NCZDecompressor, PFS0Reader, KeysParser, sha256)
    - Supports optional keys file as third argument
    - No longer downloads fzstd from CDN at runtime
@@ -128,13 +130,13 @@
 
 16. **Added standalone .ncz file support**
      - Browser: drop .ncz files → decompressed to .nca
-     - CLI: `node nsz-convert.js game.ncz` → outputs game.nca
+      - CLI: `node nsz-cli.js game.ncz` → outputs game.nca
      - NCZDecompressor already detected standalone NCZ (NCZSECTN at offset 0); just needed UI/CLI routing
 
 17. **Added XCZ decompression**
      - New `HFS0Writer` class in `xci.js` for building HFS0 partitions
      - Browser: drop .xcz files → decompressed to .xci
-     - CLI: `node nsz-convert.js game.xcz` → outputs game.xci
+      - CLI: `node nsz-cli.js game.xcz` → outputs game.xci
      - Parses XCI secure partition, decompresses NCZ files inside, rebuilds HFS0
 
 18. **Removed dead code**
