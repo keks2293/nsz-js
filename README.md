@@ -37,45 +37,30 @@ nsz-js/
 ├── index.html          # Main browser UI
 ├── main.js             # Browser UI logic and event handling
 ├── converter.js        # Main NSZ to NSP conversion orchestrator
-├── ncz.js              # NCZ decompression (NCZSECTN format)
-├── pfs0.js             # PFS0 container parsing and writing
+├── nsz-convert.js      # Node.js CLI entry point
 ├── keys.js             # Browser key parsing and derivation
-├── ticket.js           # Ticket, CNMT, NCA header parsing
-├── xci.js              # XCI (game card) container support
+├── fs/                 # File format modules (mirrors Python nsz Fs/)
+│   ├── pfs0.js         # PFS0 container parsing and writing
+│   ├── ncz.js          # NCZ decompression + DataReader abstractions
+│   ├── xci.js          # XCI/HFS0 container support
+│   └── ticket.js       # Ticket, CNMT, NCA header parsing
 ├── crypto/             # Cryptographic utilities
-│   ├── aes128.js      # AES-128 ECB/CBC implementation
-│   ├── aesctr.mjs     # AES-CTR mode (Node.js native crypto / Web Crypto API)
-│   ├── aesxts.js      # AES XTS mode encryption
-│   ├── sha256.js      # SHA-256 hash function
-│   └── zstd.js        # Zstandard decompression (uses zstddec WASM)
+│   ├── aes128.js       # AES-128 ECB/CBC implementation
+│   ├── aesctr.mjs      # AES-CTR mode (Node.js native crypto / Web Crypto API)
+│   ├── sha256.js       # SHA-256 hash function
+│   ├── unified.js      # Unified crypto wrapper (Node.js / pure JS)
+│   └── zstd.js         # Zstandard decompression (uses zstddec WASM)
+├── node/               # Node.js specific utilities
+│   ├── keys.js         # Node.js key management
+│   ├── parseArguments.js
+│   └── pathTools.js    # Path utilities
 ├── static/             # Static dependencies for browser (offline use)
-│   ├── zstddec.mjs    # WASM-based zstd decompression from npm (zstddec package)
-│   └── prod.keys      # Nintendo Switch keys file (user-provided)
-├── node/               # Node.js specific implementation
-│   ├── nsz.js         # CLI entry point
-│   ├── decompressor.js # Node.js decompressor
-│   ├── keys.js        # Node.js key management (uses crypto module)
-│   ├── parseArguments.js # CLI argument parsing
-│   ├── pathTools.js   # Path utilities
-│   ├── fileExistingChecks.js # File validation
-│   └── fs/            # File system implementations
-│       ├── index.js   # Export wrapper
-│       ├── pfs0.js    # PFS0 file system
-│       ├── ncz.js     # NCZ file system
-│       └── nca.js     # NCA header parsing
-├── test_convert.js     # Conversion test script
-├── test_aes_manual.js # Manual AES test
-├── test_aes_node.js    # Node.js AES test
-├── test_aes_ctr.py     # Python AES-CTR test
-├── counter-test.js     # Counter mode test
-├── test_aes_simple.html    # Simple AES browser test
-├── test_ctr.html      # CTR mode browser test
-├── test_ctr_browser.html   # CTR browser test UI
-├── test_final.html    # Final integration test
-├── nsz-convert.js     # Reference NSZ converter (WIP)
-├── nsz-convert-ref.py # Python reference implementation
-├── PLAN.md            # Project plan
-└── PROGRESS.md        # Progress tracking
+│   ├── zstddec.mjs     # WASM-based zstd decompression
+│   └── prod.keys       # Nintendo Switch keys file
+├── test_*.mjs          # Test suites
+├── test_*.{cjs,py,html}# Additional tests
+├── nsz-convert-ref.py  # Python reference implementation
+├── .md files           # Documentation
 ```
 
 ## File Descriptions
