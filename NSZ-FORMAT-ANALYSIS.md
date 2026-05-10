@@ -15,6 +15,30 @@ The Python `nsz` tool processes multiple Nintendo compressed file formats. Each 
 - Contains `.ncz` files (compressed NCA data)
 - `.nca` files stored uncompressed
 
+### PFS0 Header Alignment
+
+Python nsz uses `align0x20(n) = 0x20 - n%0x20` for PFS0 header padding. Original implementation from `nsz/Fs/Pfs0.py`:
+
+```python
+def allign0x20(self, n):
+    return 0x20 - n % 0x20
+```
+
+This always rounds up to the next 0x20 boundary — when already aligned, it still adds 0x20 bytes (minimum padding is always 0x20, never 0).
+
+**Examples:**
+| Header (unpadded) | `n % 0x20` | `align0x20(n)` = padding | Header end (padded) |
+|---|---|---|---|
+| 0x31 (49) | 17 (0x11) | 15 (0x0F) | 0x40 (64) |
+| 0x80 (128) | 0 | 32 (0x20) | 0xA0 (160) |
+| 0x84 (132) | 4 | 28 (0x1C) | 0xA0 (160) |
+| 0x100 (256) | 0 | 32 (0x20) | 0x120 (288) |
+| 0x203 (515) | 3 | 29 (0x1D) | 0x220 (544) |
+
+With 16-byte alignment, the 515-byte header took 13 bytes of padding to reach 528. With Python's 0x20 alignment, it takes 29 bytes to reach 544.
+
+nsz-js matches this exact behavior when `fixPadding` is enabled. When disabled (default), nsz-js uses 16-byte alignment `(16 - n%16) % 16`, matching Python nsz's default output format. Both modes produce identical file data — only the header padding differs. nsz-js default mode output has been verified byte-identical to Python nsz output.
+
 **Decompression flow:**
 1. Parse PFS0 header from container
 2. For each `.ncz` file: decompress using `__decompressNcz()`

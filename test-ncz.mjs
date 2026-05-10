@@ -8,7 +8,7 @@ import fs from 'fs';
 import { NCZDecompressor } from './ncz.js';
 import { AESCTR } from './crypto/aesctr.mjs';
 import { ZstdDecompressor } from './crypto/zstd.js';
-import { PFS0Reader } from './pfs0.js';
+import { PFS0 } from './pfs0.js';
 import { KeysParser } from './keys.js';
 import { sha256 } from './crypto/sha256.js';
 
@@ -80,7 +80,7 @@ async function testNCZParsing() {
     }
     
     const nszData = fs.readFileSync(nszPath);
-    const pfs0 = new PFS0Reader(nszData);
+    const pfs0 = new PFS0(nszData);
     const files = pfs0.getFiles();
     
     assertEqual(files.length, 1, 'PFS0 file count');
@@ -94,7 +94,7 @@ async function testNCZParsing() {
     }
     
     const workingData = fs.readFileSync(workingPath);
-    const workingPfs0 = new PFS0Reader(workingData);
+    const workingPfs0 = new PFS0(workingData);
     const workingFiles = workingPfs0.getFiles();
     
     assertEqual(workingFiles.length, 1, 'Working NSP file count');
@@ -117,7 +117,7 @@ async function testNCZDecompression() {
     const keys = KeysParser.parse(keysText);
     
     // Extract NCZ file from NSZ container first
-    const pfs0 = new PFS0Reader(nszData);
+    const pfs0 = new PFS0(nszData);
     const files = pfs0.getFiles();
     const nczFile = files.find(f => f.name.endsWith('.ncz'));
     if (!nczFile) {
@@ -137,7 +137,7 @@ async function testNCZDecompression() {
     
     // Compare with working NSP's NCA
     const workingData = fs.readFileSync(workingPath);
-    const workingPfs0 = new PFS0Reader(workingData);
+    const workingPfs0 = new PFS0(workingData);
     const workingFiles = workingPfs0.getFiles();
     const ncaFile = workingFiles.find(f => f.name === nczFile.name.replace('.ncz', '.nca'));
     

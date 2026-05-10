@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import fs from 'fs';
-import { PFS0Reader } from './pfs0.js';
+import { PFS0 } from './pfs0.js';
 import { AESCTR } from './crypto/aesctr.mjs';
 
 const args = process.argv.slice(2);
@@ -29,7 +29,7 @@ async function test() {
         process.exit(1);
     }
     const nszData = new Uint8Array(fs.readFileSync(NSZ_PATH));
-    const nszPfs0 = new PFS0Reader(nszData);
+    const nszPfs0 = new PFS0(nszData);
     const nszFiles = nszPfs0.getFiles();
 
     const nszNczFile = nszFiles.find(f => f.name.endsWith('.ncz'));
@@ -102,7 +102,7 @@ async function test() {
     }
 
     const workingData = new Uint8Array(fs.readFileSync(WORKING_NSP_PATH));
-    const workingPfs0 = new PFS0Reader(workingData);
+    const workingPfs0 = new PFS0(workingData);
     const workingFiles = workingPfs0.getFiles();
     const workingTicket = workingFiles.find(f => f.name.endsWith('.tik'));
 
