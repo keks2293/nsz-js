@@ -122,24 +122,21 @@ class FileDescriptorReader extends DataReader {
         this.fd = fd;
         this.baseOffset = baseOffset;
         this._length = totalLength;
-        this._fs = null;
     }
 
     get length() {
         return this._length;
     }
 
-    async _getFs() {
-        if (!this._fs) {
-            this._fs = await import('fs/promises');
-        }
-        return this._fs;
-    }
-
     async read(offset, size) {
-        const fs = await this._getFs();
         const buf = Buffer.alloc(size);
-        const { bytesRead } = await fs.read(this.fd, buf, 0, size, this.baseOffset + offset);
+        const fs = await import('fs');
+        const { bytesRead } = await new Promise((resolve, reject) => {
+            fs.read(this.fd, buf, 0, size, this.baseOffset + offset, (err, bytesRead, buffer) => {
+                if (err) reject(err);
+                else resolve({ bytesRead, buffer });
+            });
+        });
         if (bytesRead < size) {
             return new Uint8Array(buf.buffer, buf.byteOffset, bytesRead);
         }

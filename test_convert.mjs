@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import fs from 'fs';
-import { PFS0Reader } from './pfs0.js';
+import { PFS0 } from './pfs0.js';
 import { NCZDecompressor } from './ncz.js';
 import { sha256 } from './crypto/sha256.js';
 
@@ -8,8 +8,8 @@ async function convertNSZtoNSP(inputPath) {
     console.log(`Reading: ${inputPath}`);
     const data = new Uint8Array(fs.readFileSync(inputPath));
 
-    const pfs0Reader = new PFS0Reader(data);
-    const files = pfs0Reader.getFiles();
+    const pfs0 = new PFS0(data);
+    const files = pfs0.getFiles();
     console.log(`Found ${files.length} files`);
 
     const outputFiles = [];
