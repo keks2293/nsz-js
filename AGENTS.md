@@ -10,7 +10,6 @@
 - `PROGRESS.md` — Working components, recent fixes, remaining issues
 - `TESTS.md` — Test suite documentation, test vectors, how to run tests
 - `FIXES_PLAN.md` — Planned fixes with file/line references
-- `fix_converter.md` — Quick fix reference
 
 These docs contain format specifications, crypto implementation details, and known issues that are essential for correct development.
 
@@ -51,16 +50,16 @@ The `static/` folder contains downloaded/copied dependencies for browser use:
 When original files from npm don't work directly in the target environment:
 
 - **Problem**: `DecompressionStream` API doesn't support `'zstd'` format in any browser — constructor throws `"Failed to construct 'DecompressionStream': Unsupported compression format: 'zstd'"`.
-  **Solution**: Use `zstddec` (WASM-based native zstd) for all decompression in browser via `static/zstddec.mjs`. Imported in `crypto/zstd.js` and `ncz.js`.
+  **Solution**: Use `zstddec` (WASM-based native zstd) for all decompression in browser via `static/zstddec.mjs`. Imported in `crypto/zstd.js` and `fs/ncz.js`.
 
 - **Problem**: `zstddec` streaming ESM build has a bug in `decode()` when passing explicit `uncompressedSize` — produces truncated/all-zeros output for large streams (>1GB).
-  **Solution**: In `ncz.js:310`, call `decoder.decode(compressedData, 0)` (auto-detect size). This works correctly: calls `ZSTD_findDecompressedSize` internally, falls back to streaming API if size is unknown.
+  **Solution**: In `ncz.js` (around line 310), call `decoder.decode(compressedData, 0)` (auto-detect size). This works correctly: calls `ZSTD_findDecompressedSize` internally, falls back to streaming API if size is unknown.
 
 ### Browser Usage
 
 Browser HTML files load dependencies:
 ```html
-<!-- zstddec.mjs is imported via ES module in crypto/zstd.js and ncz.js -->
+<!-- zstddec.mjs is imported via ES module in crypto/zstd.js and fs/ncz.js -->
 ```
 
 `zstddec.mjs` is imported directly as ES module (WASM binary is base64-embedded in the JS).
