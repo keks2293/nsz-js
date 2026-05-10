@@ -30,7 +30,7 @@ Since `zstddec` handles all cases correctly (both streaming and block decompress
 
 ## The Node.js Path
 
-Node.js CLI (`nsz-convert.js`) uses the system `zstd` binary via `spawn` for streaming decompression (faster, no WASM overhead):
+Node.js CLI (`nsz-cli.js`) uses the system `zstd` binary via `spawn` for streaming decompression (faster, no WASM overhead):
 ```javascript
 const proc = spawn('zstd', ['-d', '--no-check'], { stdio: ['pipe', 'pipe', 'pipe'] });
 ```
