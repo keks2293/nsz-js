@@ -48,10 +48,6 @@ nsz-js/
 │   ├── sha256.js       # SHA-256 hash function
 │   ├── unified.js      # Unified crypto wrapper (Node.js / pure JS)
 │   └── zstd.js         # Zstandard decompression (uses zstddec WASM)
-├── node/               # Node.js specific utilities
-│   ├── keys.js         # Node.js key management
-│   ├── parseArguments.js
-│   └── pathTools.js    # Path utilities
 ├── static/             # Static dependencies for browser (offline use)
 │   ├── zstddec.mjs     # WASM-based zstd decompression
 │   └── prod.keys       # Nintendo Switch keys file
@@ -99,12 +95,6 @@ The `static/` folder contains downloaded copies of browser dependencies for offl
 AES-CTR uses native crypto — Node.js `crypto.createCipheriv` or browser Web Crypto API. No external AES library needed.
 
 To update dependencies: `npm install zstddec@x.x.x` then copy files to `static/`
-
-### Node.js Files
-
-- **node/keys.js** - Key management using Node.js crypto module, includes `Keys`, `AESECB`, `AESCTR`, and `crc32`
-- **node/parseArguments.js** - Command-line argument parser
-- **node/pathTools.js** - Path utility (`changeExtension` only — trimmed from 10 exports)
 
 ### Test Files
 
