@@ -71,8 +71,8 @@ async function testAESCTR() {
 async function testNCZParsing() {
     console.log('\n=== NCZ Parsing Tests ===');
     
-    const nszPath = './test.nsz';
-    const workingPath = './test.nsp';
+    const nszPath = process.argv[2] || './test.nsz';
+    const workingPath = process.argv[3] || './test.nsp';
     
     if (!fs.existsSync(nszPath)) {
         console.log('  ⊘ Skipping - NSZ file not found');
@@ -103,9 +103,9 @@ async function testNCZParsing() {
 async function testNCZDecompression() {
     console.log('\n=== NCZ Decompression Tests ===');
     
-    const nszPath = './test.nsz';
-    const workingPath = './test.nsp';
-    const keysPath = './static/prod.keys';
+    const nszPath = process.argv[2] || './test.nsz';
+    const workingPath = process.argv[3] || './test.nsp';
+    const keysPath = process.argv[4] || './static/prod.keys';
     
     if (!fs.existsSync(nszPath)) {
         console.log('  ⊘ Skipping - NSZ file not found');
