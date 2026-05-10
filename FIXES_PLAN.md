@@ -24,7 +24,7 @@ All four fixes in this document were completed in commit `dac31b6` ("Wire up pro
 - Uses `console.error` instead of `console.log`
 - Checks for empty decompressor output
 
-### D. `nsz-convert.js` rewritten
+### D. `nsz-cli.js` rewritten
 - No longer downloads fzstd from CDN at runtime
 - Uses proper project modules (NCZDecompressor, PFS0Reader, KeysParser, sha256)
 - Supports optional keys file as third argument

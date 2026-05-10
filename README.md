@@ -37,7 +37,7 @@ nsz-js/
 ├── index.html          # Main browser UI
 ├── main.js             # Browser UI logic and event handling
 ├── converter.js        # Main NSZ to NSP conversion orchestrator
-├── nsz-convert.js      # Node.js CLI entry point
+├── nsz-cli.js          # Node.js CLI entry point
 ├── keys.js             # Browser key parsing and derivation
 ├── fs/                 # File format modules (mirrors Python nsz Fs/)
 │   ├── pfs0.js         # PFS0 container parsing and writing
