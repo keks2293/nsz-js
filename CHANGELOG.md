@@ -2,7 +2,7 @@
 
 ## ✅ Recent Changes (2026-05-10)
 
-1. **Consolidated PFS0 writing into `pfs0.js`** — All PFS0 header building logic moved into `PFS0Writer` class in root `pfs0.js`. Removed duplicated inline header builders from `converter.js`, `nsz-convert.js`, `node/decompressor.js`. `node/fs/pfs0.js` `PFS0Writer` delegates to root.
+1. **Consolidated PFS0 writing into `pfs0.js`** — All PFS0 header building logic moved into `PFS0Writer` class in root `pfs0.js`. Removed duplicated inline header builders from `converter.js`, `nsz-convert.js`, `node/decompressor.js`.
 
 2. **PFS0 alignment: two modes matching Python nsz** — Default uses 16-byte alignment `(16 - n%16) % 16` (Python nsz default); `--fix-padding` uses 0x20 alignment via `0x20 - n%0x20` (Python's `align0x20`). Verified: JS default output is byte-identical to Python nsz output.
 
