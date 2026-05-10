@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { PFS0Reader } from './pfs0.js';
+import { PFS0 } from './pfs0.js';
 import { NCZDecompressor } from './ncz.js';
 import { sha256 } from './crypto/sha256.js';
 import fs from 'fs';
@@ -23,7 +23,7 @@ if (!filePath) {
 async function test() {
     console.log(`Reading NSZ: ${filePath}`);
     const data = new Uint8Array(fs.readFileSync(filePath));
-    const reader = new PFS0Reader(data);
+    const reader = new PFS0(data);
     const files = reader.getFiles();
 
     const nczFile = files.find(f => f.name.endsWith('.ncz'));
@@ -50,7 +50,7 @@ async function test() {
 
     console.log(`\nReading working NSP: ${workingPath}`);
     const workingData = new Uint8Array(fs.readFileSync(workingPath));
-    const workingReader = new PFS0Reader(workingData);
+    const workingReader = new PFS0(workingData);
     const workingFiles = workingReader.getFiles();
 
     const ncaFile = workingFiles.find(f => f.name.endsWith('.nca') && !f.name.includes('cnmt'));

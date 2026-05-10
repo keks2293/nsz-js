@@ -1,5 +1,5 @@
 import { ZstdDecompressor } from './crypto/zstd.js';
-import { PFS0Reader } from './pfs0.js';
+import { PFS0, PFS0Writer } from './pfs0.js';
 import { NCZDecompressor, DataReader } from './ncz.js';
 import { KeysParser } from './keys.js';
 import { SHA256, sha256 } from './crypto/sha256.js';
@@ -55,48 +55,12 @@ class NSZConverter {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
-    async writePFS0HeaderOnly(writable, fileEntries, stringTable, fixPadding) {
-        const headerSize = 0x10 + fileEntries.length * 0x18 + stringTable.length;
-        const paddingSize = fixPadding ? (16 - (headerSize % 16)) % 16 : 0;
-        const encoder = new TextEncoder();
-
-        let paddedStringTable;
-        let paddedHeaderSize;
-        let stringTableSizeInHeader;
-
-        if (fixPadding) {
-            paddedStringTable = stringTable + '\x00'.repeat(paddingSize);
-            paddedHeaderSize = 0x10 + fileEntries.length * 0x18 + paddedStringTable.length;
-            stringTableSizeInHeader = paddedStringTable.length;
-        } else {
-            paddedStringTable = stringTable;
-            paddedHeaderSize = headerSize + paddingSize;
-            stringTableSizeInHeader = stringTable.length + paddingSize;
-        }
-
-        const headerBuffer = new Uint8Array(paddedHeaderSize);
-        const view = new DataView(headerBuffer.buffer);
-
-        headerBuffer[0] = 0x50; headerBuffer[1] = 0x46; headerBuffer[2] = 0x53; headerBuffer[3] = 0x30;
-        view.setUint32(4, fileEntries.length, true);
-        view.setUint32(8, stringTableSizeInHeader, true);
-        view.setUint32(12, 0, true);
-
-        let stringOffset = 0;
-        for (let i = 0; i < fileEntries.length; i++) {
-            const entry = fileEntries[i];
-            const pos = 0x10 + i * 0x18;
-            view.setBigUint64(pos, BigInt(entry.offset), true);
-            view.setBigUint64(pos + 8, BigInt(entry.size), true);
-            view.setUint32(pos + 16, stringOffset, true);
-            view.setUint32(pos + 20, 0, true);
-            const nameBytes = encoder.encode(entry.name);
-            headerBuffer.set(nameBytes, 0x10 + fileEntries.length * 0x18 + stringOffset);
-            stringOffset += nameBytes.length + 1;
-        }
-
-        await writable.write({ type: 'write', position: 0, data: headerBuffer.buffer });
-        return paddedHeaderSize;
+    async writePFS0Header(writable, metas, fixPadding) {
+        const writer = new PFS0Writer(fixPadding);
+        for (const m of metas) writer.add(m.name, m.size);
+        const header = writer.buildHeader();
+        await writable.write({ type: 'write', position: 0, data: header.buffer });
+        return writer;
     }
 
     async decompressNSZtoNSP(file, options = {}) {
@@ -106,7 +70,7 @@ class NSZConverter {
         await this.init();
 
         const fileBuffer = await file.slice(0, Math.min(file.size, 1024 * 1024)).arrayBuffer();
-        const pfs0Reader = new PFS0Reader(fileBuffer);
+        const pfs0Reader = new PFS0(fileBuffer);
         const files = pfs0Reader.getFiles();
         onLog('info', `PFS0 header: ${files.length} files`);
         onLog('info', `Found ${files.length} files in container`);
@@ -139,20 +103,10 @@ class NSZConverter {
             }
         }
 
-        // Compute PFS0 file entries with relative offsets
-        let fileDataOffset = 0;
-        const fileEntries = outputMeta.map(m => {
-            const entry = { name: m.name, offset: fileDataOffset, size: m.size };
-            fileDataOffset += m.size;
-            return entry;
-        });
-
-        const stringTable = outputMeta.map(m => m.name).join('\0') + '\0';
-
         if (writable) {
             // Streaming path: write header first, then stream decompressed data
             onLog('info', 'Using streaming output (File System Access)');
-            const paddedHeaderSize = await this.writePFS0HeaderOnly(writable, fileEntries, stringTable, fixPadding);
+            const writer = await this.writePFS0Header(writable, outputMeta, fixPadding);
             onProgress(0.8, 'Writing output file...');
 
             let dataWritten = 0;
@@ -161,7 +115,7 @@ class NSZConverter {
             for (let idx = 0; idx < files.length; idx++) {
                 const meta = outputMeta[idx];
                 const f = files[idx];
-                const writePos = paddedHeaderSize + fileEntries[idx].offset;
+                const writePos = writer.headerSize + writer.files[idx].offset;
 
                 if (meta.isNcz) {
                     const hasher = new SHA256();
@@ -212,7 +166,7 @@ class NSZConverter {
 
             onProgress(1.0, 'Done!');
             const outputName = file.name.replace(/\.nsz$/i, '.nsp');
-            const totalSize = paddedHeaderSize + totalDataSize;
+            const totalSize = writer.headerSize + totalDataSize;
             onLog('success', `Output: ${outputName} (${this.formatBytes(totalSize)})`);
             return { blob: null, name: outputName, size: totalSize, writable: true };
         } else {
@@ -272,70 +226,24 @@ class NSZConverter {
         }
     }
 
-    async buildPFS0Stream(writable, fileEntries, fileDataList, headerSize, stringTable, paddingSize, fixPadding = false, onProgress = () => {}) {
-        const encoder = new TextEncoder();
-        
-        let paddedStringTable;
-        let paddedHeaderSize;
-        let stringTableSizeInHeader;
-        
-        if (fixPadding) {
-            // Padding added to string table itself (like Python fix_padding=True)
-            paddedStringTable = stringTable + '\x00'.repeat(paddingSize);
-            paddedHeaderSize = 0x10 + fileEntries.length * 0x18 + paddedStringTable.length;
-            stringTableSizeInHeader = paddedStringTable.length;
-        } else {
-            // No padding in string table, separate padding after
-            paddedStringTable = stringTable;
-            paddedHeaderSize = headerSize + paddingSize;
-            stringTableSizeInHeader = stringTable.length + paddingSize;
-        }
-        
-        const headerBuffer = new Uint8Array(paddedHeaderSize);
-        const view = new DataView(headerBuffer.buffer);
-
-        headerBuffer[0] = 0x50; headerBuffer[1] = 0x46; headerBuffer[2] = 0x53; headerBuffer[3] = 0x30;
-        view.setUint32(4, fileEntries.length, true);
-        view.setUint32(8, stringTableSizeInHeader, true);
-        view.setUint32(12, 0, true);
-
-        let stringOffset = 0;
-        for (let i = 0; i < fileEntries.length; i++) {
-            const entry = fileEntries[i];
-            const pos = 0x10 + i * 0x18;
-            
-            view.setBigUint64(pos, BigInt(entry.offset), true);
-            view.setBigUint64(pos + 8, BigInt(entry.size), true);
-            view.setUint32(pos + 16, stringOffset, true);
-            view.setUint32(pos + 20, 0, true);
-
-            const nameBytes = encoder.encode(entry.name);
-            headerBuffer.set(nameBytes, 0x10 + fileEntries.length * 0x18 + stringOffset);
-            stringOffset += nameBytes.length + 1;
-        }
-
-        await writable.write({ type: 'write', position: 0, data: headerBuffer.buffer });
+    async buildPFS0Stream(writable, writer, fileDataList, onProgress) {
+        const header = writer.buildHeader();
+        await writable.write({ type: 'write', position: 0, data: header.buffer });
         onProgress(0.85, 'Writing header...');
-        
-        // Write files at absolute positions (after header)
-        const totalSize = fileDataList.reduce((sum, d) => sum + (d.byteLength || d.length), 0);
+
+        const totalDataSize = writer.files.reduce((s, f) => s + f.size, 0);
         let written = 0;
-        
-        for (let i = 0; i < fileEntries.length; i++) {
+
+        for (let i = 0; i < writer.files.length; i++) {
+            const f = writer.files[i];
             const data = fileDataList[i];
-            let buffer = data instanceof ArrayBuffer ? data : (data.buffer || data);
-            
-            // Absolute position = header size + relative offset
-            const writePosition = paddedHeaderSize + Number(fileEntries[i].offset);
-            await writable.write({ type: 'write', position: writePosition, data: buffer });
-            
-            written += buffer.byteLength || buffer.length;
-            const progress = 0.85 + (0.15 * (written / totalSize));
-            onProgress(progress, `Writing file ${i + 1}/${fileEntries.length}...`);
+            const buf = data instanceof ArrayBuffer ? data : (data.buffer || data);
+            await writable.write({ type: 'write', position: header.length + f.offset, data: buf });
+            written += f.size;
+            onProgress(0.85 + (0.15 * written / totalDataSize), `Writing file ${i + 1}/${writer.files.length}...`);
         }
 
-        const total = paddedHeaderSize + fileEntries.reduce((sum, e) => sum + Number(e.size), 0);
-        return { size: total };
+        return { size: header.length + totalDataSize };
     }
 
     async decompressNCZ(file, nczFile) {
@@ -540,82 +448,43 @@ class NSZConverter {
     async buildPFS0(files, writable = null, options = {}) {
         const { file = null, onLog = () => {}, fixPadding = false, onProgress = () => {} } = options;
         const outputName = file ? file.name.replace(/\.nsz$/i, '.nsp') : 'output.nsp';
-        
-        const stringTable = files.map(f => f.name).join('\0') + '\0';
-        const headerSize = 0x10 + files.length * 0x18 + stringTable.length;
-        const paddingSize = fixPadding ? (16 - (headerSize % 16)) % 16 : 0;
 
-        let fileOffset = 0;
-        
-        const fileEntries = files.map(f => {
+        const writer = new PFS0Writer(fixPadding);
+        for (const f of files) {
             const data = f.data;
-            const entry = {
-                name: f.name,
-                offset: fileOffset,
-                size: data instanceof ArrayBuffer ? data.byteLength : data.length,
-                data: data
-            };
-            fileOffset += entry.size;
-            return entry;
-        });
-        
+            writer.add(f.name, data instanceof ArrayBuffer ? data.byteLength : data.length);
+        }
+
         if (!writable) {
             onLog('info', 'Using memory download (no File System Access)');
-            return this.buildPFS0Memory(fileEntries, stringTable, headerSize, paddingSize, fixPadding, onProgress, outputName);
+            return this.buildPFS0Memory(writer, files, onProgress, outputName);
         }
-        
+
         onProgress(0.8, 'Writing output file...');
         const fileDataList = files.map(f => f.data);
-        const streamResult = await this.buildPFS0Stream(writable, fileEntries, fileDataList, headerSize, stringTable, paddingSize, fixPadding, onProgress);
+        const streamResult = await this.buildPFS0Stream(writable, writer, fileDataList, onProgress);
         onProgress(1.0, 'Done!');
         onLog('success', `Output: ${outputName} (${this.formatBytes(streamResult.size)})`);
         return { blob: null, name: outputName, size: streamResult.size, writable: true };
     }
 
-    async buildPFS0Memory(fileEntries, stringTable, headerSize, paddingSize, fixPadding, onProgress, outputName) {
-        const encoder = new TextEncoder();
-        
-        const fullHeaderSize = headerSize + paddingSize;
-        const header = new Uint8Array(fullHeaderSize);
-        const view = new DataView(header.buffer);
-
-        header[0] = 0x50; header[1] = 0x46; header[2] = 0x53; header[3] = 0x30;
-        view.setUint32(4, fileEntries.length, true);
-        view.setUint32(8, stringTable.length + paddingSize, true);
-        view.setUint32(12, 0, true);
-
-        let stringOffset = 0;
-        for (let i = 0; i < fileEntries.length; i++) {
-            const entry = fileEntries[i];
-            const pos = 0x10 + i * 0x18;
-            
-            view.setBigUint64(pos, BigInt(entry.offset), true);
-            view.setBigUint64(pos + 8, BigInt(entry.size), true);
-            view.setUint32(pos + 16, stringOffset, true);
-            view.setUint32(pos + 20, 0, true);
-
-            const nameBytes = encoder.encode(entry.name);
-            header.set(nameBytes, 0x10 + fileEntries.length * 0x18 + stringOffset);
-            stringOffset += nameBytes.length + 1;
-        }
-
+    async buildPFS0Memory(writer, files, onProgress, outputName) {
+        const header = writer.buildHeader();
         onProgress(0.85, 'Building file in memory...');
-        
-        const totalDataSize = fileEntries.reduce((sum, e) => sum + Number(e.size), 0);
-        const totalSize = fullHeaderSize + totalDataSize;
+
+        const totalDataSize = writer.files.reduce((s, f) => s + f.size, 0);
+        const totalSize = header.length + totalDataSize;
         const outputBuffer = new Uint8Array(totalSize);
-        
+
         outputBuffer.set(header, 0);
-        
-        let offset = fullHeaderSize;
-        for (let i = 0; i < fileEntries.length; i++) {
-            const data = fileEntries[i].data;
+
+        let offset = header.length;
+        for (let i = 0; i < writer.files.length; i++) {
+            const data = files[i].data;
             const arr = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
             outputBuffer.set(arr, offset);
             offset += arr.length;
-            
-            const progress = 0.85 + (0.15 * (offset - fullHeaderSize) / totalDataSize);
-            onProgress(progress, `Building file ${i + 1}/${fileEntries.length}...`);
+            onProgress(0.85 + (0.15 * (offset - header.length) / totalDataSize), `Building file ${i + 1}/${writer.files.length}...`);
         }
 
         const blob = new Blob([outputBuffer], { type: 'application/octet-stream' });

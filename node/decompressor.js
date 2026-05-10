@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { sha256 } from '../crypto/unified.js';
-import { PFS0 } from './fs/pfs0.js';
+import { PFS0, PFS0Writer } from '../pfs0.js';
 import { NCZDecompressor } from '../ncz.js';
 import { Keys } from './keys.js';
 import { extractHashes } from './fileExistingChecks.js';
@@ -61,49 +61,14 @@ export class NSZDecompressor {
     }
 
     writeNSP(files) {
-        const stringTable = files.map(f => f.name).join('\0') + '\0';
-        const headerSize = 0x10 + files.length * 0x18 + stringTable.length;
-        const paddingSize = (16 - (headerSize % 16)) % 16;
-        const paddedStringTableSize = stringTable.length + paddingSize;
+        const writer = new PFS0Writer(true);
+        for (const f of files) writer.add(f.name, f.data.length);
+        const header = writer.buildHeader();
 
-        let fileOffset = 0x10 + files.length * 0x18 + paddedStringTableSize;
-        const fileEntries = files.map(f => {
-            const entry = {
-                name: f.name,
-                offset: fileOffset,
-                size: f.data.length
-            };
-            fileOffset += f.data.length;
-            return entry;
-        });
-
-        const output = Buffer.alloc(fileOffset + paddingSize);
-        
-        output.write('PFS0', 0);
-        output.writeUInt32LE(files.length, 4);
-        output.writeUInt32LE(paddedStringTableSize, 8);
-        output.writeUInt32LE(0, 12);
-
-        let stringOffset = 0;
-        for (let i = 0; i < fileEntries.length; i++) {
-            const entry = fileEntries[i];
-            const pos = 0x10 + i * 0x18;
-            
-            output.writeBigUInt64LE(BigInt(entry.offset), pos);
-            output.writeBigUInt64LE(BigInt(entry.size), pos + 8);
-            output.writeUInt32LE(stringOffset, pos + 16);
-            output.writeUInt32LE(0, pos + 20);
-            
-            output.write(entry.name, 0x10 + files.length * 0x18 + stringOffset);
-            stringOffset += entry.name.length + 1;
-        }
-
-        for (let i = 0; i < paddingSize; i++) {
-            output.writeUInt8(0, 0x10 + files.length * 0x18 + stringTable.length + i);
-        }
-
-        for (let i = 0; i < files.length; i++) {
-            files[i].data.copy(output, fileEntries[i].offset);
+        const output = Buffer.alloc(header.length + writer.files.reduce((s, f) => s + f.size, 0));
+        Buffer.from(header.buffer, header.byteOffset, header.byteLength).copy(output, 0);
+        for (let i = 0; i < writer.files.length; i++) {
+            files[i].data.copy(output, header.length + writer.files[i].offset);
         }
 
         fs.writeFileSync(this.outputPath, output);

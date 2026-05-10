@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'fs';
-import { PFS0Reader } from './pfs0.js';
+import { PFS0, PFS0Writer } from './pfs0.js';
 import { NCZDecompressor, FileDescriptorReader, BufferReader } from './ncz.js';
 import { KeysParser } from './keys.js';
 import { sha256 } from './crypto/sha256.js';
@@ -44,7 +44,7 @@ async function main() {
         console.log('  .xcz                -> .xci');
         console.log('');
         console.log('Options:');
-        console.log('  --fix-padding, -p    Pad PFS0 header to 16-byte boundary');
+        console.log('  --fix-padding, -p    Use 0x20-byte alignment (default: 16-byte, matching Python nsz)');
         console.log('');
         process.exit(1);
     }
@@ -242,7 +242,7 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
     // Read PFS0 header (first 4MB)
     const headerBuf = Buffer.alloc(1024 * 1024);
     fs.readSync(inputFd, headerBuf, 0, headerBuf.length, 0);
-    const pfs0Reader = new PFS0Reader(headerBuf);
+    const pfs0Reader = new PFS0(headerBuf);
     const files = pfs0Reader.getFiles();
     console.log(`PFS0 files: ${files.length}`);
 
@@ -262,58 +262,20 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
         }
     }
 
-    // Compute PFS0 file entries
-    let fileDataOffset = 0;
-    const fileEntries = outputMeta.map(m => {
-        const entry = { name: m.name, offset: fileDataOffset, size: m.size };
-        fileDataOffset += m.size;
-        return entry;
-    });
-    const stringTable = outputMeta.map(m => m.name).join('\0') + '\0';
-    const stringTableBytes = Buffer.from(stringTable, 'utf-8');
-    const headerSize = 0x10 + files.length * 0x18;
-    const rawHeaderSize = headerSize + stringTableBytes.length;
-    const paddingSize = fixPadding ? (16 - (rawHeaderSize % 16)) % 16 : 0;
-    const totalHeaderSize = rawHeaderSize + paddingSize;
-
     // Write output PFS0 header
+    const writer = new PFS0Writer(fixPadding);
+    for (const m of outputMeta) writer.add(m.name, m.size);
+    const header = writer.buildHeader();
+    const headerOutBuf = Buffer.from(header.buffer, header.byteOffset, header.byteLength);
+
     const outputFd = fs.openSync(outPath, 'w');
     try {
-        const paddedStringTable = fixPadding
-            ? Buffer.concat([stringTableBytes, Buffer.alloc(paddingSize)])
-            : stringTableBytes;
-        const stringTableSizeInHeader = fixPadding
-            ? paddedStringTable.length
-            : stringTableBytes.length + paddingSize;
-
-        const headerBufOut = Buffer.alloc(totalHeaderSize);
-        headerBufOut.write('PFS0', 0);
-        headerBufOut.writeUInt32LE(files.length, 4);
-        headerBufOut.writeUInt32LE(stringTableSizeInHeader, 8);
-        headerBufOut.writeUInt32LE(0, 12);
-        paddedStringTable.copy(headerBufOut, headerSize);
-
-        for (let i = 0; i < fileEntries.length; i++) {
-            const entry = fileEntries[i];
-            const pos = 0x10 + i * 0x18;
-            const nameOffset = stringTable.indexOf(entry.name);
-            headerBufOut.writeBigUInt64LE(BigInt(entry.offset), pos);
-            headerBufOut.writeBigUInt64LE(BigInt(entry.size), pos + 8);
-            headerBufOut.writeUInt32LE(nameOffset, pos + 16);
-            headerBufOut.writeUInt32LE(0, pos + 20);
-        }
-        fs.writeSync(outputFd, headerBufOut, 0, totalHeaderSize, 0);
-
-        // Write files
-        let writePos = totalHeaderSize;
-        let totalDataSize = 0;
+        fs.writeSync(outputFd, headerOutBuf, 0, header.length, 0);
 
         for (let idx = 0; idx < files.length; idx++) {
             const meta = outputMeta[idx];
             const f = files[idx];
-            const absWritePos = writePos;
-            writePos += meta.size;
-            totalDataSize += meta.size;
+            const absWritePos = header.length + writer.files[idx].offset;
 
             if (meta.isNcz) {
                 console.log(`Decompressing: ${f.name} -> ${meta.name}`);

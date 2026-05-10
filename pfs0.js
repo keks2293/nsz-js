@@ -1,44 +1,55 @@
-class PFS0Reader {
-    constructor(buffer) {
-        this.buffer = buffer instanceof ArrayBuffer ? buffer : buffer.buffer;
-        this.view = new DataView(this.buffer);
+class PFS0 {
+    constructor(data) {
+        if (data instanceof Uint8Array) {
+            this._data = data;
+        } else if (data instanceof ArrayBuffer) {
+            this._data = new Uint8Array(data);
+        } else {
+            this._data = new Uint8Array(data);
+        }
+        this._view = new DataView(this._data.buffer, this._data.byteOffset, this._data.byteLength);
         this.files = [];
         this.headerSize = 0;
-        this.stringTableSize = 0;
-        this.parse();
+        this._parse();
     }
 
-parse() {
-        const magic = this.readString(0, 4);
+    _parse() {
+        const magic = String.fromCharCode(this._data[0], this._data[1], this._data[2], this._data[3]);
         if (magic !== 'PFS0') {
             throw new Error(`Invalid PFS0 magic: ${magic}`);
         }
 
-        const fileCount = this.readUint32(4);
-        this.stringTableSize = this.readUint32(8);
-        this.headerSize = 0x10 + fileCount * 0x18 + this.stringTableSize;
-        
-        const stringTableOffset = 0x10 + fileCount * 0x18;
-        const stringTable = this.readBytes(stringTableOffset, this.stringTableSize);
+        const fileCount = this._view.getUint32(4, true);
+        const stringTableSize = this._view.getUint32(8, true);
+        this.headerSize = 0x10 + fileCount * 0x18 + stringTableSize;
 
-        for (let i = 0; i < fileCount; i++) {
+        const stringTableOffset = 0x10 + fileCount * 0x18;
+        const stringTable = this._data.slice(stringTableOffset, stringTableOffset + stringTableSize);
+
+        let stringEndOffset = stringTableSize;
+
+        for (let i = fileCount - 1; i >= 0; i--) {
             const entryOffset = 0x10 + i * 0x18;
-            const offset = Number(this.readUint64(entryOffset));
-            const size = Number(this.readUint64(entryOffset + 8));
-            const nameOffset = this.readUint32(entryOffset + 16);
+            const relOffset = Number(this._view.getBigUint64(entryOffset, true));
+            const size = Number(this._view.getBigUint64(entryOffset + 8, true));
+            const nameOffset = this._view.getUint32(entryOffset + 16, true);
 
             let name = '';
-            for (let j = nameOffset; j < this.stringTableSize && j >= 0; j++) {
-                if (stringTable[j] === 0) break;
+            for (let j = nameOffset; j < stringEndOffset && j < stringTable.length && stringTable[j] !== 0; j++) {
                 name += String.fromCharCode(stringTable[j]);
             }
+            stringEndOffset = nameOffset;
 
+            const absOffset = relOffset + this.headerSize;
             this.files.push({
                 name,
-                offset: offset + this.headerSize,
-                size
+                offset: absOffset,
+                size,
+                data: this._data.slice(absOffset, absOffset + size)
             });
         }
+
+        this.files.reverse();
     }
 
     getFiles() {
@@ -48,118 +59,76 @@ parse() {
     getHeaderSize() {
         return this.headerSize;
     }
-
-    getStringTableSize() {
-        return this.stringTableSize;
-    }
-
-    readFile(index) {
-        const file = this.files[index];
-        return this.readBytes(file.offset, file.size);
-    }
-
-    readUint8(offset) {
-        return this.view.getUint8(offset);
-    }
-
-    readUint16(offset) {
-        return this.view.getUint16(offset, true);
-    }
-
-    readUint32(offset) {
-        return this.view.getUint32(offset, true);
-    }
-
-    readUint64(offset) {
-        const low = this.view.getUint32(offset, true);
-        const high = this.view.getUint32(offset + 4, true);
-        return BigInt(low) + (BigInt(high) << 32n);
-    }
-
-    readBytes(offset, length) {
-        // Create proper Uint8Array view from sliced buffer
-        const slice = this.buffer.slice(offset, offset + length);
-        return new Uint8Array(slice);
-    }
-
-    readString(offset, length) {
-        let str = '';
-        for (let i = 0; i < length; i++) {
-            const char = this.view.getUint8(offset + i);
-            if (char === 0) break;
-            str += String.fromCharCode(char);
-        }
-        return str;
-    }
 }
 
 class PFS0Writer {
-    constructor() {
+    constructor(fixPadding = false) {
         this.files = [];
+        this.fixPadding = fixPadding;
     }
 
-    addFile(name, data) {
-        this.files.push({ name, data });
+    add(name, size) {
+        const offset = this.files.length === 0
+            ? 0
+            : this.files[this.files.length - 1].offset + this.files[this.files.length - 1].size;
+        this.files.push({ name, offset, size });
     }
 
-    build() {
-        const stringTable = this.buildStringTable();
-        const headerSize = 0x10 + this.files.length * 0x18;
-        const paddedStringTableSize = stringTable.length + (16 - ((headerSize + stringTable.length) % 16)) % 16;
-        
-        let offset = headerSize + paddedStringTableSize;
-        const fileEntries = [];
-
-        for (const file of this.files) {
-            fileEntries.push({
-                name: file.name,
-                offset: offset,
-                size: file.data.byteLength
-            });
-            offset += file.data.byteLength;
-        }
-
-        const header = new ArrayBuffer(headerSize + paddedStringTableSize);
-        const view = new DataView(header);
-        const bytes = new Uint8Array(header);
-
-        let pos = 0;
-        view.setUint32(pos, 0x50465330, false); pos += 4;
-        view.setUint32(pos, this.files.length, true); pos += 4;
-        view.setUint32(pos, paddedStringTableSize, true); pos += 4;
-        view.setUint32(pos, 0, true); pos += 4;
-
-        let stringPos = headerSize;
-        for (let i = 0; i < fileEntries.length; i++) {
-            const entry = fileEntries[i];
-            const relativeOffset = entry.offset - headerSize;
-            
-            view.setBigUint64(pos, BigInt(relativeOffset), true); pos += 8;
-            view.setBigUint64(pos, BigInt(entry.size), true); pos += 8;
-            view.setUint32(pos, stringPos - headerSize, true); pos += 4;
-            view.setUint32(pos, 0, true); pos += 4;
-
-            for (let j = 0; j < entry.name.length; j++) {
-                bytes[stringPos++] = entry.name.charCodeAt(j);
-            }
-            bytes[stringPos++] = 0;
-        }
-
-        const chunks = [new Uint8Array(header)];
-        for (const file of this.files) {
-            chunks.push(new Uint8Array(file.data));
-        }
-
-        return new Blob(chunks, { type: 'application/octet-stream' });
+    get headerSize() {
+        return 0x10 + this.files.length * 0x18 + this._paddedStringTableSize;
     }
 
-    buildStringTable() {
-        let str = '';
-        for (const file of this.files) {
-            str += file.name + '\0';
+    get _stringTable() {
+        return this.files.map(f => f.name).join('\0') + '\0';
+    }
+
+    get _paddedStringTableSize() {
+        const enc = new TextEncoder();
+        const names = this._stringTable;
+        const namesLen = enc.encode(names).length;
+        const rawSize = 0x10 + this.files.length * 0x18 + namesLen;
+        if (this.fixPadding) {
+            return namesLen + (0x20 - (rawSize % 0x20));
         }
-        return str;
+        const pad16 = (16 - (rawSize % 16)) % 16;
+        return namesLen + pad16;
+    }
+
+    buildHeader() {
+        const enc = new TextEncoder();
+        const names = this._stringTable;
+        const tableSize = this._paddedStringTableSize;
+        const namesLen = enc.encode(names).length;
+        const paddedBytes = tableSize > namesLen
+            ? new Uint8Array(tableSize)
+            : enc.encode(names);
+        if (tableSize > namesLen) {
+            paddedBytes.set(enc.encode(names), 0);
+            paddedBytes.fill(0, namesLen);
+        }
+        const size = this.headerSize;
+        const buf = new Uint8Array(size);
+        const v = new DataView(buf.buffer);
+
+        buf[0] = 0x50; buf[1] = 0x46; buf[2] = 0x53; buf[3] = 0x30;
+        v.setUint32(4, this.files.length, true);
+        v.setUint32(8, tableSize, true);
+        v.setUint32(12, 0, true);
+
+        let soff = 0;
+        for (let i = 0; i < this.files.length; i++) {
+            const f = this.files[i];
+            const pos = 0x10 + i * 0x18;
+            v.setBigUint64(pos, BigInt(f.offset), true);
+            v.setBigUint64(pos + 8, BigInt(f.size), true);
+            v.setUint32(pos + 16, soff, true);
+            v.setUint32(pos + 20, 0, true);
+            soff += enc.encode(f.name).length + 1;
+        }
+
+        buf.set(paddedBytes, 0x10 + this.files.length * 0x18);
+        return buf;
     }
 }
 
-export { PFS0Reader, PFS0Writer };
+export { PFS0, PFS0Writer };

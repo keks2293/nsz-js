@@ -1,5 +1,17 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-05-10)
+
+1. **Consolidated PFS0 writing into `pfs0.js`** — All PFS0 header building logic moved into `PFS0Writer` class in root `pfs0.js`. Removed duplicated inline header builders from `converter.js`, `nsz-convert.js`, `node/decompressor.js`. `node/fs/pfs0.js` `PFS0Writer` delegates to root.
+
+2. **PFS0 alignment: two modes matching Python nsz** — Default uses 16-byte alignment `(16 - n%16) % 16` (Python nsz default); `--fix-padding` uses 0x20 alignment via `0x20 - n%0x20` (Python's `align0x20`). Verified: JS default output is byte-identical to Python nsz output.
+
+3. **Fixed absolute offset bug in `node/decompressor.js:writeNSP`** — Was writing absolute file positions instead of offsets relative to header end. Fixed by `PFS0Writer` which correctly tracks relative offsets from 0.
+
+4. **Fixed `FileDescriptorReader.read` for Node v25** — `fs/promises` dropped the `read` export; switched to callback-based `fs.read` wrapped in Promise.
+
+5. **Verified JS output vs Python nsz** — Both default and `--fix-padding` modes produce byte-identical file data to Python nsz. Default mode output is 100% byte-identical. `--fix-padding` provides 0x20-aligned headers.
+
 ## ✅ Recent Changes (2026-05-09)
 
 1. **Node.js CLI rewritten for large files** — No more `fs.readFileSync`. Uses `FileDescriptorReader` for random access reads from file descriptor. Output written via `fs.writeSync` with positional writes. Works for files of any size (limited only by disk space). Handles NCZ, XCZ, and NSZ formats.
@@ -136,6 +148,6 @@
 - **All NCA data byte-identical** to Python nsz reference output
 - **AES-CTR implementation** verified against Node.js native `crypto.createCipheriv('aes-128-ctr')` — both are correct
 - **zstd CLI piping + Node.js native AES-CTR** confirmed to produce byte-identical output to the reference
-- **PFS0 header padding**: `--fix-padding` pads header to 16-byte boundary (528 bytes, matches reference); without it, header is minimal unpadded size (515 bytes). All file data is identical between modes. Use `--fix-padding` or toggle in UI to match Python nsz output size.
+- **PFS0 header padding**: Default uses 16-byte alignment (matching Python nsz). `--fix-padding` uses Python's `align0x20` (32-byte alignment, minimum 0x20 padding). All file data is identical between modes. Default mode output is byte-identical to Python nsz.
 - XCZ output is a flat HFS0 partition without full XCI header/metadata — enough for game loading but not a byte-for-byte copy of the original XCI structure.
 

@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { PFS0Writer as RootPFS0Writer } from '../../pfs0.js';
 
 export class PFS0 {
     constructor(buffer) {
@@ -57,59 +57,24 @@ export class PFS0 {
 }
 
 export class PFS0Writer {
-    constructor() {
+    constructor(fixPadding = true) {
+        this._writer = new RootPFS0Writer(fixPadding);
         this.files = [];
     }
 
     add(name, data) {
-        this.files.push({ name, data: data instanceof Buffer ? data : Buffer.from(data) });
+        const buf = data instanceof Buffer ? data : Buffer.from(data);
+        this.files.push({ name, data: buf });
+        this._writer.add(name, buf.length);
     }
 
     build() {
-        const stringTable = this.files.map(f => f.name).join('\0') + '\0';
-        const headerSize = 0x10 + this.files.length * 0x18 + stringTable.length;
-        const paddingSize = (16 - (headerSize % 16)) % 16;
-        const paddedHeaderSize = headerSize + paddingSize;
-
-        let fileOffset = paddedHeaderSize;
-        const entries = this.files.map(f => {
-            const entry = {
-                name: f.name,
-                offset: fileOffset,
-                size: f.data.length
-            };
-            fileOffset += f.data.length;
-            return entry;
-        });
-
-        const totalSize = fileOffset;
-        const output = Buffer.alloc(totalSize);
-
-        output.write('PFS0', 0);
-        output.writeUInt32LE(this.files.length, 4);
-        output.writeUInt32LE(stringTable.length + paddingSize, 8);
-        output.writeUInt32LE(0, 12);
-
-        const relativeOffsetBase = paddedHeaderSize;
-        let stringOffset = 0;
-
-        for (let i = 0; i < entries.length; i++) {
-            const entry = entries[i];
-            const pos = 0x10 + i * 0x18;
-            
-            output.writeBigUInt64LE(BigInt(entry.offset - relativeOffsetBase), pos);
-            output.writeBigUInt64LE(BigInt(entry.size), pos + 8);
-            output.writeUInt32LE(stringOffset, pos + 16);
-            output.writeUInt32LE(0, pos + 20);
-            
-            output.write(entry.name, 0x10 + entries.length * 0x18 + stringOffset);
-            stringOffset += Buffer.byteLength(entry.name) + 1;
+        const header = this._writer.buildHeader();
+        const output = Buffer.alloc(header.length + this._writer.files.reduce((s, f) => s + f.size, 0));
+        Buffer.from(header.buffer, header.byteOffset, header.byteLength).copy(output, 0);
+        for (let i = 0; i < this.files.length; i++) {
+            this.files[i].data.copy(output, header.length + this._writer.files[i].offset);
         }
-
-        for (const entry of entries) {
-            entry.data.copy(output, entry.offset);
-        }
-
         return output;
     }
 }
