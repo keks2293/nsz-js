@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'fs';
-import { PFS0 } from './pfs0.js';
-import { NCZDecompressor } from './ncz.js';
+import { PFS0 } from './fs/pfs0.js';
+import { NCZDecompressor } from './fs/ncz.js';
 import { sha256 } from './crypto/sha256.js';
 
 async function convertNSZtoNSP(inputPath) {

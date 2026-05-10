@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import fs from 'fs';
-import { PFS0, PFS0Writer } from './pfs0.js';
-import { NCZDecompressor, FileDescriptorReader, BufferReader } from './ncz.js';
+import { PFS0, PFS0Writer } from './fs/pfs0.js';
+import { NCZDecompressor, FileDescriptorReader, BufferReader } from './fs/ncz.js';
 import { KeysParser } from './keys.js';
 import { sha256 } from './crypto/sha256.js';
 
@@ -122,7 +122,7 @@ async function convertNCZ(inReader, inputFd, inputPath, outputPath, keys) {
 
 async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
     console.log('Detected XCZ file');
-    const { XCIReader, HFS0Writer, XCIWriter } = await import('./xci.js');
+    const { XCIReader, HFS0Writer, XCIWriter } = await import('./fs/xci.js');
     const outPath = outputPath || inputPath.replace(/\.xcz$/i, '.xci');
     console.log(`Output: ${outPath}`);
 

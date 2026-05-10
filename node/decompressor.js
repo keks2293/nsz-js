@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { sha256 } from '../crypto/unified.js';
-import { PFS0, PFS0Writer } from '../pfs0.js';
-import { NCZDecompressor } from '../ncz.js';
+import { PFS0, PFS0Writer } from '../fs/pfs0.js';
+import { NCZDecompressor } from '../fs/ncz.js';
 import { Keys } from './keys.js';
 import { extractHashes } from './fileExistingChecks.js';
 import { changeExtension } from './pathTools.js';

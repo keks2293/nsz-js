@@ -2,7 +2,7 @@
 
 ## ✅ Recent Changes (2026-05-10)
 
-1. **Consolidated PFS0 writing into `pfs0.js`** — All PFS0 header building logic moved into `PFS0Writer` class in root `pfs0.js`. Removed duplicated inline header builders from `converter.js`, `nsz-convert.js`, `node/decompressor.js`.
+1. **Consolidated PFS0 writing into `pfs0.js`** — All PFS0 header building logic moved into `PFS0Writer` class. Removed duplicated inline header builders from `converter.js`, `nsz-convert.js`, `node/decompressor.js`.
 
 2. **PFS0 alignment: two modes matching Python nsz** — Default uses 16-byte alignment `(16 - n%16) % 16` (Python nsz default); `--fix-padding` uses 0x20 alignment via `0x20 - n%0x20` (Python's `align0x20`). Verified: JS default output is byte-identical to Python nsz output.
 
@@ -11,6 +11,8 @@
 4. **Fixed `FileDescriptorReader.read` for Node v25** — `fs/promises` dropped the `read` export; switched to callback-based `fs.read` wrapped in Promise.
 
 5. **Verified JS output vs Python nsz** — Both default and `--fix-padding` modes produce byte-identical file data to Python nsz. Default mode output is 100% byte-identical. `--fix-padding` provides 0x20-aligned headers.
+
+6. **Moved modules to `fs/` directory** — `pfs0.js`, `ncz.js`, `xci.js`, `ticket.js` moved from root to `fs/` matching Python nsz's `Fs/` layout. Removed unused `node/fs/` directory. All imports updated.
 
 ## ✅ Recent Changes (2026-05-09)
 
