@@ -7,7 +7,7 @@ A pure JavaScript implementation for converting Nintendo Switch NSZ (compressed 
 - **Pure JavaScript**: No server-side processing required
 - **Browser-based**: Works entirely in the browser with File System Access API
 - **Zstandard decompression**: Full support for both streaming and block compression
-- **NCA encryption**: Supports CTR, XTS, and BKTR encryption modes
+- **NCA encryption**: Supports CTR and BKTR encryption modes
 - **Integrity verification**: Validates NCA file hashes against CNMT records
 - **Large file support**: Streaming decompression for files up to 8GB+
 - **Batch processing**: Process multiple NSZ files at once
@@ -25,9 +25,7 @@ A pure JavaScript implementation for converting Nintendo Switch NSZ (compressed 
 ### Node.js Version
 
 ```bash
-cd node
-npm install
-node nsz.js -d "path/to/file.nsz" -o "output/directory"
+node nsz-cli.js <input> [output] [keys.txt] [-p]
 ```
 
 ## Architecture
@@ -70,18 +68,18 @@ nsz-js/
 - **index.html** - Main web UI with drag-and-drop support, progress bar, and log display
 - **main.js** - UI controller handling file selection, drag-drop, conversion triggers, and progress updates
 - **converter.js** - Core converter class `NSZConverter` that orchestrates NCZ decompression, PFS0 rebuilding, and hash verification
-- **ncz.js** - `NCZDecompressor` class for decompressing NCZ files with support for section-based, block-based (NCZBLOCK), and streaming compression
-- **pfs0.js** - `PFS0Reader` and `PFS0Writer` classes for parsing and building PFS0 containers
+- **fs/pfs0.js** - `PFS0Reader` and `PFS0Writer` classes for parsing and building PFS0 containers
+- **fs/ncz.js** - `NCZDecompressor` class for decompressing NCZ files with section-based, block-based (NCZBLOCK), and streaming compression. Contains DataReader hierarchy (`DataReader`, `FileDescriptorReader`, `BufferReader`, `FileSliceReader`, `ChunkedBufferReader`)
+- **fs/xci.js** - `XCIReader`, `XCIWriter`, `HFS0Reader`, and `HFS0Writer` for XCI/HFS0 container support
+- **fs/ticket.js** - Classes for parsing Ticket, CNMT (Content Metadata), NCA headers, and BKTR structures
 - **keys.js** - `KeysParser` class for parsing prod.keys files and deriving title KEKs and key area keys
-- **ticket.js** - Classes for parsing Ticket, CNMT (Content Metadata), NCA headers, and BKTR structures. Also exports `sha256`
-- **xci.js** - `XCIReader` and `HFS0Reader` for reading XCI game card images
 
 ### Crypto Files
 
 - **crypto/aes128.js** - Lightweight AES-128 implementation with ECB and CBC modes
 - **crypto/aesctr.mjs** - AES-CTR encryption/decryption (Node.js native `crypto.createCipheriv` or browser Web Crypto API)
-- **crypto/aesxts.js** - AES-XTS mode for NCA section decryption
 - **crypto/sha256.js** - Pure JavaScript SHA-256 implementation
+- **crypto/unified.js** - Unified crypto wrapper (provides sha256, crc32 for both Node.js and browser)
 - **crypto/zstd.js** - Zstandard decompression using zstddec WASM library
 
 ### Dependencies
@@ -104,31 +102,33 @@ To update dependencies: `npm install zstddec@x.x.x` then copy files to `static/`
 
 ### Node.js Files
 
-- **node/nsz.js** - CLI entry point for Node.js version
-- **node/decompressor.js** - Main decompression logic for Node.js
 - **node/keys.js** - Key management using Node.js crypto module, includes `Keys`, `AESECB`, `AESCTR`, and `crc32`
 - **node/parseArguments.js** - Command-line argument parser
-- **node/pathTools.js** - Path manipulation utilities
-- **node/fileExistingChecks.js** - File existence and validation checks
-(node/fs/ directory removed — unused, all code imports from root-level modules directly)
+- **node/pathTools.js** - Path utility (`changeExtension` only — trimmed from 10 exports)
 
 ### Test Files
 
-- **test_convert.js** - Tests the NSZ to NSP conversion process
-- **test_aes_manual.js** - Manual AES encryption/decryption tests
-- **test_aes_node.js** - Node.js AES functionality tests
-- **test_aes_ctr.py** - Python script for AES-CTR verification
-- **counter-test.js** - Tests counter mode operations
-- **test_aes_simple.html** - Simple AES test page for browser
-- **test_ctr.html** - CTR mode test page
-- **test_ctr_browser.html** - Browser-based CTR test with UI
-- **test_final.html** - Final integration test page
+- **test_vector.mjs** - AES-CTR keystream test vector verification (self-contained)
+- **test_aesctr.mjs** - AES-CTR seek + encrypt test (self-contained)
+- **test_aes_manual.cjs** - Standalone AES-CTR test using Node.js crypto (self-contained)
+- **test-ncz.mjs** - NCZ decompressor component tests (file-dependent tests skip gracefully)
+- **test_convert.mjs** - Full NSZ→NSP conversion pipeline (requires NSZ file)
+- **test_decompress.mjs** - Byte-level decompression comparison against reference NSP
+- **test_ticket_keys.mjs** - Ticket key and section analysis tool
+- **test_aes_ctr.py** - Python reference script for AES-CTR verification
+- **test_browser.html** - AES-CTR keystream test for browser (open in browser)
 
 ## File Format Support
 
-- **Input**: `.nsz` (compressed NSP container)
-- **Output**: `.nsp` (uncompressed NSP container)
-- **Internal**: `.ncz` (compressed NCA files with NCZSECTN header)
+| Input | Output | Description |
+|-------|--------|-------------|
+| `.nsz` | `.nsp` | Compressed NSP container |
+| `.ncz` | `.nca` | Standalone compressed NCA file |
+| `.xcz` | `.xci` | Compressed XCI (game card) image |
+
+### Internal formats
+
+- `.ncz` (compressed NCA files with NCZSECTN header)
 
 ## Compression Types
 
@@ -139,7 +139,6 @@ To update dependencies: `npm install zstddec@x.x.x` then copy files to `static/`
 ## NCA Encryption Types
 
 - **Type 1 (CRYPTO_NONE)**: No encryption
-- **Type 2 (CRYPTO_XTS)**: AES-XTS mode
 - **Type 3 (CRYPTO_CTR)**: AES-CTR mode
 - **Type 4 (CRYPTO_BKTR)**: AES-CTR with BKTR relocation tables
 - **Type 0x3041434E (CRYPTO_NCA0)**: Legacy NCA0 format (no crypto)
