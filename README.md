@@ -1,6 +1,6 @@
-# NSZ to NSP Converter (JavaScript)
+# NSZ to NSP Converter (Local)
 
-A pure JavaScript implementation for converting Nintendo Switch NSZ (compressed NSP) files to NSP format. Works entirely in the browser or Node.js.
+A **100% local** pure JavaScript converter for Nintendo Switch compressed game files (NSZ/NCZ/XCZ). Everything runs on your machine — no uploads, no servers, no cloud.
 
 ## Features
 
@@ -20,7 +20,7 @@ A pure JavaScript implementation for converting Nintendo Switch NSZ (compressed 
 1. Open `index.html` in a modern web browser
 2. Drag and drop NSZ files or click to select
 3. (Optional) Load default keys or paste your own prod.keys
-4. Click "Convert to NSP" to decompress
+4. Click "Convert" to decompress
 
 ### Node.js Version
 
