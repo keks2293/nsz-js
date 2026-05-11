@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NSZ to NSP Converter</title>
+    <title>NSZ to NSP Converter (Local)</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <!-- zstddec.mjs is imported via ES module in crypto/zstd.js and ncz.js -->
     <style>
@@ -303,11 +303,11 @@
 <body>
     <div class="container">
         <h1>NSZ to NSP Converter</h1>
-        <p class="subtitle">Convert Nintendo Switch compressed games to NSP format</p>
+        <p class="subtitle">100% local — no uploads, no servers, everything runs in your browser</p>
         
         <div class="drop-zone" id="dropZone">
             <div class="drop-zone-icon">📦</div>
-            <div class="drop-zone-text">Drop NSZ files here or click to select</div>
+            <div class="drop-zone-text">Drop files here or click to select</div>
             <div class="drop-zone-hint">.nsz/.nspz/.nsx → .nsp &nbsp;|&nbsp; .ncz → .nca &nbsp;|&nbsp; .xcz → .xci (multi-file supported)</div>
             <input type="file" id="fileInput" multiple accept=".nsz,.ncz,.xcz">
         </div>
@@ -331,7 +331,7 @@
         
         <div class="log-container" id="logContainer"></div>
         
-        <button class="btn" id="convertBtn" disabled>Convert to NSP</button>
+        <button class="btn" id="convertBtn" disabled>Convert</button>
         <div style="display: flex; gap: 10px; margin-top: 10px;">
             <button class="btn btn-secondary" id="clearBtn" style="display: none; flex: 1;">Clear All</button>
             <button class="btn btn-secondary" id="fixPaddingBtn" style="flex: 1;">Fix Padding: OFF</button>
