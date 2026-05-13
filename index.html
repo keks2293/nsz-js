@@ -337,6 +337,25 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+        @media (max-width: 600px) {
+            .mode-section {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+                padding: 12px 14px;
+            }
+            .mode-options {
+                flex-wrap: wrap;
+                width: 100%;
+            }
+            .mode-btn {
+                flex: 1 1 auto;
+                text-align: center;
+                padding: 8px 6px;
+                font-size: 12px;
+                min-width: 0;
+            }
+        }
     </style>
 </head>
 <body>
