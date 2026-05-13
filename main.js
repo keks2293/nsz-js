@@ -78,6 +78,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const status = document.getElementById('status');
 
     let fixPadding = false;
+    let downloadMode = 'auto';
 
     const converter = new NSZConverter();
     const files = [];
@@ -240,6 +241,18 @@ window.addEventListener('DOMContentLoaded', async () => {
         addLog('info', `Fix Padding ${fixPadding ? 'enabled' : 'disabled'}`);
     });
 
+    document.getElementById('modeOptions').addEventListener('click', (e) => {
+        const label = e.target.closest('.mode-btn');
+        if (!label) return;
+        const radio = label.querySelector('input');
+        if (!radio) return;
+        radio.checked = true;
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        label.classList.add('active');
+        downloadMode = radio.value;
+        addLog('info', `Download mode: ${radio.value}`);
+    });
+
     convertBtn.addEventListener('click', async () => {
         if (files.length === 0) return;
 
@@ -259,7 +272,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
         let directoryHandle = null;
 
-        if (!isMobile && 'showDirectoryPicker' in window) {
+        if (downloadMode !== 'sw' && downloadMode !== 'blob' && !isMobile && 'showDirectoryPicker' in window) {
             try {
                 directoryHandle = await window.showDirectoryPicker({
                     startIn: 'downloads'
@@ -287,7 +300,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                         : file.name.replace(/\.nsz$/i, '.nsp');
 
                 let writable = null;
-                if (directoryHandle) {
+                if (downloadMode === 'blob') {
+                    // skip FSA and SW entirely
+                } else if (directoryHandle) {
                     try {
                         const fileHandle = await directoryHandle.getFileHandle(outputName, { create: true });
                         writable = await fileHandle.createWritable();
@@ -297,7 +312,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 }
 
                 // Fallback: try Service Worker streaming download
-                if (!writable && 'serviceWorker' in navigator && location.protocol !== 'file:') {
+                if (!writable && downloadMode !== 'fsa' && 'serviceWorker' in navigator && location.protocol !== 'file:') {
                     try {
                         const dl = new SWDownloader(outputName);
                         await dl.start();
