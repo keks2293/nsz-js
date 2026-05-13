@@ -13,6 +13,13 @@ class SWDownloader {
         this.sw = reg.active;
         if (!this.sw) throw new Error('No active service worker');
 
+        // Ensure this page is controlled by the SW so fetch events are intercepted
+        if (!navigator.serviceWorker.controller) {
+            await new Promise(resolve => {
+                navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true });
+            });
+        }
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 navigator.serviceWorker.removeEventListener('message', onMessage);
@@ -33,12 +40,16 @@ class SWDownloader {
     }
 
     triggerDownload() {
-        const a = document.createElement('a');
-        a.href = this.streamUrl + '?name=' + encodeURIComponent(this.outputName);
-        a.download = this.outputName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        const url = this.streamUrl + '?name=' + encodeURIComponent(this.outputName);
+        if (!window.open(url, '_blank')) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
     }
 
     async write({ type, position, data }) {
@@ -301,8 +312,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 
                 let writable = null;
                 if (downloadMode === 'blob') {
-                    // skip FSA and SW entirely
-                } else if (directoryHandle) {
+                    // Blob only — skip FSA and SW
+                } else if (directoryHandle && (downloadMode === 'auto' || downloadMode === 'fsa')) {
                     try {
                         const fileHandle = await directoryHandle.getFileHandle(outputName, { create: true });
                         writable = await fileHandle.createWritable();
@@ -311,8 +322,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                     }
                 }
 
-                // Fallback: try Service Worker streaming download
-                if (!writable && downloadMode !== 'fsa' && 'serviceWorker' in navigator && location.protocol !== 'file:') {
+                // Try Service Worker streaming (modes: auto, sw)
+                if (!writable && (downloadMode === 'auto' || downloadMode === 'sw') && 'serviceWorker' in navigator && location.protocol !== 'file:') {
                     try {
                         const dl = new SWDownloader(outputName);
                         await dl.start();
