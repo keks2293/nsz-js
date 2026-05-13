@@ -285,6 +285,45 @@
         .remove-btn:hover {
             background: #c0392b;
         }
+        .mode-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding: 15px 20px;
+            background: #f8f9fa;
+            border-radius: 12px;
+        }
+        .mode-label {
+            font-size: 14px;
+            color: #666;
+            font-weight: 500;
+        }
+        .mode-options {
+            display: flex;
+            gap: 6px;
+        }
+        .mode-btn {
+            padding: 6px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            background: #e9ecef;
+            color: #495057;
+            transition: all 0.2s;
+            user-select: none;
+        }
+        .mode-btn:hover {
+            background: #dee2e6;
+        }
+        .mode-btn.active {
+            background: #3498db;
+            color: white;
+        }
+        .mode-btn input {
+            display: none;
+        }
         .loading {
             display: inline-block;
             width: 20px;
@@ -314,7 +353,27 @@
         
         <div class="file-list" id="fileList"></div>
         
-        
+        <div class="mode-section">
+            <div class="mode-label">Download Mode:</div>
+            <div class="mode-options" id="modeOptions">
+                <label class="mode-btn active" data-mode="auto">
+                    <input type="radio" name="mode" value="auto" checked>
+                    <span>Auto</span>
+                </label>
+                <label class="mode-btn" data-mode="fsa">
+                    <input type="radio" name="mode" value="fsa">
+                    <span>File System</span>
+                </label>
+                <label class="mode-btn" data-mode="sw">
+                    <input type="radio" name="mode" value="sw">
+                    <span>Stream</span>
+                </label>
+                <label class="mode-btn" data-mode="blob">
+                    <input type="radio" name="mode" value="blob">
+                    <span>Blob</span>
+                </label>
+            </div>
+        </div>
         
         <div class="file-info" id="fileInfo">
             <h3>📋 File Information</h3>
