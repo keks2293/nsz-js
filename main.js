@@ -283,7 +283,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
         let directoryHandle = null;
 
-        if (downloadMode !== 'sw' && downloadMode !== 'blob' && (downloadMode === 'fsa' || !isMobile) && 'showDirectoryPicker' in window) {
+        if ('showDirectoryPicker' in window && (downloadMode === 'fsa' || (downloadMode === 'auto' && !isMobile))) {
             try {
                 directoryHandle = await window.showDirectoryPicker({
                     startIn: 'downloads'
