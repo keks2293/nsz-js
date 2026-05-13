@@ -1,5 +1,58 @@
 import { NSZConverter } from './converter.js';
 
+class SWDownloader {
+    constructor(outputName) {
+        const base = location.pathname.substring(0, location.pathname.lastIndexOf('/') + 1);
+        this.streamUrl = base + 'download/' + crypto.randomUUID();
+        this.outputName = outputName;
+        this.sw = null;
+    }
+
+    async start() {
+        const reg = await navigator.serviceWorker.ready;
+        this.sw = reg.active;
+        if (!this.sw) throw new Error('No active service worker');
+
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                navigator.serviceWorker.removeEventListener('message', onMessage);
+                reject(new Error('SW download start timed out'));
+            }, 5000);
+
+            const onMessage = (e) => {
+                if (e.data.type === 'ready' && e.data.url === this.streamUrl) {
+                    clearTimeout(timeout);
+                    navigator.serviceWorker.removeEventListener('message', onMessage);
+                    resolve();
+                }
+            };
+
+            navigator.serviceWorker.addEventListener('message', onMessage);
+            this.sw.postMessage({ type: 'start', url: this.streamUrl, fileName: this.outputName });
+        });
+    }
+
+    triggerDownload() {
+        const a = document.createElement('a');
+        a.href = this.streamUrl + '?name=' + encodeURIComponent(this.outputName);
+        a.download = this.outputName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    }
+
+    async write({ type, position, data }) {
+        if (type !== 'write' || !this.sw) return;
+        const view = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
+        const copy = view.slice(0);
+        this.sw.postMessage({ type: 'data', url: this.streamUrl, chunk: copy.buffer }, [copy.buffer]);
+    }
+
+    async close() {
+        if (this.sw) this.sw.postMessage({ type: 'end', url: this.streamUrl });
+    }
+}
+
 window.addEventListener('error', (e) => {
     console.error('Global error:', e.error);
 });
@@ -201,7 +254,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         await loadDefaultKeys();
 
         // Android Chrome: createWritable() has a known bug ("cached state changed"),
-        // so skip directory picker entirely and use Blob download
+        // so skip directory picker entirely and use SW streaming or Blob download
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
         let directoryHandle = null;
@@ -217,8 +270,6 @@ window.addEventListener('DOMContentLoaded', async () => {
                     addLog('warning', 'File System Access not available: ' + e.message);
                 }
             }
-        } else if (isMobile) {
-            addLog('info', 'Mobile device detected, using Blob download');
         }
 
         for (let i = 0; i < files.length; i++) {
@@ -241,7 +292,20 @@ window.addEventListener('DOMContentLoaded', async () => {
                         const fileHandle = await directoryHandle.getFileHandle(outputName, { create: true });
                         writable = await fileHandle.createWritable();
                     } catch (e) {
-                        addLog('warning', 'Failed to create file: ' + e.message + ' — falling back to Blob download');
+                        addLog('warning', 'Failed to create file: ' + e.message);
+                    }
+                }
+
+                // Fallback: try Service Worker streaming download
+                if (!writable && 'serviceWorker' in navigator && location.protocol !== 'file:') {
+                    try {
+                        const dl = new SWDownloader(outputName);
+                        await dl.start();
+                        dl.triggerDownload();
+                        writable = dl;
+                        addLog('info', 'Using Service Worker streaming download');
+                    } catch (e) {
+                        addLog('info', 'SW download not available: ' + e.message);
                     }
                 }
 
@@ -307,5 +371,16 @@ window.addEventListener('DOMContentLoaded', async () => {
     await converter.init().catch(e => {
         addLog('warning', 'Zstd init failed: ' + e.message);
     });
+
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+        try {
+            await navigator.serviceWorker.register('sw.js');
+            await navigator.serviceWorker.ready;
+            addLog('info', 'Service Worker ready for streaming download');
+        } catch (e) {
+            addLog('info', 'Service Worker not available: ' + e.message);
+        }
+    }
+
     addLog('info', 'Ready. Drop NSZ files to begin.');
 });

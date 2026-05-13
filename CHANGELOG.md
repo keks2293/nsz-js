@@ -6,7 +6,7 @@
 
 2. **NCZ→NCA streaming write support** — Added `writable` path to `decompressNCZtoNCA`. Uses NCZ decompressor's `writeChunk` callback with correct absolute positions for random-access `createWritable` writes. Memory path unchanged (NCZ needs random-access, not sequential).
 
-3. **Android mobile detection** — Skips `showDirectoryPicker()` entirely on mobile devices (Android Chrome `createWritable()` is broken — "cached state changed" error). Falls directly to Blob download path.
+3. **Mobile: SW streaming download instead of Blob** — On mobile (broken `createWritable`), registers a Service Worker at `sw.js` that creates a `ReadableStream`. Data chunks are sent to the SW via `postMessage` with zero-copy `Transferable` buffers and enqueued into the stream. The browser download manager consumes the stream immediately — peak memory drops from file-size to chunk-size. Falls back to Blob download if SW unavailable.
 
 ## ✅ Recent Changes (2026-05-10)
 
