@@ -8,6 +8,8 @@
 
 3. **Mobile: SW streaming download instead of Blob** — On mobile (broken `createWritable`), registers a Service Worker at `sw.js` that creates a `ReadableStream`. Data chunks are sent to the SW via `postMessage` with zero-copy `Transferable` buffers and enqueued into the stream. The browser download manager consumes the stream immediately — peak memory drops from file-size to chunk-size. Falls back to Blob download if SW unavailable.
 
+4. **Download mode switch** — UI radio buttons in `index.html` let the user pick: Auto (FSA→SW→Blob), File System (force FSA), Stream (force SW), Blob (force memory download). Mode state in `downloadMode` variable in `main.js`.
+
 ## ✅ Recent Changes (2026-05-10)
 
 1. **Consolidated PFS0 writing into `pfs0.js`** — All PFS0 header building logic moved into `PFS0Writer` class. Removed duplicated inline header builders from `converter.js`, `nsz-cli.js`, `node/decompressor.js`.
