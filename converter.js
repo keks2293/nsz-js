@@ -258,14 +258,29 @@ class NSZConverter {
     }
 
     async decompressNCZtoNCA(file, options = {}) {
-        const { onProgress = () => {}, onLog = () => {} } = options;
+        const { onProgress = () => {}, onLog = () => {}, writable = null } = options;
         const reader = new FileSliceReader(file);
         const decompressor = new NCZDecompressor(reader, this.keys);
-        const ncaData = await decompressor.decompress();
+        const outputName = file.name.replace(/\.ncz$/i, '.nca');
+
+        if (writable) {
+            onLog('info', 'Using streaming output (File System Access)');
+            let maxPos = 0;
+            await decompressor.decompress(null, async (chunk, position) => {
+                await writable.write({ type: 'write', position, data: chunk });
+                const end = position + chunk.byteLength;
+                if (end > maxPos) maxPos = end;
+            });
+            onProgress(1.0, 'Done!');
+            onLog('success', `Output: ${outputName} (${this.formatBytes(maxPos)})`);
+            return { blob: null, name: outputName, size: maxPos, writable: true };
+        }
+
+        onLog('info', 'Using memory download');
+        const ncaData = await decompressor.decompress(onProgress);
         const hash = sha256(ncaData);
         onLog('info', `NCA SHA256: ${hash}`);
         onProgress(1.0, 'Done!');
-        const outputName = file.name.replace(/\.ncz$/i, '.nca');
         const blob = new Blob([ncaData], { type: 'application/octet-stream' });
         return { blob, name: outputName, size: ncaData.length };
     }
@@ -474,20 +489,16 @@ class NSZConverter {
 
         const totalDataSize = writer.files.reduce((s, f) => s + f.size, 0);
         const totalSize = header.length + totalDataSize;
-        const outputBuffer = new Uint8Array(totalSize);
 
-        outputBuffer.set(header, 0);
-
-        let offset = header.length;
+        const parts = [header];
         for (let i = 0; i < writer.files.length; i++) {
             const data = files[i].data;
             const arr = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-            outputBuffer.set(arr, offset);
-            offset += arr.length;
-            onProgress(0.85 + (0.15 * (offset - header.length) / totalDataSize), `Building file ${i + 1}/${writer.files.length}...`);
+            parts.push(arr);
+            onProgress(0.85 + (0.15 * (i + 1) / writer.files.length), `Building file ${i + 1}/${writer.files.length}...`);
         }
 
-        const blob = new Blob([outputBuffer], { type: 'application/octet-stream' });
+        const blob = new Blob(parts, { type: 'application/octet-stream' });
         onProgress(1.0, 'Done!');
         return { blob, name: outputName, size: totalSize };
     }

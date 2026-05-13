@@ -1,5 +1,13 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-05-13)
+
+1. **Blob parts instead of giant Uint8Array** — `buildPFS0Memory` now passes file data as individual Blob parts instead of allocating a contiguous `new Uint8Array(totalSize)` and copying. Eliminates peak 2× memory overhead during PFS0 container building.
+
+2. **NCZ→NCA streaming write support** — Added `writable` path to `decompressNCZtoNCA`. Uses NCZ decompressor's `writeChunk` callback with correct absolute positions for random-access `createWritable` writes. Memory path unchanged (NCZ needs random-access, not sequential).
+
+3. **Android `showSaveFilePicker` fallback** — When `createWritable()` fails on `showDirectoryPicker()` (known Android Chrome bug: "cached state changed"), tries `showSaveFilePicker()` as fallback for NCZ→NCA single-file output. Multi-file outputs fall to Blob download.
+
 ## ✅ Recent Changes (2026-05-10)
 
 1. **Consolidated PFS0 writing into `pfs0.js`** — All PFS0 header building logic moved into `PFS0Writer` class. Removed duplicated inline header builders from `converter.js`, `nsz-cli.js`, `node/decompressor.js`.
