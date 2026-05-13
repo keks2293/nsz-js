@@ -236,6 +236,23 @@ window.addEventListener('DOMContentLoaded', async () => {
                         writable = await fileHandle.createWritable();
                     } catch (e) {
                         addLog('warning', 'Failed to create file in directory: ' + e.message);
+                        if (fileType === 'ncz') {
+                            addLog('info', 'Trying showSaveFilePicker as fallback...');
+                            try {
+                                const fileHandle = await window.showSaveFilePicker({
+                                    suggestedName: outputName,
+                                    startIn: 'downloads'
+                                });
+                                writable = await fileHandle.createWritable();
+                                directoryHandle = null;
+                            } catch (e2) {
+                                if (e2.name !== 'AbortError') {
+                                    addLog('warning', 'showSaveFilePicker also failed, falling back to Blob download: ' + e2.message);
+                                }
+                            }
+                        } else {
+                            addLog('info', 'Falling back to Blob download');
+                        }
                     }
                 }
 
@@ -245,7 +262,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                         onProgress: (progress, text) => {
                             updateProgress((i + progress) / files.length, text);
                         },
-                        onLog: addLog
+                        onLog: addLog,
+                        writable
                     });
                 } else if (fileType === 'xcz') {
                     result = await converter.decompressXCZtoXCI(file, {
