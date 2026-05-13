@@ -6,7 +6,7 @@
 
 2. **NCZ→NCA streaming write support** — Added `writable` path to `decompressNCZtoNCA`. Uses NCZ decompressor's `writeChunk` callback with correct absolute positions for random-access `createWritable` writes. Memory path unchanged (NCZ needs random-access, not sequential).
 
-3. **Android `showSaveFilePicker` fallback** — When `createWritable()` fails on `showDirectoryPicker()` (known Android Chrome bug: "cached state changed"), tries `showSaveFilePicker()` as fallback for NCZ→NCA single-file output. Multi-file outputs fall to Blob download.
+3. **Android `showSaveFilePicker` fallback** — When `createWritable()` fails on `showDirectoryPicker()` (known Android Chrome bug: "cached state changed"), tries `showSaveFilePicker()` as fallback for all output types (single file per picker call). Multiple files per batch prompt separately.
 
 ## ✅ Recent Changes (2026-05-10)
 
