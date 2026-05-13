@@ -2,8 +2,8 @@ import { NSZConverter } from './converter.js';
 
 class SWDownloader {
     constructor(outputName) {
-        const base = location.pathname.substring(0, location.pathname.lastIndexOf('/') + 1);
-        this.streamUrl = base + 'download/' + crypto.randomUUID();
+        const base = location.pathname.substring(0, location.pathname.lastIndexOf('/') + 1) || '/';
+        this.streamUrl = (base + 'download/' + crypto.randomUUID()).replace(/\/+/g, '/');
         this.outputName = outputName;
         this.sw = null;
     }
