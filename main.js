@@ -200,9 +200,13 @@ window.addEventListener('DOMContentLoaded', async () => {
         addLog('info', 'Starting conversion...');
         await loadDefaultKeys();
 
+        // Android Chrome: createWritable() has a known bug ("cached state changed"),
+        // so skip directory picker entirely and use Blob download
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
         let directoryHandle = null;
 
-        if ('showDirectoryPicker' in window) {
+        if (!isMobile && 'showDirectoryPicker' in window) {
             try {
                 directoryHandle = await window.showDirectoryPicker({
                     startIn: 'downloads'
@@ -213,6 +217,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                     addLog('warning', 'File System Access not available: ' + e.message);
                 }
             }
+        } else if (isMobile) {
+            addLog('info', 'Mobile device detected, using Blob download');
         }
 
         for (let i = 0; i < files.length; i++) {
@@ -235,20 +241,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         const fileHandle = await directoryHandle.getFileHandle(outputName, { create: true });
                         writable = await fileHandle.createWritable();
                     } catch (e) {
-                        addLog('warning', 'Failed to create file in directory: ' + e.message);
-                        addLog('info', 'Trying showSaveFilePicker as fallback...');
-                        try {
-                            const fileHandle = await window.showSaveFilePicker({
-                                suggestedName: outputName,
-                                startIn: 'downloads'
-                            });
-                            writable = await fileHandle.createWritable();
-                            directoryHandle = null;
-                        } catch (e2) {
-                            if (e2.name !== 'AbortError') {
-                                addLog('warning', 'showSaveFilePicker also failed, falling back to Blob download: ' + e2.message);
-                            }
-                        }
+                        addLog('warning', 'Failed to create file: ' + e.message + ' — falling back to Blob download');
                     }
                 }
 
