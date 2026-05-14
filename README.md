@@ -46,7 +46,6 @@ nsz-js/
 │   ├── aes128.js       # AES-128 ECB/CBC implementation
 │   ├── aesctr.mjs      # AES-CTR mode (Node.js native crypto / Web Crypto API)
 │   ├── sha256.js       # SHA-256 hash function
-│   ├── unified.js      # Unified crypto wrapper (Node.js / pure JS)
 │   └── zstd.js         # Zstandard decompression (uses zstddec WASM)
 ├── static/             # Static dependencies for browser (offline use)
 │   ├── zstddec.mjs     # WASM-based zstd decompression
@@ -75,7 +74,6 @@ nsz-js/
 - **crypto/aes128.js** - Lightweight AES-128 implementation with ECB and CBC modes
 - **crypto/aesctr.mjs** - AES-CTR encryption/decryption (Node.js native `crypto.createCipheriv` or browser Web Crypto API)
 - **crypto/sha256.js** - Pure JavaScript SHA-256 implementation
-- **crypto/unified.js** - Unified crypto wrapper (provides sha256, crc32 for both Node.js and browser)
 - **crypto/zstd.js** - Zstandard decompression using zstddec WASM library
 
 ### Dependencies
