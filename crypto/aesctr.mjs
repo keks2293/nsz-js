@@ -9,7 +9,8 @@ let useNodeCrypto = false;
 let nodeCrypto = null;
 
 if (isNode) {
-    nodeCrypto = await import('crypto');
+    const cryptoModule = await import('crypto');
+    nodeCrypto = cryptoModule.default || cryptoModule;
     useNodeCrypto = true;
 } else if (typeof crypto === 'undefined' || !crypto.subtle || typeof crypto.subtle.encrypt !== 'function') {
     throw new Error('Web Crypto API not available. Use a modern browser with HTTPS or localhost.');
@@ -61,8 +62,7 @@ class AESCTR {
                 iv[j] = tmp & 0xff;
                 tmp >>>= 8;
             }
-            const c = nodeCrypto.default || nodeCrypto;
-            this._cipher = c.createCipheriv('aes-128-ctr', this.key, iv);
+            this._cipher = nodeCrypto.createCipheriv('aes-128-ctr', this.key, iv);
         }
         this._nextBlockIdx = blockIdx + Math.ceil(data.length / 16);
         this.blockIndex = this._nextBlockIdx;
