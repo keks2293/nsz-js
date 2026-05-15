@@ -30,12 +30,6 @@ class ZstdDecompressor {
         return sharedDecoder.decode(data, 0);
     }
 
-    static async decompressStreaming(data, callback) {
-        await ZstdDecompressor.load();
-        if (!sharedDecoder) throw new Error('zstddec not loaded');
-        const decompressed = sharedDecoder.decode(data, 0);
-        callback(decompressed);
-    }
 }
 
 export { ZstdDecompressor };

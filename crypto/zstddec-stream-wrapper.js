@@ -39,6 +39,7 @@ export async function* decodeStream(readChunk) {
                 mv.setInt32(outP + SZ_P, outSize, true);
                 mv.setInt32(outP + offPos, 0, true);
                 ret = $.ZSTD_decompressStream(dctx, outP, inP);
+                if (ret < 0) throw new Error(`ZSTD_decompressStream failed: ${ret}`);
                 mv = memView(instance);
                 const outputPos = mv.getUint32(outP + offPos, true);
                 yield new Uint8Array(instance.exports.memory.buffer, outBuf, outputPos);
