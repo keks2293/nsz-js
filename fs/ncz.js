@@ -446,7 +446,9 @@ class NCZDecompressor {
             while (toRead > 0) {
                 const size = Math.min(toRead, READ_CHUNK_SIZE);
                 const chunk = await this.reader.read(pos, size);
-                proc.stdin.write(Buffer.from(chunk));
+                if (!proc.stdin.write(Buffer.from(chunk))) {
+                    await new Promise(r => proc.stdin.once('drain', r));
+                }
                 pos += size;
                 toRead -= size;
             }
