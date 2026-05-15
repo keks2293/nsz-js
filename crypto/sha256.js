@@ -98,7 +98,6 @@ export class SHA256 {
     }
 
     hexdigest() {
-        const savedH = [...this.h];
         const savedBuf = [...this.buf];
         const savedLen = this.len;
 
@@ -130,10 +129,6 @@ export class SHA256 {
             hex += ((this.h[i] >>> 8) & 0xff).toString(16).padStart(2, '0');
             hex += (this.h[i] & 0xff).toString(16).padStart(2, '0');
         }
-
-        this.h = savedH;
-        this.buf = savedBuf;
-        this.len = savedLen;
 
         return hex;
     }
