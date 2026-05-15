@@ -1,3 +1,8 @@
+let _nodeCrypto = null;
+try {
+    _nodeCrypto = await import('crypto');
+} catch (_) {}
+
 const K = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
     0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -98,24 +103,24 @@ export class SHA256 {
     }
 
     hexdigest() {
-        const savedBuf = [...this.buf];
         const savedLen = this.len;
 
-        const padding = 64 - (this.len % 64);
-        const padLen = padding < 9 ? padding + 64 : padding;
+        const zerosNeeded = (56 - (this.len + 1) % 64 + 64) % 64;
 
         this.buf.push(0x80);
-        for (let i = 1; i < padLen - 1; i++) this.buf.push(0);
+        for (let i = 0; i < zerosNeeded; i++) this.buf.push(0);
 
         const bitLen = savedLen * 8;
-        this.buf.push((bitLen >>> 56) & 0xff);
-        this.buf.push((bitLen >>> 48) & 0xff);
-        this.buf.push((bitLen >>> 40) & 0xff);
-        this.buf.push((bitLen >>> 32) & 0xff);
-        this.buf.push((bitLen >>> 24) & 0xff);
-        this.buf.push((bitLen >>> 16) & 0xff);
-        this.buf.push((bitLen >>> 8) & 0xff);
-        this.buf.push(bitLen & 0xff);
+        const bitLenHi = Math.floor(bitLen / 0x100000000) >>> 0;
+        const bitLenLo = bitLen >>> 0;
+        this.buf.push((bitLenHi >>> 24) & 0xff);
+        this.buf.push((bitLenHi >>> 16) & 0xff);
+        this.buf.push((bitLenHi >>> 8) & 0xff);
+        this.buf.push(bitLenHi & 0xff);
+        this.buf.push((bitLenLo >>> 24) & 0xff);
+        this.buf.push((bitLenLo >>> 16) & 0xff);
+        this.buf.push((bitLenLo >>> 8) & 0xff);
+        this.buf.push(bitLenLo & 0xff);
 
         while (this.buf.length >= 64) {
             transform(this.h, this.buf);
@@ -143,9 +148,32 @@ export class SHA256 {
     }
 }
 
-export function sha256(data) {
-    const hash = new SHA256();
+export async function sha256(data) {
     if (data instanceof ArrayBuffer) data = new Uint8Array(data);
+
+    // Browser Web Crypto API (hardware-accelerated)
+    if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
+        try {
+            const hash = await crypto.subtle.digest('SHA-256', data);
+            const bytes = new Uint8Array(hash);
+            let hex = '';
+            for (let i = 0; i < bytes.length; i++) {
+                hex += bytes[i].toString(16).padStart(2, '0');
+            }
+            return hex;
+        } catch (_) {}
+    }
+
+    // Node.js crypto (OpenSSL-accelerated)
+    if (_nodeCrypto) {
+        try {
+            const c = _nodeCrypto.default || _nodeCrypto;
+            return c.createHash('sha256').update(data).digest('hex');
+        } catch (_) {}
+    }
+
+    // Pure JS fallback
+    const hash = new SHA256();
     hash.update(data);
     return hash.hexdigest();
 }

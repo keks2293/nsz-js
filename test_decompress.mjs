@@ -40,7 +40,7 @@ async function test() {
     const decompressed = new Uint8Array(await decompressor.decompress());
 
     console.log('Decompressed size:', decompressed.length);
-    const hash = sha256(decompressed);
+    const hash = await sha256(decompressed);
     console.log('Decompressed SHA256:', hash);
 
     if (!workingPath) {
@@ -60,7 +60,7 @@ async function test() {
     }
 
     console.log('Working NCA:', ncaFile.name, 'offset:', ncaFile.offset, 'size:', ncaFile.size);
-    const workingHash = sha256(workingData.slice(ncaFile.offset, ncaFile.offset + ncaFile.size));
+    const workingHash = await sha256(workingData.slice(ncaFile.offset, ncaFile.offset + ncaFile.size));
     console.log('Working SHA256:', workingHash);
 
     const workingSlice = workingData.slice(ncaFile.offset, ncaFile.offset + ncaFile.size);
