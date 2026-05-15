@@ -144,7 +144,7 @@ class NSZConverter {
                     }
                 } else {
                     const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
-                    const hash = sha256(data);
+                    const hash = await sha256(data);
                     onLog('info', `SHA256: ${hash}`);
                     await writable.write({ type: 'write', position: writePos, data });
 
@@ -183,7 +183,7 @@ class NSZConverter {
 
                 if (meta.isNcz) {
                     const nczData = await this.decompressNCZ(file, f);
-                    const hash = sha256(nczData);
+                    const hash = await sha256(nczData);
                     onLog('info', `NCA SHA256: ${hash}`);
 
                     if (!meta.name.endsWith('.cnmt.nca')) {
@@ -204,7 +204,7 @@ class NSZConverter {
                     outputFiles.push({ name: meta.name, data: nczData });
                 } else {
                     const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
-                    const hash = sha256(data);
+                    const hash = await sha256(data);
                     onLog('info', `SHA256: ${hash}`);
 
                     if (cnmtHashes.size > 0 && !meta.name.endsWith('.cnmt.nca')) {
@@ -278,7 +278,7 @@ class NSZConverter {
 
         onLog('info', 'Using memory download');
         const ncaData = await decompressor.decompress(onProgress);
-        const hash = sha256(ncaData);
+        const hash = await sha256(ncaData);
         onLog('info', `NCA SHA256: ${hash}`);
         onProgress(1.0, 'Done!');
         const blob = new Blob([ncaData], { type: 'application/octet-stream' });
@@ -378,7 +378,7 @@ class NSZConverter {
                     onLog('info', `  SHA256: ${hasher.hexdigest()}`);
                 } else {
                     const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
-                    const hash = sha256(data);
+                    const hash = await sha256(data);
                     onLog('info', `  SHA256: ${hash}`);
                     await writable.write({ type: 'write', position: writePos, data });
                 }
@@ -407,7 +407,7 @@ class NSZConverter {
                     const nczReader = new FileSliceReader(file, f.offset, f.size);
                     const decompressor = new NCZDecompressor(nczReader, this.keys);
                     const ncaData = await decompressor.decompress();
-                    const hash = sha256(ncaData);
+                    const hash = await sha256(ncaData);
                     onLog('info', `  SHA256: ${hash}`);
                     hfs0Writer.addFile(outputName, ncaData);
                 } else {

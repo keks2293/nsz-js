@@ -2,9 +2,9 @@
 
 ## ✅ Recent Changes (2026-05-15)
 
-1. **Replaced pure-JS SHA-256 with hash-wasm WASM** — Byte-by-byte JS SHA-256 replaced with WASM-based hash-wasm for faster hashing. Falls back to pure JS if WASM unavailable.
-2. **hash-wasm preloaded during init** — `SHA256.load()` runs in parallel with `ZstdDecompressor.load()` during `converter.init()`. Eliminates WASM compile wait on first `sha256()` call.
-3. **Speed comparison in `TEST_RESULTS.md`**
+1. **Replaced hash-wasm with Web Crypto API SHA-256** — hash-wasm WASM was 1 min slower than pure JS (WASM init overhead, SHA-256 not the bottleneck). Now uses `crypto.subtle.digest('SHA-256')` (browser) and `crypto.createHash('sha256')` (Node.js) — native, hardware-accelerated, zero init overhead. Falls back to pure JS.
+2. **Updated `TEST_RESULTS.md` with speed comparison** — hash-wasm was 2m53s vs pure JS 1m51s for 5 GB NSZ conversion.
+3. **Fixed SHA256 class bit-length encoding** — `>>> 32` in JS is a no-op (shifts mask to 5 bits). Split into hi/lo 32-bit words. Also fixed padding math (was padding to 64 instead of 56 bytes, leaving the 8-byte length field untransformed). Both bugs caused incorrect SHA-256 for all non-empty inputs.
 
 ## ✅ Recent Changes (2026-05-13)
 
