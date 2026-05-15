@@ -2,7 +2,7 @@
 
 ## ✅ Recent Changes (2026-05-15)
 
-1. **Shared ZSTDDecoder instance in `crypto/zstd.js`** — WASM `ZSTDDecoder` is instantiated once and reused across all `decompressBuffer`/`decompressStreaming` calls. Eliminates repeated WASM module import + decoder init + memory allocation per decompress call. The WASM instance is captured for raw API access via `ZstdDecompressor.instance`.
+1. **Shared ZSTDDecoder instance in `crypto/zstd.js`** — WASM `ZSTDDecoder` is instantiated once and reused across all `decompressBuffer` calls. Eliminates repeated WASM module import + decoder init + memory allocation per decompress call. The WASM instance is captured for raw API access via `ZstdDecompressor.instance`. Removed unused `decompressStreaming` static method.
 
 2. **Eliminated `compressedChunks` pre-buffering in `fs/ncz.js`** — `_decompressWithStreamingStream` no longer reads all compressed data into an array before decompressing. Node.js path reads chunks lazily and writes to zstd stdin; browser path uses new `crypto/zstddec-stream-wrapper.js` which wraps zstddec's raw WASM exports (`ZSTD_createDCtx`/`ZSTD_decompressStream`) as an async generator with lazy `readChunk`. Peak RAM drops from file-size to 16 MB chunks.
 
