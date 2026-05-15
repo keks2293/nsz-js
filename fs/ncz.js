@@ -296,11 +296,8 @@ class NCZDecompressor {
             const result = Buffer.concat(chunks);
             decompressed = new Uint8Array(result.buffer, result.byteOffset, result.byteLength);
         } else {
-            console.log('[ZSTD] Using zstddec WASM for browser');
-            const { ZSTDDecoder } = await import('../static/zstddec.mjs');
-            const decoder = new ZSTDDecoder();
-            await decoder.init();
-            decompressed = decoder.decode(compressedData, 0);
+            console.log('[ZSTD] Using zstddec WASM (shared decoder)');
+            decompressed = await ZstdDecompressor.decompressBuffer(compressedData);
         }
 
         const streaming = writeChunk !== null;
@@ -427,16 +424,6 @@ class NCZDecompressor {
     async _decompressWithStreamingStream(sections, ncaSize, headerEnd, progressCallback, writeChunk) {
         console.log('[NCZ] Streaming (non-block) mode with chunked decompression');
         const remaining = this.reader.length - headerEnd;
-        const compressedChunks = [];
-        let pos = headerEnd;
-        let toRead = remaining;
-        while (toRead > 0) {
-            const size = Math.min(toRead, READ_CHUNK_SIZE);
-            const chunk = await this.reader.read(pos, size);
-            compressedChunks.push(chunk);
-            pos += size;
-            toRead -= size;
-        }
         const sortedSections = [...sections].sort((a, b) => a.offset - b.offset);
         const sectionAesCtrs = new Map();
         for (const s of sortedSections) {
@@ -448,16 +435,22 @@ class NCZDecompressor {
             console.log('[ZSTD] Using zstd CLI for Node.js streaming');
             const { spawn } = await import('node:child_process');
             const proc = spawn('zstd', ['-d', '--no-check'], { stdio: ['pipe', 'pipe', 'pipe'] });
-            for (const chunk of compressedChunks) {
-                proc.stdin.write(Buffer.from(chunk));
-            }
-            proc.stdin.end();
             let stderr = '';
             proc.stderr.on('data', (c) => stderr += c.toString());
             const exitPromise = new Promise((resolve, reject) => {
                 proc.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`zstd failed: ${stderr}`)));
                 proc.on('error', reject);
             });
+            let pos = headerEnd;
+            let toRead = remaining;
+            while (toRead > 0) {
+                const size = Math.min(toRead, READ_CHUNK_SIZE);
+                const chunk = await this.reader.read(pos, size);
+                proc.stdin.write(Buffer.from(chunk));
+                pos += size;
+                toRead -= size;
+            }
+            proc.stdin.end();
             let decompOffset = UNCOMPRESSABLE_HEADER_SIZE;
             for await (const nodeChunk of proc.stdout) {
                 const dc = new Uint8Array(nodeChunk.buffer, nodeChunk.byteOffset, nodeChunk.byteLength);
@@ -465,12 +458,20 @@ class NCZDecompressor {
             }
             await exitPromise;
         } else {
-            console.log('[ZSTD] Using zstddec WASM streaming decompression');
-            const { ZSTDDecoder } = await import('../static/zstddec.mjs');
-            const decoder = new ZSTDDecoder();
-            await decoder.init();
+            console.log('[ZSTD] Using zstddec WASM streaming decompression (async)');
+            const { initZstddec, decodeStream } = await import('../crypto/zstddec-stream-wrapper.js');
+            await initZstddec();
+            let pos = headerEnd;
+            let toRead = remaining;
             let decompOffset = UNCOMPRESSABLE_HEADER_SIZE;
-            for (const decompChunk of decoder.decodeStreaming(compressedChunks)) {
+            for await (const decompChunk of decodeStream(async () => {
+                if (toRead <= 0) return null;
+                const size = Math.min(toRead, READ_CHUNK_SIZE);
+                const chunk = await this.reader.read(pos, size);
+                pos += size;
+                toRead -= size;
+                return chunk;
+            })) {
                 decompOffset = await this._processStreamDecompressedChunk(decompChunk, decompOffset, sortedSections, sectionAesCtrs, progressCallback, writeChunk, ncaSize);
             }
         }
@@ -548,9 +549,7 @@ class AsyncBlockDecompressorReader {
         const compressedData = await this.reader.read(this.baseOffset + relOffset, compressedSize);
 
         if (compressedSize < decompressedSize) {
-            const decompressor = new ZstdDecompressor();
-            await decompressor.load();
-            this.currentBlock = decompressor.decompress(compressedData);
+            this.currentBlock = await ZstdDecompressor.decompressBuffer(compressedData);
         } else {
             this.currentBlock = compressedData;
         }
