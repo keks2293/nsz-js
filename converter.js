@@ -33,7 +33,10 @@ class NSZConverter {
 
     async init() {
         if (this.initialized) return;
-        await ZstdDecompressor.load();
+        await Promise.all([
+            ZstdDecompressor.load(),
+            SHA256.load()
+        ]);
         this.initialized = true;
     }
 
