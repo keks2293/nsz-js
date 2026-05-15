@@ -1,5 +1,11 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-05-15)
+
+1. **Replaced pure-JS SHA-256 with hash-wasm WASM** — Byte-by-byte JS SHA-256 replaced with WASM-based hash-wasm for faster hashing. Falls back to pure JS if WASM unavailable.
+2. **hash-wasm preloaded during init** — `SHA256.load()` runs in parallel with `ZstdDecompressor.load()` during `converter.init()`. Eliminates WASM compile wait on first `sha256()` call.
+3. **Speed comparison in `TEST_RESULTS.md`**
+
 ## ✅ Recent Changes (2026-05-13)
 
 1. **SW streaming: fixed `<a download>` not intercepted by SW** — Chrome's download manager bypasses the Service Worker for `<a download>` fetches (no `[SW] fetch` log seen). Replaced with `window.open(streamUrl)` — navigation fetches are always routed through the SW. The SW responds with `Content-Disposition: attachment` which triggers the download.
