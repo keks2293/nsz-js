@@ -301,7 +301,7 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
                 console.log(`Copying: ${f.name} -> ${meta.name}`);
                 const buf = Buffer.alloc(f.size);
                 fs.readSync(inputFd, buf, 0, f.size, f.offset);
-                const hash = sha256(buf);
+                const hash = await sha256(buf);
                 console.log(`  SHA256: ${hash}`);
                 fs.writeSync(outputFd, buf, 0, f.size, absWritePos);
             }
