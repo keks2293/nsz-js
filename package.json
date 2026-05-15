@@ -17,7 +17,6 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "zstddec": "^0.2.0",
-    "hash-wasm": "^4.12.0"
+    "zstddec": "^0.2.0"
   }
 }
