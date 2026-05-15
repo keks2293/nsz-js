@@ -2,7 +2,9 @@
 
 ## ✅ Recent Changes (2026-05-15)
 
-1. **Replaced hash-wasm with Web Crypto API SHA-256** — hash-wasm WASM was 1 min slower than pure JS (WASM init overhead, SHA-256 not the bottleneck). Now uses `crypto.subtle.digest('SHA-256')` (browser) and `crypto.createHash('sha256')` (Node.js) — native, hardware-accelerated, zero init overhead. Falls back to pure JS.
+1. **Shared ZSTDDecoder instance in `crypto/zstd.js`** — WASM `ZSTDDecoder` is instantiated once and reused across all `decompressBuffer`/`decompressStreaming` calls. Eliminates repeated WASM module import + decoder init + memory allocation per decompress call. The WASM instance is captured for raw API access via `ZstdDecompressor.instance`.
+
+2. **Replaced hash-wasm with Web Crypto API SHA-256** — hash-wasm WASM was 1 min slower than pure JS (WASM init overhead, SHA-256 not the bottleneck). Now uses `crypto.subtle.digest('SHA-256')` (browser) and `crypto.createHash('sha256')` (Node.js) — native, hardware-accelerated, zero init overhead. Falls back to pure JS.
 2. **Updated `TEST_RESULTS.md` with speed comparison** — hash-wasm was 2m53s vs pure JS 1m51s for 5 GB NSZ conversion.
 3. **Fixed SHA256 class bit-length encoding** — `>>> 32` in JS is a no-op (shifts mask to 5 bits). Split into hi/lo 32-bit words. Also fixed padding math (was padding to 64 instead of 56 bytes, leaving the 8-byte length field untransformed). Both bugs caused incorrect SHA-256 for all non-empty inputs.
 

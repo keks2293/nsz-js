@@ -9,11 +9,12 @@ NSZ files can use zstd compression with any window size. The browser has no nati
 [zstddec](https://github.com/StadiA/zstddec) wraps the real zstd C library compiled to WebAssembly:
 
 ```javascript
-import { ZSTDDecoder } from './static/zstddec.mjs';
-const decoder = new ZSTDDecoder();
-await decoder.init();
-const decompressed = decoder.decode(compressed, 0);
+import { ZstdDecompressor } from './crypto/zstd.js';
+await ZstdDecompressor.load();
+const decompressed = await ZstdDecompressor.decompressBuffer(compressed);
 ```
+
+A single `ZSTDDecoder` instance is shared across all calls — loaded once, reused forever.
 
 - **Native zstd** — handles any window size
 - **~28 KB WASM** binary base64-embedded in the JS (no extra `.wasm` file)
@@ -39,8 +40,8 @@ For NCZBLOCK block decompression, Node.js also uses `zstddec` via `crypto/zstd.j
 
 ## Current Implementation
 
-- `ncz.js` — Browser streaming path imports `zstddec` directly
-- `crypto/zstd.js` — Block decompression for both Node.js and browser uses `zstddec`
+- `crypto/zstd.js` — All zstddec usage is centralized here. Uses a shared `ZSTDDecoder` instance.
+- `ncz.js` — Browser streaming and block paths use `crypto/zstd.js`
 
 ## Known zstddec Bug
 
@@ -51,5 +52,4 @@ zstddec's `decode()` has a bug when passing explicit `uncompressedSize` for larg
 ## Files
 
 - `static/zstddec.mjs` — Copied from `node_modules/zstddec/dist/zstddec-stream.modern.js` (ES Module)
-- `crypto/zstd.js` — ZstdDecompressor class using zstddec
-- `ncz.js` — Browser streaming path using zstddec directly
+- `crypto/zstd.js` — ZstdDecompressor class using a shared ZSTDDecoder instance
