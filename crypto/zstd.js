@@ -1,39 +1,39 @@
 let ready = false;
-let zstddecModule = null;
+let sharedDecoder = null;
+let wasmInstance = null;
 
 class ZstdDecompressor {
-    constructor() {
-    }
-
     static async load() {
         if (ready) return;
         const module = await import('../static/zstddec.mjs');
-        zstddecModule = module;
+
+        const OrigDecoder = module.ZSTDDecoder;
+        class CapturingDecoder extends OrigDecoder {
+            _init(result) {
+                wasmInstance = result.instance;
+                return super._init(result);
+            }
+        }
+
+        sharedDecoder = new CapturingDecoder();
+        await sharedDecoder.init();
         ready = true;
     }
 
-    async decompress(data) {
-        await ZstdDecompressor.load();
-        if (!zstddecModule) throw new Error('zstddec not loaded');
-        const decoder = new zstddecModule.ZSTDDecoder();
-        await decoder.init();
-        return decoder.decode(data, 0);
+    static get instance() {
+        return wasmInstance;
     }
 
     static async decompressBuffer(data) {
         await ZstdDecompressor.load();
-        if (!zstddecModule) throw new Error('zstddec not loaded');
-        const decoder = new zstddecModule.ZSTDDecoder();
-        await decoder.init();
-        return decoder.decode(data, 0);
+        if (!sharedDecoder) throw new Error('zstddec not loaded');
+        return sharedDecoder.decode(data, 0);
     }
 
     static async decompressStreaming(data, callback) {
         await ZstdDecompressor.load();
-        if (!zstddecModule) throw new Error('zstddec not loaded');
-        const decoder = new zstddecModule.ZSTDDecoder();
-        await decoder.init();
-        const decompressed = decoder.decode(data, 0);
+        if (!sharedDecoder) throw new Error('zstddec not loaded');
+        const decompressed = sharedDecoder.decode(data, 0);
         callback(decompressed);
     }
 }
