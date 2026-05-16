@@ -1,5 +1,9 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-05-16)
+
+1. **fileInput.value = '' moved from click handler** — No longer resets in click handler. Browser's native behavior prevents same file from re-triggering change event. Input resets only on clear or after file conversion, enabling re-add after removal. (commit `6c5f593`)
+
 ## ✅ Recent Changes (2026-05-15)
 
 1. **Shared ZSTDDecoder instance in `crypto/zstd.js`** — WASM `ZSTDDecoder` is instantiated once and reused across all `decompressBuffer` calls. Eliminates repeated WASM module import + decoder init + memory allocation per decompress call. The WASM instance is captured for raw API access via `ZstdDecompressor.instance`. Removed unused `decompressStreaming` static method.
