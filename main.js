@@ -181,7 +181,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         return false;
     }
 
-    dropZone.addEventListener('click', () => { fileInput.value = ''; fileInput.click(); });
+    dropZone.addEventListener('click', () => fileInput.click());
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
     dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dragover'); });
 
@@ -205,6 +205,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     clearBtn.addEventListener('click', () => {
         files.length = 0;
+        fileInput.value = '';
         updateFileList();
     });
 
@@ -345,6 +346,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
                 files.splice(i, 1);
                 i--;
+                fileInput.value = '';
                 updateFileList();
             } catch (error) {
                 addLog('error', `Failed: ${error.message}`);
