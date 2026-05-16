@@ -215,7 +215,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         return false;
     }
 
-    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('click', () => { fileInput.value = ''; fileInput.click(); });
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
     dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dragover'); });
 
