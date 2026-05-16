@@ -76,8 +76,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const fileList = document.getElementById('fileList');
-    const fileInfo = document.getElementById('fileInfo');
-    const fileDetails = document.getElementById('fileDetails');
     const progressContainer = document.getElementById('progressContainer');
         const progressFill = document.getElementById('progressFill');
         const progressPercent = document.getElementById('progressPercent');
@@ -154,44 +152,12 @@ window.addEventListener('DOMContentLoaded', async () => {
                 const index = parseInt(e.target.dataset.index);
                 files.splice(index, 1);
                 updateFileList();
-                updateFileInfo();
             });
         });
 
         fileList.style.display = files.length > 0 ? 'block' : 'none';
         clearBtn.style.display = files.length > 0 ? 'block' : 'none';
         convertBtn.disabled = files.length === 0;
-    }
-
-    function updateFileInfo() {
-        if (files.length === 0) {
-            fileInfo.classList.remove('visible');
-            return;
-        }
-
-        const file = files[0];
-        fileDetails.innerHTML = `
-            <div class="file-detail">
-                <div class="file-detail-label">Name</div>
-                <div class="file-detail-value">${escapeHtml(file.name)}</div>
-            </div>
-            <div class="file-detail">
-                <div class="file-detail-label">Size</div>
-                <div class="file-detail-value">${formatBytes(file.size)}</div>
-            </div>
-        `;
-        
-        if (files.length > 1) {
-            const totalSize = files.reduce((sum, f) => sum + f.size, 0);
-            fileDetails.innerHTML += `
-                <div class="file-detail" style="grid-column: span 2;">
-                    <div class="file-detail-label">Total Files</div>
-                    <div class="file-detail-value">${files.length} files (${formatBytes(totalSize)} total)</div>
-                </div>
-            `;
-        }
-
-        fileInfo.classList.add('visible');
     }
 
     function escapeHtml(text) {
@@ -227,7 +193,6 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (isCompressedGame(file.name)) files.push(file);
         }
         updateFileList();
-        updateFileInfo();
     });
 
     fileInput.addEventListener('change', async (e) => {
@@ -236,13 +201,11 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (isCompressedGame(file.name)) files.push(file);
         }
         updateFileList();
-        updateFileInfo();
     });
 
     clearBtn.addEventListener('click', () => {
         files.length = 0;
         updateFileList();
-        updateFileInfo();
     });
 
     fixPaddingBtn.addEventListener('click', () => {
@@ -383,7 +346,6 @@ window.addEventListener('DOMContentLoaded', async () => {
                 files.splice(i, 1);
                 i--;
                 updateFileList();
-                updateFileInfo();
             } catch (error) {
                 addLog('error', `Failed: ${error.message}`);
             }
