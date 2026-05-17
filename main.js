@@ -34,7 +34,12 @@ class SWDownloader {
     }
 
     triggerDownload() {
-        this.iframe.src = this.streamUrl + '?name=' + encodeURIComponent(this.outputName);
+        const url = this.streamUrl + '?name=' + encodeURIComponent(this.outputName);
+        if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+            window.open(url, '_blank');
+            return;
+        }
+        this.iframe.src = url;
     }
 
     async write({ type, position, data }) {
