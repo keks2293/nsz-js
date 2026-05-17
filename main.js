@@ -13,13 +13,6 @@ class SWDownloader {
         this.sw = reg.active;
         if (!this.sw) throw new Error('No active service worker');
 
-        // Ensure this page is controlled by the SW so fetch events are intercepted
-        if (!navigator.serviceWorker.controller) {
-            await new Promise(resolve => {
-                navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true });
-            });
-        }
-
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 navigator.serviceWorker.removeEventListener('message', onMessage);
