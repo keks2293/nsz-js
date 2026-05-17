@@ -1,11 +1,12 @@
 import { NSZConverter } from './converter.js';
 
 class SWDownloader {
-    constructor(outputName) {
+    constructor(outputName, iframe) {
         const base = location.pathname.substring(0, location.pathname.lastIndexOf('/') + 1) || '/';
         this.streamUrl = (base + 'download/' + crypto.randomUUID()).replace(/\/+/g, '/');
         this.outputName = outputName;
         this.sw = null;
+        this.iframe = iframe || null;
     }
 
     async start() {
@@ -33,12 +34,7 @@ class SWDownloader {
     }
 
     triggerDownload() {
-        const url = this.streamUrl + '?name=' + encodeURIComponent(this.outputName);
-        if (window.open(url, '_blank')) return;
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        iframe.src = url;
-        document.body.appendChild(iframe);
+        this.iframe.src = this.streamUrl + '?name=' + encodeURIComponent(this.outputName);
     }
 
     async write({ type, position, data }) {
@@ -255,6 +251,13 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
         }
 
+        const fileIframes = files.map(() => {
+            const iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            document.body.appendChild(iframe);
+            return iframe;
+        });
+
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
             addLog('info', `Processing ${i + 1}/${files.length}: ${file.name}`);
@@ -282,7 +285,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 // Try Service Worker streaming (modes: auto, sw)
                 if (!writable && (downloadMode === 'auto' || downloadMode === 'sw') && 'serviceWorker' in navigator && location.protocol !== 'file:') {
                     try {
-                        const dl = new SWDownloader(outputName);
+                        const dl = new SWDownloader(outputName, fileIframes[i]);
                         await dl.start();
                         dl.triggerDownload();
                         writable = dl;
