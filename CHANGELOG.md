@@ -1,8 +1,8 @@
 # NSZ to NSP Converter - Status Report
 
-## ✅ Recent Changes (2026-05-16)
+## ✅ Recent Changes (2026-05-17)
 
-1. **fileInput.value = '' moved from click handler** — No longer resets in click handler. Browser's native behavior prevents same file from re-triggering change event. Input resets only on clear or after file conversion, enabling re-add after removal. (commit `6c5f593`)
+1. **SW download: hidden iframes pre-created upfront, one per file** — All hidden `<iframe>` elements are created before the conversion loop (`main.js:265-270`). Each file in the loop uses its pre-allocated iframe, navigating it to the SW stream URL only after the stream is registered. No `window.open` calls, no new tabs. (`main.js:36-39`, `main.js:265-270`)
 
 ## ✅ Recent Changes (2026-05-15)
 
