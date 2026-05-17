@@ -34,15 +34,11 @@ class SWDownloader {
 
     triggerDownload() {
         const url = this.streamUrl + '?name=' + encodeURIComponent(this.outputName);
-        if (!window.open(url, '_blank')) {
-            const a = document.createElement('a');
-            a.href = url;
-            a.target = '_blank';
-            a.rel = 'noopener';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-        }
+        if (window.open(url, '_blank')) return;
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.src = url;
+        document.body.appendChild(iframe);
     }
 
     async write({ type, position, data }) {
