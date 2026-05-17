@@ -249,7 +249,11 @@ window.addEventListener('DOMContentLoaded', async () => {
                 });
                 addLog('info', 'Using File System Access API - saving to selected directory');
             } catch (e) {
-                if (e.name !== 'AbortError') {
+                if (e.name === 'AbortError') {
+                    addLog('error', 'Save location rejected — conversion cancelled');
+                    convertBtn.disabled = false;
+                    return;
+                } else {
                     addLog('warning', 'File System Access not available: ' + e.message);
                 }
             }
