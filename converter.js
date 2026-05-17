@@ -222,28 +222,8 @@ class NSZConverter {
             }
 
             onProgress(0.7, 'Building PFS0 container...');
-            return this.buildPFS0(outputFiles, null, { file, onLog, fixPadding, onProgress });
+            return this.buildPFS0(outputFiles, { file, onLog, fixPadding, onProgress });
         }
-    }
-
-    async buildPFS0Stream(writable, writer, fileDataList, onProgress) {
-        const header = writer.buildHeader();
-        await writable.write({ type: 'write', position: 0, data: header.buffer });
-        onProgress(0.85, 'Writing header...');
-
-        const totalDataSize = writer.files.reduce((s, f) => s + f.size, 0);
-        let written = 0;
-
-        for (let i = 0; i < writer.files.length; i++) {
-            const f = writer.files[i];
-            const data = fileDataList[i];
-            const buf = data instanceof ArrayBuffer ? data : (data.buffer || data);
-            await writable.write({ type: 'write', position: header.length + f.offset, data: buf });
-            written += f.size;
-            onProgress(0.85 + (0.15 * written / totalDataSize), `Writing file ${i + 1}/${writer.files.length}...`);
-        }
-
-        return { size: header.length + totalDataSize };
     }
 
     async decompressNCZ(file, nczFile) {
@@ -460,7 +440,7 @@ class NSZConverter {
         return hashes;
     }
 
-    async buildPFS0(files, writable = null, options = {}) {
+    async buildPFS0(files, options = {}) {
         const { file = null, onLog = () => {}, fixPadding = false, onProgress = () => {} } = options;
         const outputName = file ? file.name.replace(/\.nsz$/i, '.nsp') : 'output.nsp';
 
@@ -470,17 +450,8 @@ class NSZConverter {
             writer.add(f.name, data instanceof ArrayBuffer ? data.byteLength : data.length);
         }
 
-        if (!writable) {
-            onLog('info', 'Using memory download (no File System Access)');
-            return this.buildPFS0Memory(writer, files, onProgress, outputName);
-        }
-
-        onProgress(0.8, 'Writing output file...');
-        const fileDataList = files.map(f => f.data);
-        const streamResult = await this.buildPFS0Stream(writable, writer, fileDataList, onProgress);
-        onProgress(1.0, 'Done!');
-        onLog('success', `Output: ${outputName} (${this.formatBytes(streamResult.size)})`);
-        return { blob: null, name: outputName, size: streamResult.size, writable: true };
+        onLog('info', 'Using memory download');
+        return this.buildPFS0Memory(writer, files, onProgress, outputName);
     }
 
     async buildPFS0Memory(writer, files, onProgress, outputName) {
