@@ -263,8 +263,6 @@ window.addEventListener('DOMContentLoaded', async () => {
             const file = files[i];
             addLog('info', `Processing ${i + 1}/${files.length}: ${file.name}`);
 
-            updateProgress(i / files.length, 'Starting...');
-            
             try {
                 const fileType = detectFileType(file.name);
                 const outputName = fileType === 'ncz'
@@ -318,8 +316,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 } else {
                     result = await converter.decompressNSZtoNSP(file, {
                         onProgress: (progress, text) => {
-                            const normalizedProgress = Math.max(0, Math.min(1, (progress - 0.02) / 0.98));
-                            const overall = (i + normalizedProgress) / files.length;
+                            const overall = Math.max(0, Math.min(1, (progress - 0.02) / 0.98));
                             updateProgress(overall, text);
                         },
                         onLog: addLog,
