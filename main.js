@@ -114,8 +114,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         logContainer.scrollTop = logContainer.scrollHeight;
     }
 
+    let lastPercent = -1;
     function updateProgress(progress, text) {
         const percent = Math.round(progress * 100);
+        if (percent === lastPercent) return;
+        lastPercent = percent;
         progressFill.style.width = `${percent}%`;
         progressPercent.textContent = `${percent}%`;
         progressText.textContent = text;
@@ -312,7 +315,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 } else {
                     result = await converter.decompressNSZtoNSP(file, {
                         onProgress: (progress, text) => {
-                            const normalizedProgress = Math.max(0, Math.min(1, (progress - 0.05) / 0.85));
+                            const normalizedProgress = Math.max(0, Math.min(1, (progress - 0.02) / 0.98));
                             const overall = (i + normalizedProgress) / files.length;
                             updateProgress(overall, text);
                         },
