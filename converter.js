@@ -74,7 +74,7 @@ class NSZConverter {
         const files = pfs0Reader.getFiles();
         onLog('info', `PFS0 header: ${files.length} files`);
         onLog('info', `Found ${files.length} files in container`);
-        onProgress(0.05, 'Reading container...');
+        onProgress(0.02, 'Reading container...');
 
         const cnmtFiles = files.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
         const cnmtHashes = new Set();
@@ -107,10 +107,10 @@ class NSZConverter {
             // Streaming path: write header first, then stream decompressed data
             onLog('info', 'Using streaming output (File System Access)');
             const writer = await this.writePFS0Header(writable, outputMeta, fixPadding);
-            onProgress(0.8, 'Writing output file...');
 
             let dataWritten = 0;
             const totalDataSize = outputMeta.reduce((s, m) => s + m.size, 0);
+            const pct = (bytes) => 0.02 + 0.93 * (bytes / totalDataSize);
 
             for (let idx = 0; idx < files.length; idx++) {
                 const meta = outputMeta[idx];
@@ -121,10 +121,12 @@ class NSZConverter {
                     const hasher = new SHA256();
                     const reader = new FileSliceReader(meta.file, meta.fileOffset, meta.nczLen);
                     const decompressor = new NCZDecompressor(reader, this.keys);
-                    await decompressor.decompress(null, async (chunk, offset) => {
-                        hasher.update(chunk);
-                        await writable.write({ type: 'write', position: writePos + offset, data: chunk });
-                    });
+                    await decompressor.decompress(
+                        (p) => onProgress(pct(dataWritten + meta.size * p), `Decompressing ${f.name}...`),
+                        async (chunk, offset) => {
+                            hasher.update(chunk);
+                            await writable.write({ type: 'write', position: writePos + offset, data: chunk });
+                        });
                     const hash = hasher.hexdigest();
                     onLog('info', `NCA SHA256: ${hash}`);
 
@@ -143,6 +145,7 @@ class NSZConverter {
                         }
                     }
                 } else {
+                    onProgress(pct(dataWritten), `Copying ${f.name}...`);
                     const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
                     const hash = await sha256(data);
                     onLog('info', `SHA256: ${hash}`);
@@ -160,8 +163,7 @@ class NSZConverter {
                 }
 
                 dataWritten += meta.size;
-                const progress = 0.8 + (0.2 * (dataWritten / totalDataSize));
-                onProgress(progress, `Writing file ${idx + 1}/${files.length}...`);
+                onProgress(pct(dataWritten), `File ${idx + 1}/${files.length} done`);
             }
 
             onProgress(1.0, 'Done!');
@@ -173,16 +175,17 @@ class NSZConverter {
             // Memory path (no File System Access): collect all data, build PFS0
             onLog('info', 'Using memory download (no File System Access)');
             const outputFiles = [];
+            const totalDataSize = outputMeta.reduce((s, m) => s + m.size, 0);
+            let dataWritten = 0;
+            const pct = (bytes) => 0.02 + 0.93 * (bytes / totalDataSize);
 
             for (let idx = 0; idx < files.length; idx++) {
                 const meta = outputMeta[idx];
                 const f = files[idx];
-                const progress = 0.05 + (0.65 * (idx / files.length));
-                onProgress(progress, `Processing file ${idx + 1}/${files.length}...`);
                 onLog('info', `${meta.isNcz ? 'Decompressing' : 'Copying'}: ${f.name}`);
 
                 if (meta.isNcz) {
-                    const nczData = await this.decompressNCZ(file, f);
+                    const nczData = await this.decompressNCZ(file, f, (p) => onProgress(pct(dataWritten + meta.size * p), `Decompressing ${f.name}...`));
                     const hash = await sha256(nczData);
                     onLog('info', `NCA SHA256: ${hash}`);
 
@@ -203,6 +206,7 @@ class NSZConverter {
 
                     outputFiles.push({ name: meta.name, data: nczData });
                 } else {
+                    onProgress(pct(dataWritten), `Copying ${f.name}...`);
                     const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
                     const hash = await sha256(data);
                     onLog('info', `SHA256: ${hash}`);
@@ -219,18 +223,21 @@ class NSZConverter {
 
                     outputFiles.push({ name: meta.name, data });
                 }
+
+                dataWritten += meta.size;
+                onProgress(pct(dataWritten), `File ${idx + 1}/${files.length} done`);
             }
 
-            onProgress(0.7, 'Building PFS0 container...');
+            onProgress(0.95, 'Building PFS0 container...');
             return this.buildPFS0(outputFiles, { file, onLog, fixPadding, onProgress });
         }
     }
 
-    async decompressNCZ(file, nczFile) {
+    async decompressNCZ(file, nczFile, onProgress = () => {}) {
         const reader = new FileSliceReader(file, nczFile.offset, nczFile.size);
         try {
             const decompressor = new NCZDecompressor(reader, this.keys);
-            return await decompressor.decompress();
+            return await decompressor.decompress(onProgress);
         } catch(e) {
             console.error('NCZ decompression error:', e);
             throw e;
@@ -246,7 +253,7 @@ class NSZConverter {
         if (writable) {
             onLog('info', 'Using streaming output (File System Access)');
             let maxPos = 0;
-            await decompressor.decompress(null, async (chunk, position) => {
+            await decompressor.decompress((p) => onProgress(p, 'Decompressing...'), async (chunk, position) => {
                 await writable.write({ type: 'write', position, data: chunk });
                 const end = position + chunk.byteLength;
                 if (end > maxPos) maxPos = end;
@@ -343,6 +350,9 @@ class NSZConverter {
             await writable.write({ type: 'write', position: hfs0Offset, data: hfs0Header.buffer });
 
             let writePos = hfs0Offset + hfs0TotalHeader;
+            const totalDataSize = outputMeta.reduce((s, m) => s + m.size, 0);
+            let dataWritten = 0;
+            const pct = (bytes) => 0.02 + 0.93 * (bytes / totalDataSize);
             for (let idx = 0; idx < files.length; idx++) {
                 const meta = outputMeta[idx];
                 const f = files[idx];
@@ -351,20 +361,23 @@ class NSZConverter {
                     const hasher = new SHA256();
                     const reader = new FileSliceReader(meta.file, meta.fileOffset, meta.nczLen);
                     const decomp = new NCZDecompressor(reader, this.keys);
-                    await decomp.decompress(null, async (chunk, offset) => {
-                        hasher.update(chunk);
-                        await writable.write({ type: 'write', position: writePos + offset, data: chunk });
-                    });
+                    await decomp.decompress(
+                        (p) => onProgress(pct(dataWritten + meta.size * p), `Decompressing ${f.name}...`),
+                        async (chunk, offset) => {
+                            hasher.update(chunk);
+                            await writable.write({ type: 'write', position: writePos + offset, data: chunk });
+                        });
                     onLog('info', `  SHA256: ${hasher.hexdigest()}`);
                 } else {
+                    onProgress(pct(dataWritten), `Copying ${f.name}...`);
                     const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
                     const hash = await sha256(data);
                     onLog('info', `  SHA256: ${hash}`);
                     await writable.write({ type: 'write', position: writePos, data });
                 }
                 writePos += meta.size;
-                const progress = 0.1 + 0.8 * ((idx + 1) / files.length);
-                onProgress(progress, `Writing file ${idx + 1}/${files.length}...`);
+                dataWritten += meta.size;
+                onProgress(pct(dataWritten), `File ${idx + 1}/${files.length} done`);
             }
 
             onProgress(1.0, 'Done!');
@@ -376,6 +389,9 @@ class NSZConverter {
             // Memory path: build in memory for download
             onLog('info', 'Using memory download');
             const hfs0Writer = new HFS0Writer();
+            const totalDataSize = outputMeta.reduce((s, m) => s + m.size, 0);
+            let dataWritten = 0;
+            const pct = (bytes) => 0.02 + 0.93 * (bytes / totalDataSize);
             for (let idx = 0; idx < files.length; idx++) {
                 const meta = outputMeta[idx];
                 const f = files[idx];
@@ -386,19 +402,21 @@ class NSZConverter {
                 if (isNcz) {
                     const nczReader = new FileSliceReader(file, f.offset, f.size);
                     const decompressor = new NCZDecompressor(nczReader, this.keys);
-                    const ncaData = await decompressor.decompress();
+                    const ncaData = await decompressor.decompress((p) => onProgress(pct(dataWritten + meta.size * p), `Decompressing ${f.name}...`));
                     const hash = await sha256(ncaData);
                     onLog('info', `  SHA256: ${hash}`);
                     hfs0Writer.addFile(outputName, ncaData);
                 } else {
+                    onProgress(pct(dataWritten), `Copying ${f.name}...`);
                     const fileData = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
                     onLog('info', `  Size: ${fileData.byteLength} bytes`);
                     hfs0Writer.addFile(outputName, new Uint8Array(fileData));
                 }
-                onProgress(0.1 + 0.8 * ((idx + 1) / files.length), `Processing file ${idx + 1}/${files.length}...`);
+                dataWritten += meta.size;
+                onProgress(pct(dataWritten), `File ${idx + 1}/${files.length} done`);
             }
 
-            onProgress(0.9, 'Building XCI...');
+            onProgress(0.95, 'Building XCI...');
             const hfs0Data = hfs0Writer.build();
             onLog('info', `HFS0 partition built: ${hfs0Data.length} bytes`);
 
@@ -456,7 +474,7 @@ class NSZConverter {
 
     async buildPFS0Memory(writer, files, onProgress, outputName) {
         const header = writer.buildHeader();
-        onProgress(0.85, 'Building file in memory...');
+        onProgress(0.95, 'Building file in memory...');
 
         const totalDataSize = writer.files.reduce((s, f) => s + f.size, 0);
         const totalSize = header.length + totalDataSize;
@@ -466,7 +484,7 @@ class NSZConverter {
             const data = files[i].data;
             const arr = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
             parts.push(arr);
-            onProgress(0.85 + (0.15 * (i + 1) / writer.files.length), `Building file ${i + 1}/${writer.files.length}...`);
+            onProgress(0.95 + (0.05 * (i + 1) / writer.files.length), `Building file ${i + 1}/${writer.files.length}...`);
         }
 
         const blob = new Blob(parts, { type: 'application/octet-stream' });
