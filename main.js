@@ -212,12 +212,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         addLog('info', `Fix Padding ${fixPadding ? 'enabled' : 'disabled'}`);
     });
 
-    document.getElementById('modeOptions').addEventListener('click', (e) => {
+    document.getElementById('modeOptions').addEventListener('change', (e) => {
         const label = e.target.closest('.mode-btn');
         if (!label) return;
         const radio = label.querySelector('input');
         if (!radio) return;
-        radio.checked = true;
         document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
         label.classList.add('active');
         downloadMode = radio.value;
@@ -234,7 +233,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         status.className = 'status';
 
         updateProgress(0, 'Starting...');
-        addLog('info', 'Starting conversion...');
+        addLog('info', `Starting conversion (mode: ${downloadMode})...`);
         await loadDefaultKeys();
 
         // Android Chrome: createWritable() has a known bug ("cached state changed"),
