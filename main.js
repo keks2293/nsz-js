@@ -364,7 +364,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
         try {
-            await navigator.serviceWorker.register('sw.js');
+            await navigator.serviceWorker.register('download-worker.js');
             await navigator.serviceWorker.ready;
             addLog('info', 'Service Worker ready for streaming download');
         } catch (e) {
