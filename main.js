@@ -287,8 +287,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                     }
                 }
 
-                // Try Service Worker streaming (modes: auto, sw)
-                if (!writable && (downloadMode === 'auto' || downloadMode === 'sw') && 'serviceWorker' in navigator && location.protocol !== 'file:') {
+                // Try Service Worker streaming (modes: auto, sw, fsa)
+                if (!writable && (downloadMode === 'auto' || downloadMode === 'sw' || downloadMode === 'fsa') && 'serviceWorker' in navigator && location.protocol !== 'file:') {
                     try {
                         const dl = new SWDownloader(outputName, fileIframes[i]);
                         await dl.start();
