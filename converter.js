@@ -138,7 +138,7 @@ class NSZConverter {
                                 onLog('error', `[CORRUPTED]  ${meta.name} - hash mismatch!`);
                             }
                         } else {
-                            const expectedFromFilename = file.name.toLowerCase().replace(/\.nsz$/i, '.nca');
+                            const expectedFromFilename = file.name.replace(/\.nsz$/i, '.nca');
                             if (hash.startsWith(expectedFromFilename.substring(0, 32))) {
                                 onLog('success', `[VERIFIED]   ${meta.name}`);
                             }
@@ -197,7 +197,7 @@ class NSZConverter {
                                 onLog('error', `[CORRUPTED]  ${meta.name} - hash mismatch!`);
                             }
                         } else {
-                            const expectedFromFilename = file.name.toLowerCase().replace(/\.nsz$/i, '.nca');
+                            const expectedFromFilename = file.name.replace(/\.nsz$/i, '.nca');
                             if (hash.startsWith(expectedFromFilename.substring(0, 32))) {
                                 onLog('success', `[VERIFIED]   ${meta.name}`);
                             }
