@@ -1,5 +1,9 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-05-30)
+
+1. **XCZ→XCI: proper nested XCI output** — `fs/xci.js`, `converter.js`, `nsz-cli.js` rewritten to produce full XCI with root HFS0 at `0xF000` containing partition entries (`secure`, `normal`, `update`, `logo`). Each partition is a nested HFS0 with `0x8000` header padding containing the decompressed NCA files. Matches Python nsz output structure. Previously produced a flat HFS0 at `0x200` which treated partition names as filenames.
+
 ## ✅ Recent Changes (2026-05-17)
 
 1. **SW download: hidden iframes pre-created upfront, one per file** — All hidden `<iframe>` elements are created before the conversion loop (`main.js:265-270`). Each file in the loop uses its pre-allocated iframe, navigating it to the SW stream URL only after the stream is registered. No `window.open` calls, no new tabs. (`main.js:36-39`, `main.js:265-270`)
@@ -186,5 +190,5 @@
 - **AES-CTR implementation** verified against Node.js native `crypto.createCipheriv('aes-128-ctr')` — both are correct
 - **zstd CLI piping + Node.js native AES-CTR** confirmed to produce byte-identical output to the reference
 - **PFS0 header padding**: Default uses 16-byte alignment (matching Python nsz). `--fix-padding` uses Python's `align0x20` (32-byte alignment, minimum 0x20 padding). All file data is identical between modes. Default mode output is byte-identical to Python nsz.
-- XCZ output is a flat HFS0 partition without full XCI header/metadata — enough for game loading but not a byte-for-byte copy of the original XCI structure.
+- **XCZ output is a proper nested XCI** — root HFS0 at `0xF000` with partition entries, each partition a nested HFS0 with `0x8000` header padding. Structure matches Python nsz output.
 
