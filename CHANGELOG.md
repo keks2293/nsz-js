@@ -2,13 +2,15 @@
 
 ## ✅ Recent Changes (2026-05-30)
 
-1. **XCZ→XCI: proper nested XCI output** — `fs/xci.js`, `converter.js`, `nsz-cli.js` rewritten to produce full XCI with root HFS0 at `0xF000` containing partition entries (`secure`, `normal`, `update`, `logo`). Each partition is a nested HFS0 with `0x8000` header padding containing the decompressed NCA files. Matches Python nsz output structure. Previously produced a flat HFS0 at `0x200` which treated partition names as filenames.
+1. **HFS0 offset convention changed to match hactool** — All HFS0 writers (`HFS0Writer`, `XCIWriter`, `_buildPartitionHfs0*` in converter.js, `nsz-cli.js` root/partition entries) now store `absolutePos - actualHeaderSize` instead of `absolutePos`. The `HFS0Reader` reconstructs the absolute offset as `baseOffset + actualHeaderSize + storedOffset`. This matches Python nsz commit `b445f666` and hactool's `absolute = base + header_size + cur_file->offset`. 7 sites updated across 3 files.
 
-2. **nsz-cli.js root HFS0 padded to 0x8000** — Root HFS0 now written as 0x8000 bytes (std. convention: partition offsets relative to HFS0 base at 0xF000, so first partition stored as 0x8000). Partition HFS0 uses dynamic `pHeaderSize` for actual padding. Fix: `writePos` and file entry offsets now use `pHeaderSize` instead of hardcoded `PARTITION_HEADER_SIZE`.
+2. **XCZ→XCI: proper nested XCI output** — `fs/xci.js`, `converter.js`, `nsz-cli.js` rewritten to produce full XCI with root HFS0 at `0xF000` containing partition entries (`secure`, `normal`, `update`, `logo`). Each partition is a nested HFS0 with `0x8000` header padding containing the decompressed NCA files. Matches Python nsz output structure. Previously produced a flat HFS0 at `0x200` which treated partition names as filenames.
 
-3. **Removed dead code in converter.js** — Cleaned up unused `inputFile`/`origFiles` variables in streaming path (lines 411-412) and unused `hfs0`/`hfs0Data` variables in memory path (lines 461-463).
+3. **nsz-cli.js root HFS0 padded to 0x8000** — Root HFS0 now written as 0x8000 bytes (std. convention: partition offsets relative to HFS0 base at 0xF000, so first partition stored as 0x8000 - actualHeader). Partition HFS0 uses dynamic `pHeaderSize` for actual padding. Fix: `writePos` and file entry offsets now use `pHeaderSize` instead of hardcoded `PARTITION_HEADER_SIZE`.
 
-4. **Fixed `nsz-cli.js` unused HFS0Writer import** — Removed unused HFS0Writer import from nsz-cli.js.
+4. **Removed dead code in converter.js** — Cleaned up unused `inputFile`/`origFiles` variables in streaming path (lines 411-412) and unused `hfs0`/`hfs0Data` variables in memory path (lines 461-463).
+
+5. **Fixed `nsz-cli.js` unused HFS0Writer import** — Removed unused HFS0Writer import from nsz-cli.js.
 
 ## ✅ Recent Changes (2026-05-17)
 

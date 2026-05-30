@@ -362,7 +362,7 @@ class NSZConverter {
             for (let i = 0; i < partitionMetas.length; i++) {
                 const po = partOffsets[i];
                 const pos = 0x10 + i * 0x40;
-                rootView.setBigUint64(pos, BigInt(po.offset - ROOT_HFS0_OFFSET), true);
+                rootView.setBigUint64(pos, BigInt(po.offset - ROOT_HFS0_OFFSET - rootActualHeader), true);
                 rootView.setBigUint64(pos + 8, BigInt(po.size), true);
                 rootView.setUint32(pos + 16, sOff, true);
                 rootView.setUint32(pos + 20, 0, true);
@@ -520,7 +520,7 @@ class NSZConverter {
         for (let i = 0; i < fileMetas.length; i++) {
             const m = fileMetas[i];
             const pos = 0x10 + i * 0x40;
-            view.setBigUint64(pos, BigInt(filePos), true);
+            view.setBigUint64(pos, BigInt(filePos - actualHeader), true);
             view.setBigUint64(pos + 8, BigInt(m.size), true);
             view.setUint32(pos + 16, sOff, true);
             view.setUint32(pos + 20, 0, true);
@@ -556,7 +556,7 @@ class NSZConverter {
         for (let i = 0; i < fileMetas.length; i++) {
             const m = fileMetas[i];
             const pos = 0x10 + i * 0x40;
-            view.setBigUint64(pos, BigInt(filePos), true);
+            view.setBigUint64(pos, BigInt(filePos - actualHeader), true);
             view.setBigUint64(pos + 8, BigInt(m.size), true);
             view.setUint32(pos + 16, sOff, true);
             view.setUint32(pos + 20, 0, true);

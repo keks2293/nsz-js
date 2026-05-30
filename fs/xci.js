@@ -47,7 +47,7 @@ export class HFS0Reader {
 
             this.files.push({
                 name,
-                offset: baseOffset + storedOffset,
+                offset: baseOffset + this._headerSize + storedOffset,
                 size,
                 storedOffset
             });
@@ -100,7 +100,7 @@ export class HFS0Writer {
             const size = data instanceof ArrayBuffer ? data.byteLength : data.length;
             const pos = 0x10 + i * 0x40;
 
-            view.setBigUint64(pos, BigInt(filePos), true);
+            view.setBigUint64(pos, BigInt(filePos - actualHeaderSize), true);
             view.setBigUint64(pos + 8, BigInt(size), true);
             view.setUint32(pos + 16, stringOffset, true);
             view.setUint32(pos + 20, 0, true);
@@ -275,7 +275,7 @@ export class XCIWriter {
         for (let i = 0; i < partitionEntries.length; i++) {
             const entry = partitionEntries[i];
             const pos = rootHfs0Base + 0x10 + i * 0x40;
-            view.setBigUint64(pos, BigInt(entry.dataOffset - rootHfs0Base), true);
+            view.setBigUint64(pos, BigInt(entry.dataOffset - rootHfs0Base - rootActualHeader), true);
             view.setBigUint64(pos + 8, BigInt(entry.dataSize), true);
             view.setUint32(pos + 16, stringOffset, true);
             view.setUint32(pos + 20, 0, true);
