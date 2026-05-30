@@ -218,7 +218,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
         for (let i = 0; i < partitionMetas.length; i++) {
             const po = partOffsets[i];
             const pos = 0x10 + i * 0x40;
-            rootHeader.writeBigUInt64LE(BigInt(po.offsetInSection + ROOT_HFS0_PADDED_SIZE), pos);
+            rootHeader.writeBigUInt64LE(BigInt(po.offsetInSection + ROOT_HFS0_PADDED_SIZE - rootActualHeader), pos);
             rootHeader.writeBigUInt64LE(BigInt(po.size), pos + 8);
             rootHeader.writeUInt32LE(sOff, pos + 16);
             rootHeader.writeUInt32LE(0, pos + 20);
@@ -260,7 +260,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
             for (let fi = 0; fi < pm.files.length; fi++) {
                 const m = pm.files[fi];
                 const pos = 0x10 + fi * 0x40;
-                pHeader.writeBigUInt64LE(BigInt(pHeaderSize + pfOff), pos);
+                pHeader.writeBigUInt64LE(BigInt(pHeaderSize + pfOff - pActualHeader), pos);
                 pHeader.writeBigUInt64LE(BigInt(m.size), pos + 8);
                 pHeader.writeUInt32LE(pStrOff, pos + 16);
                 pHeader.writeUInt32LE(0, pos + 20);
