@@ -129,108 +129,172 @@ async function convertNCZ(inReader, inputFd, inputPath, outputPath, keys) {
 
 async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
     console.log('Detected XCZ file');
-    const { XCIReader, HFS0Writer, XCIWriter } = await import('./fs/xci.js');
+    const { XCIReader } = await import('./fs/xci.js');
     const outPath = outputPath || inputPath.replace(/\.xcz$/i, '.xci');
     console.log(`Output: ${outPath}`);
 
     const xci = new XCIReader(inReader);
     await xci.parse();
-    const files = xci.getSecurePartition();
-    console.log(`HFS0 files: ${files.length}`);
+    const partitions = xci.getPartitions();
+    console.log(`Partitions: ${partitions.map(p => p.name).join(', ')}`);
 
-    // First pass: determine output sizes
-    const outputMeta = [];
-    for (const f of files) {
-        const isNcz = f.name.toLowerCase().endsWith('.ncz');
-        const outputName = isNcz ? f.name.replace(/\.ncz$/i, '.nca') : f.name;
-        if (isNcz) {
-            const nczReader = new FileDescriptorReader(inputFd, f.offset, f.size);
-            const tmpDecomp = new NCZDecompressor(nczReader, keys);
-            const { ncaSize } = await tmpDecomp.getSections();
-            outputMeta.push({ name: outputName, size: ncaSize, isNcz: true, offset: f.offset, compressedSize: f.size });
-        } else {
-            outputMeta.push({ name: outputName, size: f.size, isNcz: false, offset: f.offset });
+    const PARTITION_HEADER_SIZE = 0x8000;
+    const ROOT_HFS0_OFFSET = 0xF000;
+
+    // First pass: read each partition's files and determine output sizes
+    const partitionMetas = [];
+    for (const partition of partitions) {
+        if (partition.size === 0) {
+            partitionMetas.push({ name: partition.name, files: [], totalSize: 0, hfs0Data: null });
+            continue;
         }
+        let hfs0;
+        try {
+            hfs0 = await xci.readPartitionFiles(partition);
+        } catch (e) {
+            console.log(`  ${partition.name}: cannot parse as HFS0, copying raw (${e.message})`);
+            const buf = Buffer.alloc(partition.size);
+            fs.readSync(inputFd, buf, 0, partition.size, partition.offset);
+            partitionMetas.push({ name: partition.name, raw: true, rawData: buf, files: [], totalSize: partition.size, hfs0Data: null });
+            continue;
+        }
+        const pFiles = hfs0.getFiles();
+        console.log(`  ${partition.name}: ${pFiles.length} files`);
+
+        const fileMetas = [];
+        for (const f of pFiles) {
+            const isNcz = f.name.toLowerCase().endsWith('.ncz');
+            const outputName = isNcz ? f.name.replace(/\.ncz$/i, '.nca') : f.name;
+            if (isNcz) {
+                const nczReader = new FileDescriptorReader(inputFd, f.offset, f.size);
+                const tmpDecomp = new NCZDecompressor(nczReader, keys);
+                const { ncaSize } = await tmpDecomp.getSections();
+                fileMetas.push({ name: outputName, size: ncaSize, isNcz: true, offset: f.offset, nczLen: f.size, inputName: f.name });
+            } else {
+                fileMetas.push({ name: outputName, size: f.size, isNcz: false, offset: f.offset, inputName: f.name });
+            }
+        }
+        const totalSize = fileMetas.reduce((s, m) => s + m.size, 0);
+        partitionMetas.push({ name: partition.name, files: fileMetas, totalSize, raw: false, rawData: null });
     }
 
-    // Build HFS0 header to determine total size
-    let fileRelOffset = 0;
-    for (const m of outputMeta) {
-        m.fileOffset = fileRelOffset;
-        fileRelOffset += m.size;
-    }
-    const stringTable = outputMeta.map(m => m.name).join('\0') + '\0';
-    const stringTableBytes = Buffer.from(stringTable, 'utf-8');
-    const hfs0HeaderBase = 0x10 + outputMeta.length * 0x40;
-    const hfs0TotalHeader = hfs0HeaderBase + stringTableBytes.length;
-    const hfs0TotalSize = hfs0TotalHeader + fileRelOffset;
+    // Build root HFS0 header
+    const rootStringTable = partitionMetas.map(p => p.name).join('\0') + '\0';
+    const rootStringBytes = Buffer.from(rootStringTable, 'utf-8');
+    const rootActualHeader = 0x10 + partitionMetas.length * 0x40 + rootStringBytes.length;
 
-    // Write output XCI
+    let currentDataOffset = ROOT_HFS0_OFFSET + rootActualHeader;
+    const partOffsets = [];
+    for (const pm of partitionMetas) {
+        const dataSize = pm.raw ? pm.rawData.length : Math.max(PARTITION_HEADER_SIZE, pm.totalSize);
+        partOffsets.push({ name: pm.name, offset: currentDataOffset, dataSize });
+        currentDataOffset += dataSize;
+    }
+    const totalFileSize = currentDataOffset;
+
+    // Write output
     const outputFd = fs.openSync(outPath, 'w');
     try {
-        const xciHeader = await inReader.read(0, 0x200);
-        const xciWriter = new XCIWriter(xciHeader);
-        const hfs0Offset = 0x200;
-
         // Write XCI header
-        const hdrView = new DataView(xciHeader.buffer, xciHeader.byteOffset, xciHeader.byteLength);
-
-        // Build HFS0 header buffer
-        const hfs0Header = Buffer.alloc(hfs0TotalHeader);
-        hfs0Header[0] = 0x48; hfs0Header[1] = 0x46; hfs0Header[2] = 0x53; hfs0Header[3] = 0x30;
-        hfs0Header.writeUInt32LE(outputMeta.length, 4);
-        hfs0Header.writeUInt32LE(stringTableBytes.length, 8);
-        hfs0Header.writeUInt32LE(0, 12);
-        stringTableBytes.copy(hfs0Header, hfs0HeaderBase);
-
-        for (let i = 0; i < outputMeta.length; i++) {
-            const m = outputMeta[i];
-            const pos = 0x10 + i * 0x40;
-            const nameOffset = stringTable.indexOf(m.name);
-            hfs0Header.writeBigUInt64LE(BigInt(m.fileOffset), pos);
-            hfs0Header.writeBigUInt64LE(BigInt(m.size), pos + 8);
-            hfs0Header.writeUInt32LE(nameOffset, pos + 16);
-            hfs0Header.writeUInt32LE(0, pos + 20);
-            hfs0Header.writeUInt32LE(0, pos + 24);
-            hfs0Header.writeUInt32LE(0, pos + 28);
-            hfs0Header.writeBigUInt64LE(0n, pos + 32);
-        }
-
-        // Write XCI header bytes with updated offsets
+        const xciHeader = await inReader.read(0, 0x200);
         const xciHeaderOut = Buffer.alloc(0x200);
         xciHeaderOut.set(xciHeader.slice(0, 0x200), 0);
-        xciHeaderOut.writeBigUInt64LE(BigInt(hfs0Offset + hfs0TotalSize), 0x118);
-        xciHeaderOut.writeBigUInt64LE(BigInt(hfs0Offset), 0x130);
-        const hfs0HeaderSize = 0x10 + outputMeta.length * 0x40 + stringTableBytes.length;
-        xciHeaderOut.writeBigUInt64LE(BigInt(hfs0HeaderSize), 0x138);
+        xciHeaderOut.writeBigUInt64LE(BigInt(totalFileSize), 0x118);
+        xciHeaderOut.writeBigUInt64LE(BigInt(ROOT_HFS0_OFFSET), 0x130);
+        xciHeaderOut.writeBigUInt64LE(BigInt(rootActualHeader), 0x138);
         fs.writeSync(outputFd, xciHeaderOut, 0, 0x200, 0);
 
-        // Write HFS0 header
-        fs.writeSync(outputFd, hfs0Header, 0, hfs0TotalHeader, hfs0Offset);
+        // Write root HFS0 header
+        const rootHeader = Buffer.alloc(rootActualHeader);
+        rootHeader[0] = 0x48; rootHeader[1] = 0x46; rootHeader[2] = 0x53; rootHeader[3] = 0x30;
+        rootHeader.writeUInt32LE(partitionMetas.length, 4);
+        rootHeader.writeUInt32LE(rootStringBytes.length, 8);
+        rootHeader.writeUInt32LE(0, 12);
+        rootStringBytes.copy(rootHeader, 0x10 + partitionMetas.length * 0x40);
 
-        // Write files
-        let writePos = hfs0Offset + hfs0TotalHeader;
-        for (let i = 0; i < files.length; i++) {
-            const f = files[i];
-            const m = outputMeta[i];
-            if (m.isNcz) {
-                console.log(`Decompressing: ${f.name} -> ${m.name}`);
-                const nczReader = new FileDescriptorReader(inputFd, f.offset, f.size);
-                const decomp = new NCZDecompressor(nczReader, keys);
-                const hasher = new (await import('./crypto/sha256.js')).SHA256();
-                await decomp.decompress(null, async (chunk, offset) => {
-                    hasher.update(chunk);
-                    const buf = Buffer.from(chunk);
-                    fs.writeSync(outputFd, buf, 0, buf.length, writePos + offset);
-                });
-                console.log(`  SHA256: ${hasher.hexdigest()}`);
-            } else {
-                console.log(`Copying: ${f.name} -> ${m.name}`);
-                const buf = Buffer.alloc(f.size);
-                fs.readSync(inputFd, buf, 0, f.size, f.offset);
-                fs.writeSync(outputFd, buf, 0, f.size, writePos);
+        let sOff = 0;
+        for (let i = 0; i < partitionMetas.length; i++) {
+            const po = partOffsets[i];
+            const pos = 0x10 + i * 0x40;
+            rootHeader.writeBigUInt64LE(BigInt(po.offset - ROOT_HFS0_OFFSET), pos);
+            rootHeader.writeBigUInt64LE(BigInt(po.dataSize), pos + 8);
+            rootHeader.writeUInt32LE(sOff, pos + 16);
+            rootHeader.writeUInt32LE(0, pos + 20);
+            rootHeader.writeUInt32LE(0, pos + 24);
+            rootHeader.writeUInt32LE(0, pos + 28);
+            rootHeader.writeBigUInt64LE(0n, pos + 32);
+            const enc = Buffer.from(po.name, 'utf-8');
+            enc.copy(rootHeader, 0x10 + partitionMetas.length * 0x40 + sOff);
+            sOff += enc.length + 1;
+        }
+        fs.writeSync(outputFd, rootHeader, 0, rootActualHeader, ROOT_HFS0_OFFSET);
+
+        // Write partitions
+        for (let pi = 0; pi < partitionMetas.length; pi++) {
+            const pm = partitionMetas[pi];
+            const po = partOffsets[pi];
+
+            if (pm.raw) {
+                fs.writeSync(outputFd, pm.rawData, 0, pm.rawData.length, po.offset);
+                console.log(`  [RAW] ${pm.name}: ${pm.rawData.length} bytes`);
+                continue;
             }
-            writePos += m.size;
+
+            // Build partition HFS0 header
+            const pStringTable = pm.files.map(m => m.name).join('\0') + '\0';
+            const pStringBytes = Buffer.from(pStringTable, 'utf-8');
+            const pActualHeader = 0x10 + pm.files.length * 0x40 + pStringBytes.length;
+            const pHeaderSize = Math.max(PARTITION_HEADER_SIZE, pActualHeader);
+
+            const pHeader = Buffer.alloc(pHeaderSize);
+            pHeader[0] = 0x48; pHeader[1] = 0x46; pHeader[2] = 0x53; pHeader[3] = 0x30;
+            pHeader.writeUInt32LE(pm.files.length, 4);
+            pHeader.writeUInt32LE(pStringBytes.length, 8);
+            pHeader.writeUInt32LE(0, 12);
+            pStringBytes.copy(pHeader, 0x10 + pm.files.length * 0x40);
+
+            let pfOff = 0;
+            let pStrOff = 0;
+            for (let fi = 0; fi < pm.files.length; fi++) {
+                const m = pm.files[fi];
+                const pos = 0x10 + fi * 0x40;
+                pHeader.writeBigUInt64LE(BigInt(PARTITION_HEADER_SIZE + pfOff), pos);
+                pHeader.writeBigUInt64LE(BigInt(m.size), pos + 8);
+                pHeader.writeUInt32LE(pStrOff, pos + 16);
+                pHeader.writeUInt32LE(0, pos + 20);
+                pHeader.writeUInt32LE(0, pos + 24);
+                pHeader.writeUInt32LE(0, pos + 28);
+                pHeader.writeBigUInt64LE(0n, pos + 32);
+                const enc = Buffer.from(m.name, 'utf-8');
+                enc.copy(pHeader, 0x10 + pm.files.length * 0x40 + pStrOff);
+                pStrOff += enc.length + 1;
+                pfOff += m.size;
+            }
+            fs.writeSync(outputFd, pHeader, 0, pHeaderSize, po.offset);
+
+            // Write files within partition
+            let writePos = po.offset + PARTITION_HEADER_SIZE;
+            for (let fi = 0; fi < pm.files.length; fi++) {
+                const m = pm.files[fi];
+                if (m.isNcz) {
+                    console.log(`Decompressing: ${pm.name}/${m.inputName} -> ${m.name}`);
+                    const nczReader = new FileDescriptorReader(inputFd, m.offset, m.nczLen);
+                    const decomp = new NCZDecompressor(nczReader, keys);
+                    const hasher = new SHA256();
+                    await decomp.decompress(null, async (chunk, offset) => {
+                        hasher.update(chunk);
+                        const buf = Buffer.from(chunk);
+                        fs.writeSync(outputFd, buf, 0, buf.length, writePos + offset);
+                    });
+                    console.log(`  SHA256: ${hasher.hexdigest()}`);
+                } else {
+                    console.log(`Copying: ${pm.name}/${m.inputName} -> ${m.name}`);
+                    const buf = Buffer.alloc(m.size);
+                    fs.readSync(inputFd, buf, 0, m.size, m.offset);
+                    fs.writeSync(outputFd, buf, 0, m.size, writePos);
+                }
+                writePos += m.size;
+            }
         }
     } finally {
         fs.closeSync(outputFd);

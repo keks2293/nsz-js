@@ -39,6 +39,16 @@ With 16-byte alignment, the 515-byte header took 13 bytes of padding to reach 52
 
 nsz-js matches this exact behavior when `fixPadding` is enabled. When disabled (default), nsz-js uses 16-byte alignment `(16 - n%16) % 16`, matching Python nsz's default output format. Both modes produce identical file data — only the header padding differs. nsz-js default mode output has been verified byte-identical to Python nsz output.
 
+### `--fix-padding` per-format applicability
+
+`--fix-padding` only applies to **PFS0 containers** (NSZ→NSP). Per-format behavior:
+
+| Format | Python nsz | nsz-js (nsz-cli.js) | Notes |
+|--------|-----------|---------------------|-------|
+| NSZ→NSP | ✅ Applied to PFS0 output | ✅ `PFS0Writer(fixPadding)` | Both identical |
+| NCZ→NCA | ❌ Not passed | ❌ Not wired — correct | NCA has no PFS0 |
+| XCZ→XCI | ⚠️ Accepted but affects nested PFS0 inside HFS0 | ❌ Not wired — correct for flat HFS0 output | Python produces full XCI with nested PFS0; nsz-js produces flat HFS0 partition (no nested PFS0), so fixPadding is structurally irrelevant |
+
 **Decompression flow:**
 1. Parse PFS0 header from container
 2. For each `.ncz` file: decompress using `__decompressNcz()`
@@ -69,6 +79,28 @@ nsz-js matches this exact behavior when `fixPadding` is enabled. When disabled (
 
 **Key handling:**
 - Uses `originalXciPath` to copy XCI metadata from source
+
+**nsz-js XCZ→XCI implementation (2026-05-30):
+- `fs/xci.js` — `XCIReader` now properly reads nested partitions: root HFS0 at `hfs0Offset`, then each partition entry's data parsed as a nested HFS0
+- `fs/xci.js` — `HFS0Writer` supports `headerSize` padding (0x8000) matching Python's `Hfs0Stream`
+- `fs/xci.js` — `XCIWriter` builds full nested XCI: root HFS0 at `0xF000` + partition entries + per-partition nested HFS0
+- `converter.js` — `decompressXCZtoXCI` iterates partitions, decompresses NCZ→NCA within each
+- `nsz-cli.js` — `convertXCZ` uses same nested partition structure with proper 0x8000 header padding
+
+**Structure of nsz-js XCZ output:**
+```
+0x000000: XCI Header (0x200 bytes)
+...
+0x00F000: Root HFS0 (partition table)
+           - "secure" → data at 0xF000 + 0x?? + 0x8000
+           - "normal" → ...
+           - "update" → ...
+           - "logo"   → ...
+0x00F000 + root_header_size: partition data area
+           Each partition starts at absolute offset (from root HFS0 entry)
+           Partition HFS0 header (padded to 0x8000)
+           Partition file data (at partition_offset + 0x8000)
+```
 
 ---
 
@@ -313,10 +345,10 @@ if hexHash[:32] == fileNameHash:
 | `.nacp` | `Nacp` | ❌ Not supported | Missing |
 | `.tik` | `Ticket` | ✅ Partial (`ticket.js` — Ticket parser) | Reading only, no handling |
 | `.cnmt` | `Cnmt` | ✅ Partial (`ticket.js` — Cnmt parser + hash extraction) | Reading only |
-| `normal` | `Hfs0` | ❌ Not supported | Missing |
-| `logo` | `Hfs0` | ❌ Not supported | Missing |
-| `update` | `Hfs0` | ❌ Not supported | Missing |
-| `secure` | `Hfs0` | ❌ Not supported | Missing |
+| `normal` | `Hfs0` | ✅ `xci.js` — nested HFS0 reading | Via XCZ→XCI |
+| `logo` | `Hfs0` | ✅ `xci.js` — nested HFS0 reading | Via XCZ→XCI |
+| `update` | `Hfs0` | ✅ `xci.js` — nested HFS0 reading | Via XCZ→XCI |
+| `secure` | `Hfs0` | ✅ `xci.js` — nested HFS0 reading | Via XCZ→XCI |
 
 ### Key gaps in nsz-js:
 
