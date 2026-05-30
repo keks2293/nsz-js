@@ -408,9 +408,6 @@ class NSZConverter {
                 let writePos = po.offset + PARTITION_HEADER_SIZE;
                 for (let fi = 0; fi < pm.files.length; fi++) {
                     const meta = pm.files[fi];
-                    const inputFile = partitions.find(p => p.name === pm.name);
-                    const origFiles = inputFile ? (await xci.readPartitionFiles(inputFile)).getFiles() : [];
-
                     if (meta.isNcz) {
                         const hasher = new SHA256();
                         const reader = new FileSliceReader(file, meta.fileOffset, meta.nczLen);
@@ -458,10 +455,6 @@ class NSZConverter {
             for (const pm of partitionMetas) {
                 if (pm.raw) {
                     const rawData = await file.slice(pm.offset, pm.offset + pm.size).arrayBuffer();
-                    const hfs0 = await new Promise((resolve) => {
-                        resolve(new HFS0Writer().build());
-                    });
-                    const hfs0Data = pm.hfs0Data || new Uint8Array(rawData);
                     xciWriter.addPartition(pm.name, new Uint8Array(rawData));
                     onLog('info', `  Copied raw partition ${pm.name}: ${rawData.byteLength} bytes`);
                     dataOverall += pm.size;

@@ -4,6 +4,12 @@
 
 1. **XCZ→XCI: proper nested XCI output** — `fs/xci.js`, `converter.js`, `nsz-cli.js` rewritten to produce full XCI with root HFS0 at `0xF000` containing partition entries (`secure`, `normal`, `update`, `logo`). Each partition is a nested HFS0 with `0x8000` header padding containing the decompressed NCA files. Matches Python nsz output structure. Previously produced a flat HFS0 at `0x200` which treated partition names as filenames.
 
+2. **nsz-cli.js root HFS0 padded to 0x8000** — Root HFS0 now written as 0x8000 bytes (std. convention: partition offsets relative to HFS0 base at 0xF000, so first partition stored as 0x8000). Partition HFS0 uses dynamic `pHeaderSize` for actual padding. Fix: `writePos` and file entry offsets now use `pHeaderSize` instead of hardcoded `PARTITION_HEADER_SIZE`.
+
+3. **Removed dead code in converter.js** — Cleaned up unused `inputFile`/`origFiles` variables in streaming path (lines 411-412) and unused `hfs0`/`hfs0Data` variables in memory path (lines 461-463).
+
+4. **Fixed `nsz-cli.js` unused HFS0Writer import** — Removed unused HFS0Writer import from nsz-cli.js.
+
 ## ✅ Recent Changes (2026-05-17)
 
 1. **SW download: hidden iframes pre-created upfront, one per file** — All hidden `<iframe>` elements are created before the conversion loop (`main.js:265-270`). Each file in the loop uses its pre-allocated iframe, navigating it to the SW stream URL only after the stream is registered. No `window.open` calls, no new tabs. (`main.js:36-39`, `main.js:265-270`)
