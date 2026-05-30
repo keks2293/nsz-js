@@ -315,11 +315,6 @@ export class XCIWriter {
 
         output.set(this.header, 0);
 
-        const hfs0View = new DataView(this.partitions[0].data.buffer, this.partitions[0].data.byteOffset, this.partitions[0].data.byteLength);
-        const pc = hfs0View.getUint32(4, true);
-        const ps = hfs0View.getUint32(8, true);
-        const sampleHfs0HeaderSize = 0x10 + pc * 0x40 + ps;
-
         view.setBigUint64(0x118, BigInt(totalSize), true);
         view.setBigUint64(0x130, BigInt(ROOT_HFS0_OFFSET), true);
         view.setBigUint64(0x138, BigInt(rootActualHeader), true);
