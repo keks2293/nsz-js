@@ -4,7 +4,7 @@ import fs from 'fs';
 import { PFS0, PFS0Writer } from './fs/pfs0.js';
 import { NCZDecompressor, FileDescriptorReader, BufferReader } from './fs/ncz.js';
 import { KeysParser } from './keys.js';
-import { sha256 } from './crypto/sha256.js';
+import { SHA256, sha256 } from './crypto/sha256.js';
 
 function formatBytes(bytes) {
     if (bytes === 0) return '0 B';
@@ -109,7 +109,7 @@ async function convertNCZ(inReader, inputFd, inputPath, outputPath, keys) {
 
     const outputFd = fs.openSync(outPath, 'w');
     try {
-        const hasher = new (await import('./crypto/sha256.js')).SHA256();
+        const hasher = new SHA256();
         await decomp.decompress(null, async (chunk, offset) => {
             hasher.update(chunk);
             const buf = Buffer.from(chunk);
@@ -288,7 +288,7 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
                 console.log(`Decompressing: ${f.name} -> ${meta.name}`);
                 const nczReader = new FileDescriptorReader(inputFd, f.offset, f.size);
                 const decomp = new NCZDecompressor(nczReader, keys);
-                const hasher = new (await import('./crypto/sha256.js')).SHA256();
+                const hasher = new SHA256();
                 await decomp.decompress(null, async (chunk, offset) => {
                     hasher.update(chunk);
                     const buf = Buffer.from(chunk);
