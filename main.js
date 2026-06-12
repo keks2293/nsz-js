@@ -100,12 +100,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     function isCompressedGame(name) {
         const lower = name.toLowerCase();
-        return lower.endsWith('.nsz') || lower.endsWith('.ncz') || lower.endsWith('.xcz');
+        return lower.endsWith('.nsz') || lower.endsWith('.xcz');
     }
 
     function detectFileType(name) {
         const lower = name.toLowerCase();
-        if (lower.endsWith('.ncz')) return 'ncz';
         if (lower.endsWith('.xcz')) return 'xcz';
         return 'nsp';
     }
@@ -306,11 +305,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
             try {
                 const fileType = detectFileType(file.name);
-                const outputName = fileType === 'ncz'
-                    ? file.name.replace(/\.ncz$/i, '.nca')
-                    : fileType === 'xcz'
-                        ? file.name.replace(/\.xcz$/i, '.xci')
-                        : file.name.replace(/\.nsz$/i, '.nsp');
+                const outputName = fileType === 'xcz'
+                    ? file.name.replace(/\.xcz$/i, '.xci')
+                    : file.name.replace(/\.nsz$/i, '.nsp');
 
                 let writable = null;
                 if (downloadMode === 'blob') {
@@ -353,15 +350,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 }
 
                 let result;
-                if (fileType === 'ncz') {
-                    result = await converter.decompressNCZtoNCA(file, {
-                        onProgress: (progress, text) => {
-                            updateProgress((i + progress) / files.length, text);
-                        },
-                        onLog: addLog,
-                        writable
-                    });
-                } else if (fileType === 'xcz') {
+                if (fileType === 'xcz') {
                     result = await converter.decompressXCZtoXCI(file, {
                         onProgress: (progress, text) => {
                             updateProgress((i + progress) / files.length, text);
