@@ -66,17 +66,25 @@ window.addEventListener('DOMContentLoaded', async () => {
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const fileList = document.getElementById('fileList');
+    const fileListScroll = document.getElementById('fileListScroll');
+    const fileCount = document.getElementById('fileCount');
+    const fileInfoPanel = document.getElementById('fileInfoPanel');
+    const infoTotalSize = document.getElementById('infoTotalSize');
+    const infoFiles = document.getElementById('infoFiles');
+    const infoFormats = document.getElementById('infoFormats');
     const progressContainer = document.getElementById('progressContainer');
-        const progressFill = document.getElementById('progressFill');
-        const progressPercent = document.getElementById('progressPercent');
-        const progressText = document.getElementById('progressText');
+    const progressFill = document.getElementById('progressFill');
+    const progressPercent = document.getElementById('progressPercent');
+    const progressText = document.getElementById('progressText');
     const logContainer = document.getElementById('logContainer');
     const convertBtn = document.getElementById('convertBtn');
     const clearBtn = document.getElementById('clearBtn');
     const fixPaddingBtn = document.getElementById('fixPaddingBtn');
+    const overwriteBtn = document.getElementById('overwriteBtn');
     const status = document.getElementById('status');
 
     let fixPadding = false;
+    let overwrite = false;
     let downloadMode = 'auto';
 
     const converter = new NSZConverter();
@@ -106,7 +114,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         const entry = document.createElement('div');
         entry.className = `log-entry ${type}`;
         const time = new Date().toLocaleTimeString();
-        entry.textContent = `[${time}] ${message}`;
+        entry.innerHTML = `<span class="time">${time}</span>${escapeHtml(message)}`;
         logContainer.appendChild(entry);
         logContainer.scrollTop = logContainer.scrollHeight;
     }
@@ -122,35 +130,57 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 
     function updateFileList() {
-        fileList.innerHTML = '';
+        fileListScroll.innerHTML = '';
         
+        const extCounts = {};
+        let totalSize = 0;
+
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
+            totalSize += file.size;
+            const ext = file.name.split('.').pop().toLowerCase();
+            extCounts[ext] = (extCounts[ext] || 0) + 1;
+
             const item = document.createElement('div');
             item.className = 'file-item';
             
+            const extClass = ['nsz'].includes(ext) ? 'nsz' : ext;
+            
             item.innerHTML = `
-                <div>
-                    <div class="file-item-name">${escapeHtml(file.name)}</div>
-                    <div class="file-item-size">${formatBytes(file.size)}</div>
+                <div class="file-icon ${extClass}">${ext.toUpperCase()}</div>
+                <div class="file-info">
+                    <div class="file-name">${escapeHtml(file.name)}</div>
+                    <div class="file-meta">${formatBytes(file.size)}</div>
                 </div>
-                <button class="remove-btn" data-index="${i}">Remove</button>
+                <button class="remove-btn" data-index="${i}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
             `;
             
-            fileList.appendChild(item);
+            fileListScroll.appendChild(item);
         }
 
-        fileList.querySelectorAll('.remove-btn').forEach(btn => {
+        fileListScroll.querySelectorAll('.remove-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const index = parseInt(e.target.dataset.index);
+                const index = parseInt(e.currentTarget.dataset.index);
                 files.splice(index, 1);
                 updateFileList();
             });
         });
 
-        fileList.style.display = files.length > 0 ? 'block' : 'none';
-        clearBtn.style.display = files.length > 0 ? 'block' : 'none';
-        convertBtn.disabled = files.length === 0;
+        const hasFiles = files.length > 0;
+        fileList.classList.toggle('visible', hasFiles);
+        fileInfoPanel.classList.toggle('visible', hasFiles);
+        clearBtn.classList.toggle('hidden', !hasFiles);
+        convertBtn.disabled = !hasFiles;
+
+        fileCount.textContent = `${files.length} file${files.length !== 1 ? 's' : ''}`;
+        infoTotalSize.textContent = formatBytes(totalSize);
+        infoFiles.textContent = files.length;
+        infoFormats.textContent = Object.keys(extCounts).map(e => e.toUpperCase()).join(', ');
     }
 
     function escapeHtml(text) {
@@ -204,20 +234,27 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     fixPaddingBtn.addEventListener('click', () => {
         fixPadding = !fixPadding;
-        fixPaddingBtn.textContent = `Fix Padding: ${fixPadding ? 'ON' : 'OFF'}`;
-        fixPaddingBtn.style.background = fixPadding ? 'linear-gradient(135deg, #27ae60, #2ecc71)' : 'linear-gradient(135deg, #95a5a6, #7f8c8d)';
+        fixPaddingBtn.classList.toggle('active', fixPadding);
         addLog('info', `Fix Padding ${fixPadding ? 'enabled' : 'disabled'}`);
     });
 
-    document.getElementById('modeOptions').addEventListener('change', (e) => {
-        const label = e.target.closest('.mode-btn');
-        if (!label) return;
-        const radio = label.querySelector('input');
-        if (!radio) return;
-        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-        label.classList.add('active');
-        downloadMode = radio.value;
-        addLog('info', `Download mode: ${radio.value}`);
+    overwriteBtn.addEventListener('click', () => {
+        overwrite = !overwrite;
+        overwriteBtn.classList.toggle('active', overwrite);
+        addLog('info', `Overwrite ${overwrite ? 'enabled' : 'disabled'}`);
+    });
+
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const radio = btn.querySelector('input');
+            if (!radio) return;
+            radio.checked = true;
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            downloadMode = radio.value;
+            addLog('info', `Download mode: ${radio.value}`);
+        });
     });
 
     convertBtn.addEventListener('click', async () => {
@@ -280,7 +317,22 @@ window.addEventListener('DOMContentLoaded', async () => {
                     // Blob only — skip FSA and SW
                 } else if (directoryHandle && (downloadMode === 'auto' || downloadMode === 'fsa')) {
                     try {
-                        const fileHandle = await directoryHandle.getFileHandle(outputName, { create: true });
+                        let fileHandle;
+                        if (overwrite) {
+                            fileHandle = await directoryHandle.getFileHandle(outputName, { create: true });
+                        } else {
+                            try {
+                                fileHandle = await directoryHandle.getFileHandle(outputName);
+                                addLog('warning', `File exists, skipping: ${outputName}`);
+                                files.splice(i, 1);
+                                i--;
+                                fileInput.value = '';
+                                updateFileList();
+                                continue;
+                            } catch {
+                                fileHandle = await directoryHandle.getFileHandle(outputName, { create: true });
+                            }
+                        }
                         writable = await fileHandle.createWritable();
                     } catch (e) {
                         addLog('warning', 'Failed to create file: ' + e.message);

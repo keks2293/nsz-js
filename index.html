@@ -1,392 +1,773 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <script>(function(s){s.dataset.zone='11024396',s.src='https://nap5k.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NSZ to NSP Converter (Local)</title>
+    <title>NSZ Converter — Professional Tool</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <!-- zstddec.mjs is imported via ES module in crypto/zstd.js and ncz.js -->
     <style>
+        :root {
+            --bg-primary: #0f0f1a;
+            --bg-secondary: #161625;
+            --bg-card: #1c1c2e;
+            --bg-elevated: #222236;
+            --border-color: #2a2a40;
+            --border-active: #4a6cf7;
+            --text-primary: #e8e8f0;
+            --text-secondary: #8888a0;
+            --text-muted: #5a5a70;
+            --accent: #4a6cf7;
+            --accent-hover: #5b7bf8;
+            --accent-glow: rgba(74, 108, 247, 0.15);
+            --success: #2ecc71;
+            --warning: #f39c12;
+            --error: #e74c3c;
+            --radius: 10px;
+            --radius-sm: 6px;
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+            --transition: 0.2s ease;
+        }
+
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
         }
+
         html {
-            background: #16213e;
+            background: var(--bg-primary);
         }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
             min-height: 100vh;
             min-height: 100dvh;
             display: flex;
             justify-content: center;
             align-items: flex-start;
-            padding: 10px;
-        }
-        .container {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 14px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             padding: 20px;
-            max-width: 800px;
+            color: var(--text-primary);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        .container {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 28px;
+            max-width: 720px;
             width: 100%;
+            box-shadow: var(--shadow);
         }
-        h1 {
-            color: #1a1a2e;
+
+        /* Header */
+        .header {
             text-align: center;
-            margin-bottom: 8px;
-            font-size: 1.5em;
+            margin-bottom: 24px;
         }
-        .subtitle {
-            text-align: center;
-            color: #666;
-            margin-bottom: 16px;
-            font-size: 14px;
+
+        .header h1 {
+            font-size: 1.6em;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+            margin-bottom: 4px;
         }
+
+        .header h1 .accent {
+            color: var(--accent);
+        }
+
+        .header .subtitle {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: var(--accent-glow);
+            border: 1px solid rgba(74, 108, 247, 0.25);
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 20px;
+            margin-top: 10px;
+            letter-spacing: 0.02em;
+        }
+
+        .badge svg {
+            width: 12px;
+            height: 12px;
+        }
+
+        /* Drop Zone */
         .drop-zone {
-            border: 2px dashed #3498db;
-            border-radius: 12px;
-            padding: 24px;
+            border: 2px dashed var(--border-color);
+            border-radius: var(--radius);
+            padding: 36px 20px;
             text-align: center;
             cursor: pointer;
-            transition: all 0.3s ease;
-            background: #f8f9fa;
+            transition: all var(--transition);
+            background: var(--bg-card);
             margin-bottom: 16px;
+            position: relative;
         }
-        .drop-zone:hover, .drop-zone.dragover {
-            background: #e3f2fd;
-            border-color: #2196f3;
+
+        .drop-zone:hover {
+            border-color: var(--accent);
+            background: rgba(74, 108, 247, 0.04);
         }
+
+        .drop-zone.dragover {
+            border-color: var(--accent);
+            background: rgba(74, 108, 247, 0.08);
+            box-shadow: inset 0 0 30px rgba(74, 108, 247, 0.08);
+        }
+
         .drop-zone-icon {
-            font-size: 48px;
-            margin-bottom: 10px;
+            width: 48px;
+            height: 48px;
+            margin: 0 auto 12px;
+            background: var(--accent-glow);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
+
+        .drop-zone-icon svg {
+            width: 24px;
+            height: 24px;
+            stroke: var(--accent);
+            fill: none;
+        }
+
         .drop-zone-text {
-            font-size: 16px;
-            color: #666;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 6px;
         }
+
         .drop-zone-hint {
-            font-size: 13px;
-            color: #999;
-            margin-top: 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+            font-family: 'SF Mono', 'Fira Code', monospace;
         }
+
+        .drop-zone-hint span {
+            color: var(--text-secondary);
+        }
+
         input[type="file"] {
             display: none;
         }
-        .file-info {
-            background: #e8f5e9;
-            border-radius: 10px;
-            padding: 15px;
+
+        /* File List */
+        .file-list {
             margin-bottom: 16px;
             display: none;
         }
-        .file-info.visible {
+
+        .file-list.visible {
             display: block;
         }
-        .file-info h3 {
-            color: #2e7d32;
-            margin-bottom: 12px;
-            font-size: 15px;
+
+        .file-list-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
         }
-        .file-details {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 8px;
-        }
-        .file-detail {
-            background: white;
-            padding: 10px;
-            border-radius: 6px;
-        }
-        .file-detail-label {
-            font-size: 11px;
-            color: #666;
-            text-transform: uppercase;
-        }
-        .file-detail-value {
-            font-size: 14px;
-            color: #1a1a2e;
+
+        .file-list-title {
+            font-size: 12px;
             font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
         }
+
+        .file-count {
+            font-size: 11px;
+            color: var(--text-muted);
+            background: var(--bg-elevated);
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .file-list-scroll {
+            max-height: 160px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-color) transparent;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            margin-bottom: 4px;
+            transition: all var(--transition);
+        }
+
+        .file-item:hover {
+            border-color: var(--accent);
+        }
+
+        .file-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 700;
+            font-family: monospace;
+            flex-shrink: 0;
+        }
+
+        .file-icon.nsz { background: rgba(52, 152, 219, 0.15); color: #3498db; }
+        .file-icon.ncz { background: rgba(231, 76, 60, 0.15); color: #e74c3c; }
+        .file-icon.xcz { background: rgba(155, 89, 182, 0.15); color: #9b59b6; }
+        .file-icon.other { background: rgba(136, 136, 160, 0.15); color: var(--text-secondary); }
+
+        .file-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .file-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .file-meta {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .remove-btn {
+            width: 28px;
+            height: 28px;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all var(--transition);
+            flex-shrink: 0;
+        }
+
+        .remove-btn:hover {
+            background: rgba(231, 76, 60, 0.15);
+            color: var(--error);
+        }
+
+        .remove-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        /* Settings Row */
+        .settings-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .setting-group {
+            flex: 1;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 10px 14px;
+        }
+
+        .setting-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .mode-options {
+            display: flex;
+            gap: 4px;
+        }
+
+        .mode-btn {
+            padding: 5px 10px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            background: transparent;
+            color: var(--text-secondary);
+            transition: all var(--transition);
+            border: 1px solid transparent;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .mode-btn:hover {
+            color: var(--text-primary);
+            background: var(--bg-elevated);
+        }
+
+        .mode-btn:active {
+            transform: scale(0.95);
+        }
+
+        .mode-btn.active {
+            background: var(--accent-glow);
+            color: var(--accent);
+            border-color: rgba(74, 108, 247, 0.3);
+        }
+
+        .mode-btn input {
+            display: none;
+        }
+
+        .toggle-group {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 0;
+        }
+
+        .toggle-group + .toggle-group {
+            border-top: 1px solid var(--border-color);
+            margin-top: 4px;
+            padding-top: 8px;
+        }
+
+        .toggle-label-text {
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .toggle {
+            width: 36px;
+            height: 20px;
+            background: var(--bg-elevated);
+            border-radius: 10px;
+            cursor: pointer;
+            position: relative;
+            transition: background var(--transition);
+            border: 1px solid var(--border-color);
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .toggle:active {
+            transform: scale(0.95);
+        }
+
+        .toggle.active {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .toggle::after {
+            content: '';
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            background: white;
+            border-radius: 50%;
+            top: 2px;
+            left: 2px;
+            transition: transform var(--transition);
+        }
+
+        .toggle.active::after {
+            transform: translateX(16px);
+        }
+
+        /* Progress */
         .progress-container {
             margin-bottom: 16px;
             display: none;
         }
+
         .progress-container.visible {
             display: block;
         }
-        .progress-bar {
-            height: 20px;
-            background: #e0e0e0;
-            border-radius: 10px;
-            overflow: hidden;
-            position: relative;
-        }
-        .progress-percent {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            color: #333;
-            font-weight: bold;
-            font-size: 12px;
-            z-index: 2;
-            pointer-events: none;
-        }
-        .progress-text {
-            text-align: center;
-            margin-top: 6px;
-            color: #666;
-            font-size: 13px;
-        }
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #3498db, #2ecc71);
-            width: 0%;
-            transition: width 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            position: absolute;
-            top: 0;
-            left: 0;
-        }
-        .progress-fill span {
-            position: relative;
-            z-index: 1;
-            white-space: nowrap;
-        }
-        .log-container {
-            background: #1a1a2e;
-            color: #fff;
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 16px;
-            max-height: 150px;
-            overflow-y: auto;
-            font-family: monospace;
-            font-size: 13px;
-            display: none;
-        }
-        .log-container.visible {
-            display: block;
-        }
-        .log-entry {
-            margin-bottom: 4px;
-            padding: 4px;
-            border-radius: 4px;
-        }
-        .log-entry.info { color: #3498db; }
-        .log-entry.success { color: #2ecc71; }
-        .log-entry.warning { color: #f39c12; }
-        .log-entry.error { color: #e74c3c; }
-        .btn {
-            background: linear-gradient(135deg, #3498db, #2980b9);
-            color: white;
-            border: none;
-            padding: 12px 30px;
-            font-size: 16px;
-            border-radius: 30px;
-            cursor: pointer;
-            width: 100%;
-            transition: all 0.3s ease;
-            font-weight: bold;
-        }
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(52, 152, 219, 0.4);
-        }
-        .btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-        .btn-secondary {
-            background: linear-gradient(135deg, #95a5a6, #7f8c8d);
-            margin-top: 8px;
-        }
-        .btn-secondary:hover {
-            box-shadow: 0 10px 30px rgba(149, 165, 166, 0.4);
-        }
-        .btn-keys {
-            background: linear-gradient(135deg, #9b59b6, #8e44ad);
-        }
-        .btn-keys:hover {
-            box-shadow: 0 10px 30px rgba(155, 89, 182, 0.4);
-        }
-        .status {
-            text-align: center;
-            margin-top: 10px;
-            font-size: 14px;
-            color: #666;
-        }
-        .status.error { color: #e74c3c; }
-        .status.success { color: #2ecc71; }
-        .file-list {
-            margin-top: 16px;
-            max-height: 150px;
-            overflow-y: auto;
-        }
-        .file-item {
-            background: white;
-            padding: 8px 12px;
-            border-radius: 6px;
-            margin-bottom: 4px;
+
+        .progress-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            margin-bottom: 8px;
         }
-        .file-item-name {
-            font-weight: 500;
-            font-size: 14px;
-        }
-        .file-item-size {
-            color: #666;
+
+        .progress-title {
             font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary);
         }
-        .remove-btn {
-            background: #e74c3c;
-            color: white;
-            border: none;
-            padding: 5px 10px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 12px;
+
+        .progress-percent {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--accent);
+            font-family: monospace;
         }
-        .remove-btn:hover {
-            background: #c0392b;
+
+        .progress-bar {
+            height: 6px;
+            background: var(--bg-elevated);
+            border-radius: 3px;
+            overflow: hidden;
         }
-        .mode-section {
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #6c8cff);
+            width: 0%;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        .progress-sub {
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            gap: 10px;
-            margin-bottom: 16px;
-            padding: 12px 16px;
-            background: #f8f9fa;
-            border-radius: 10px;
+            margin-top: 8px;
         }
-        .mode-label {
-            font-size: 13px;
-            color: #666;
-            font-weight: 500;
-        }
-        .mode-options {
-            display: flex;
-            gap: 5px;
-        }
-        .mode-btn {
-            padding: 6px 12px;
-            border-radius: 6px;
-            cursor: pointer;
+
+        .progress-text {
             font-size: 12px;
-            font-weight: 500;
-            background: #e9ecef;
-            color: #495057;
-            transition: all 0.2s;
-            user-select: none;
+            color: var(--text-muted);
         }
-        .mode-btn:hover {
-            background: #dee2e6;
+
+        .progress-speed {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-family: monospace;
         }
-        .mode-btn.active {
-            background: #3498db;
+
+        /* Log */
+        .log-container {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 12px;
+            margin-bottom: 16px;
+            max-height: 140px;
+            overflow-y: auto;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 12px;
+            display: none;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-color) transparent;
+        }
+
+        .log-container.visible {
+            display: block;
+        }
+
+        .log-entry {
+            padding: 3px 0;
+            line-height: 1.5;
+        }
+
+        .log-entry .time {
+            color: var(--text-muted);
+            margin-right: 6px;
+        }
+
+        .log-entry.info { color: var(--text-secondary); }
+        .log-entry.success { color: var(--success); }
+        .log-entry.warning { color: var(--warning); }
+        .log-entry.error { color: var(--error); }
+
+        /* Buttons */
+        .btn-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .btn {
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 14px;
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all var(--transition);
+            padding: 12px 24px;
+        }
+
+        .btn-primary {
+            flex: 1;
+            background: var(--accent);
             color: white;
         }
-        .mode-btn input {
+
+        .btn-primary:hover:not(:disabled) {
+            background: var(--accent-hover);
+            box-shadow: 0 4px 16px rgba(74, 108, 247, 0.3);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .btn-ghost {
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-ghost:hover {
+            border-color: var(--accent);
+            color: var(--text-primary);
+        }
+
+        .btn-ghost.hidden {
             display: none;
         }
+
         .loading {
             display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid rgba(255,255,255,.3);
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.3);
             border-radius: 50%;
             border-top-color: #fff;
-            animation: spin 1s ease-in-out infinite;
+            animation: spin 0.8s linear infinite;
             margin-right: 8px;
+            vertical-align: middle;
         }
+
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+
+        /* Status */
+        .status {
+            text-align: center;
+            margin-top: 12px;
+            font-size: 13px;
+            color: var(--text-muted);
+            min-height: 20px;
+        }
+
+        .status.error { color: var(--error); }
+        .status.success { color: var(--success); }
+
+        /* File Info Panel (shown after file selection) */
+        .file-info-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 16px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .file-info-panel.visible {
+            display: block;
+        }
+
+        .file-info-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+
+        .file-info-cell {
+            text-align: center;
+        }
+
+        .file-info-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+            font-family: monospace;
+        }
+
+        .file-info-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: 4px;
+        }
+
+        /* Responsive */
         @media (max-width: 600px) {
-            .mode-section {
-                flex-direction: column;
-                align-items: center;
-                gap: 8px;
-                padding: 12px 14px;
+            body {
+                padding: 10px;
             }
+
+            .container {
+                padding: 20px;
+            }
+
+            .settings-row {
+                flex-direction: column;
+            }
+
+            .file-info-grid {
+                grid-template-columns: repeat(3, 1fr);
+                gap: 8px;
+            }
+
             .mode-options {
                 flex-wrap: wrap;
-                width: 100%;
             }
-            .mode-btn {
-                flex: 1 1 auto;
-                text-align: center;
-                padding: 8px 6px;
-                font-size: 12px;
-                min-width: 0;
-            }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>NSZ to NSP Converter</h1>
-        <p class="subtitle">100% local — no uploads, no servers, everything runs in your browser</p>
-        
+        <div class="header">
+            <h1>NSZ <span class="accent">Converter</span></h1>
+            <p class="subtitle">100% local — no uploads, no servers, everything runs in your browser</p>
+            <div class="badge">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+                Local Processing
+            </div>
+        </div>
+
         <div class="drop-zone" id="dropZone">
-            <div class="drop-zone-icon">📦</div>
-            <div class="drop-zone-text">Drop files here or click to select</div>
-            <div class="drop-zone-hint">.nsz/.nspz/.nsx → .nsp &nbsp;|&nbsp; .ncz → .nca &nbsp;|&nbsp; .xcz → .xci (multi-file supported)</div>
+            <div class="drop-zone-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+            </div>
+            <div class="drop-zone-text">Drop files here or click to browse</div>
+            <div class="drop-zone-hint">
+                <span>.nsz</span> .nspz .nsx → .nsp &nbsp;|&nbsp; <span>.ncz</span> → .nca &nbsp;|&nbsp; <span>.xcz</span> → .xci
+            </div>
             <input type="file" id="fileInput" multiple accept=".nsz,.ncz,.xcz">
         </div>
-        
-        <div class="file-list" id="fileList"></div>
-        
-        <div class="mode-section">
-            <div class="mode-label">Download Mode:</div>
-            <div class="mode-options" id="modeOptions">
-                <label class="mode-btn active" data-mode="auto">
-                    <input type="radio" name="mode" value="auto" checked>
-                    <span>Auto</span>
-                </label>
-                <label class="mode-btn" data-mode="fsa">
-                    <input type="radio" name="mode" value="fsa">
-                    <span>File System</span>
-                </label>
-                <label class="mode-btn" data-mode="sw">
-                    <input type="radio" name="mode" value="sw">
-                    <span>Stream</span>
-                </label>
-                <label class="mode-btn" data-mode="blob">
-                    <input type="radio" name="mode" value="blob">
-                    <span>Blob</span>
-                </label>
+
+        <div class="file-list" id="fileList">
+            <div class="file-list-header">
+                <span class="file-list-title">Selected files</span>
+                <span class="file-count" id="fileCount">0 files</span>
+            </div>
+            <div class="file-list-scroll" id="fileListScroll"></div>
+        </div>
+
+        <div class="file-info-panel" id="fileInfoPanel">
+            <div class="file-info-grid">
+                <div class="file-info-cell">
+                    <div class="file-info-value" id="infoTotalSize">—</div>
+                    <div class="file-info-label">Total Size</div>
+                </div>
+                <div class="file-info-cell">
+                    <div class="file-info-value" id="infoFiles">—</div>
+                    <div class="file-info-label">Files</div>
+                </div>
+                <div class="file-info-cell">
+                    <div class="file-info-value" id="infoFormats">—</div>
+                    <div class="file-info-label">Formats</div>
+                </div>
             </div>
         </div>
-        
+
+        <div class="settings-row">
+            <div class="setting-group">
+                <div class="setting-label">Download Mode</div>
+                <div class="mode-options" id="modeOptions">
+                    <label class="mode-btn active" data-mode="auto">
+                        <input type="radio" name="mode" value="auto" checked>
+                        <span>Auto</span>
+                    </label>
+                    <label class="mode-btn" data-mode="fsa">
+                        <input type="radio" name="mode" value="fsa">
+                        <span>File System</span>
+                    </label>
+                    <label class="mode-btn" data-mode="sw">
+                        <input type="radio" name="mode" value="sw">
+                        <span>Stream</span>
+                    </label>
+                    <label class="mode-btn" data-mode="blob">
+                        <input type="radio" name="mode" value="blob">
+                        <span>Blob</span>
+                    </label>
+                </div>
+            </div>
+            <div class="setting-group">
+                <div class="setting-label">Options</div>
+                <div class="mode-options" id="optionsButtons">
+                    <button class="mode-btn" id="fixPaddingBtn">Fix Padding</button>
+                    <button class="mode-btn" id="overwriteBtn">Overwrite</button>
+                </div>
+            </div>
+        </div>
+
         <div class="progress-container" id="progressContainer">
+            <div class="progress-header">
+                <span class="progress-title" id="progressTitle">Converting...</span>
+                <span class="progress-percent" id="progressPercent">0%</span>
+            </div>
             <div class="progress-bar">
                 <div class="progress-fill" id="progressFill"></div>
-                <div class="progress-percent" id="progressPercent">0%</div>
             </div>
-            <div class="progress-text" id="progressText">Preparing...</div>
+            <div class="progress-sub">
+                <span class="progress-text" id="progressText">Preparing...</span>
+                <span class="progress-speed" id="progressSpeed"></span>
+            </div>
         </div>
-        
+
         <div class="log-container" id="logContainer"></div>
-        
-        <button class="btn" id="convertBtn" disabled>Convert</button>
-        <div style="display: flex; gap: 10px; margin-top: 10px;">
-            <button class="btn btn-secondary" id="clearBtn" style="display: none; flex: 1;">Clear All</button>
-            <button class="btn btn-secondary" id="fixPaddingBtn" style="flex: 1;">Fix Padding: OFF</button>
+
+        <div class="btn-row">
+            <button class="btn btn-primary" id="convertBtn" disabled>Convert</button>
+            <button class="btn btn-ghost hidden" id="clearBtn">Clear</button>
         </div>
-        
+
         <div class="status" id="status"></div>
     </div>
 
