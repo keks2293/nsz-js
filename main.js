@@ -91,11 +91,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     const files = [];
 
     function formatBytes(bytes) {
-        if (bytes === 0) return '0 Bytes';
+        if (bytes === 0) return '0 B';
         const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
     function isCompressedGame(name) {
@@ -110,10 +110,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 
     function addLog(type, message) {
+        const cls = type === 'success' ? 'ok' : type === 'error' ? 'err' : type === 'warning' ? 'warn' : 'info';
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const entry = document.createElement('div');
-        entry.className = `log-entry ${type}`;
-        const time = new Date().toLocaleTimeString();
-        entry.innerHTML = `<span class="time">${time}</span>${escapeHtml(message)}`;
+        entry.innerHTML = `<span class="t">${time}</span><span class="${cls}">${escapeHtml(message)}</span>`;
         logContainer.appendChild(entry);
         logContainer.scrollTop = logContainer.scrollHeight;
     }
@@ -130,7 +130,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     function updateFileList() {
         fileListScroll.innerHTML = '';
-        
+
         const extCounts = {};
         let totalSize = 0;
 
@@ -141,28 +141,27 @@ window.addEventListener('DOMContentLoaded', async () => {
             extCounts[ext] = (extCounts[ext] || 0) + 1;
 
             const item = document.createElement('div');
-            item.className = 'file-item';
-            
-            const extClass = ['nsz'].includes(ext) ? 'nsz' : ext;
-            
+            item.className = 'file';
+
+            const badgeClass = ['nsz'].includes(ext) ? 'nsz' : ext;
+
             item.innerHTML = `
-                <div class="file-icon ${extClass}">${ext.toUpperCase()}</div>
-                <div class="file-info">
+                <div class="file-badge ${badgeClass}">${ext.toUpperCase()}</div>
+                <div class="file-meta">
                     <div class="file-name">${escapeHtml(file.name)}</div>
-                    <div class="file-meta">${formatBytes(file.size)}</div>
+                    <div class="file-size">${formatBytes(file.size)}</div>
                 </div>
-                <button class="remove-btn" data-index="${i}">
+                <button class="file-x" data-index="${i}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18"/>
-                        <line x1="6" y1="6" x2="18" y2="18"/>
+                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
                 </button>
             `;
-            
+
             fileListScroll.appendChild(item);
         }
 
-        fileListScroll.querySelectorAll('.remove-btn').forEach(btn => {
+        fileListScroll.querySelectorAll('.file-x').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const index = parseInt(e.currentTarget.dataset.index);
                 files.splice(index, 1);
@@ -176,7 +175,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         clearBtn.classList.toggle('hidden', !hasFiles);
         convertBtn.disabled = !hasFiles;
 
-        fileCount.textContent = `${files.length} file${files.length !== 1 ? 's' : ''}`;
+        fileCount.textContent = files.length;
         infoTotalSize.textContent = formatBytes(totalSize);
         infoFiles.textContent = files.length;
         infoFormats.textContent = Object.keys(extCounts).map(e => e.toUpperCase()).join(', ');
@@ -194,11 +193,11 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (response.ok) {
                 const keyText = await response.text();
                 converter.setKeys(keyText);
-                addLog('success', 'Keys loaded from static/prod.keys');
+                addLog('success', 'Keys loaded');
                 return true;
             }
         } catch (error) {
-            addLog('info', 'No static/prod.keys found, using keys from textarea if provided');
+            addLog('info', 'No static/prod.keys found');
         }
         return false;
     }
@@ -233,26 +232,22 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     fixPaddingBtn.addEventListener('click', () => {
         fixPadding = !fixPadding;
-        fixPaddingBtn.classList.toggle('active', fixPadding);
-        addLog('info', `Fix Padding ${fixPadding ? 'enabled' : 'disabled'}`);
+        fixPaddingBtn.classList.toggle('on', fixPadding);
     });
 
     overwriteBtn.addEventListener('click', () => {
         overwrite = !overwrite;
-        overwriteBtn.classList.toggle('active', overwrite);
-        addLog('info', `Overwrite ${overwrite ? 'enabled' : 'disabled'}`);
+        overwriteBtn.classList.toggle('on', overwrite);
     });
 
-    document.querySelectorAll('.mode-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
+    document.querySelectorAll('.pill[data-mode]').forEach(btn => {
+        btn.addEventListener('click', () => {
             const radio = btn.querySelector('input');
             if (!radio) return;
             radio.checked = true;
-            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+            document.querySelectorAll('.pill[data-mode]').forEach(b => b.classList.remove('on'));
+            btn.classList.add('on');
             downloadMode = radio.value;
-            addLog('info', `Download mode: ${radio.value}`);
         });
     });
 
@@ -266,28 +261,24 @@ window.addEventListener('DOMContentLoaded', async () => {
         status.className = 'status';
 
         updateProgress(0, 'Starting...');
-        addLog('info', `Starting conversion (mode: ${downloadMode})...`);
+        addLog('info', `Starting conversion (${downloadMode})...`);
         await loadDefaultKeys();
 
-        // Android Chrome: createWritable() has a known bug ("cached state changed"),
-        // so skip directory picker entirely and use SW streaming or Blob download
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
         let directoryHandle = null;
 
         if ('showDirectoryPicker' in window && (downloadMode === 'fsa' || (downloadMode === 'auto' && !isMobile))) {
             try {
-                directoryHandle = await window.showDirectoryPicker({
-                    startIn: 'downloads'
-                });
-                addLog('info', 'Using File System Access API - saving to selected directory');
+                directoryHandle = await window.showDirectoryPicker({ startIn: 'downloads' });
+                addLog('info', 'Saving to selected directory');
             } catch (e) {
                 if (e.name === 'AbortError') {
-                    addLog('error', 'Save location rejected — conversion cancelled');
+                    addLog('err', 'Save location rejected');
                     convertBtn.disabled = false;
                     return;
                 } else {
-                    addLog('warning', 'File System Access not available: ' + e.message);
+                    addLog('warn', 'FSA not available: ' + e.message);
                 }
             }
         }
@@ -311,7 +302,6 @@ window.addEventListener('DOMContentLoaded', async () => {
 
                 let writable = null;
                 if (downloadMode === 'blob') {
-                    // Blob only — skip FSA and SW
                 } else if (directoryHandle && (downloadMode === 'auto' || downloadMode === 'fsa')) {
                     try {
                         let fileHandle;
@@ -320,7 +310,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         } else {
                             try {
                                 fileHandle = await directoryHandle.getFileHandle(outputName);
-                                addLog('warning', `File exists, skipping: ${outputName}`);
+                                addLog('warn', `Exists, skipping: ${outputName}`);
                                 files.splice(i, 1);
                                 i--;
                                 fileInput.value = '';
@@ -332,38 +322,32 @@ window.addEventListener('DOMContentLoaded', async () => {
                         }
                         writable = await fileHandle.createWritable();
                     } catch (e) {
-                        addLog('warning', 'Failed to create file: ' + e.message);
+                        addLog('warn', 'Failed to create file: ' + e.message);
                     }
                 }
 
-                // Try Service Worker streaming (modes: auto, sw, fsa)
                 if (!writable && (downloadMode === 'auto' || downloadMode === 'sw' || downloadMode === 'fsa') && 'serviceWorker' in navigator && location.protocol !== 'file:') {
                     try {
                         const dl = new SWDownloader(outputName, fileIframes[i]);
                         await dl.start();
                         dl.triggerDownload();
                         writable = dl;
-                        addLog('info', 'Using Service Worker streaming download');
+                        addLog('info', 'Using SW streaming');
                     } catch (e) {
-                        addLog('info', 'SW download not available: ' + e.message);
+                        addLog('info', 'SW not available: ' + e.message);
                     }
                 }
 
                 let result;
                 if (fileType === 'xcz') {
                     result = await converter.decompressXCZtoXCI(file, {
-                        onProgress: (progress, text) => {
-                            updateProgress((i + progress) / files.length, text);
-                        },
+                        onProgress: (p, t) => updateProgress((i + p) / files.length, t),
                         onLog: addLog,
                         writable
                     });
                 } else {
                     result = await converter.decompressNSZtoNSP(file, {
-                        onProgress: (progress, text) => {
-                            const overall = Math.max(0, Math.min(1, (progress - 0.02) / 0.98));
-                            updateProgress(overall, text);
-                        },
+                        onProgress: (p, t) => updateProgress(Math.max(0, Math.min(1, (p - 0.02) / 0.98)), t),
                         onLog: addLog,
                         writable,
                         fixPadding
@@ -372,7 +356,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
                 if (writable) {
                     await writable.close();
-                    addLog('success', `Done: ${result.name} (${result.size ? formatBytes(result.size) : 'unknown'})`);
+                    addLog('ok', `${result.name} (${result.size ? formatBytes(result.size) : '?'})`);
                 } else {
                     const url = URL.createObjectURL(result.blob);
                     const a = document.createElement('a');
@@ -382,7 +366,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     a.click();
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
-                    addLog('success', `Done: ${result.name}`);
+                    addLog('ok', `${result.name}`);
                 }
 
                 files.splice(i, 1);
@@ -390,28 +374,28 @@ window.addEventListener('DOMContentLoaded', async () => {
                 fileInput.value = '';
                 updateFileList();
             } catch (error) {
-                addLog('error', `Failed: ${error.message}`);
+                addLog('err', `Failed: ${error.message}`);
             }
         }
 
-        status.textContent = 'Conversion complete!';
-        status.className = 'status success';
+        status.textContent = 'Done!';
+        status.className = 'status ok';
         convertBtn.disabled = false;
     });
 
     await converter.init().catch(e => {
-        addLog('warning', 'Zstd init failed: ' + e.message);
+        addLog('warn', 'Zstd init failed: ' + e.message);
     });
 
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
         try {
             await navigator.serviceWorker.register('download-worker.js');
             await navigator.serviceWorker.ready;
-            addLog('info', 'Service Worker ready for streaming download');
+            addLog('info', 'SW ready');
         } catch (e) {
-            addLog('info', 'Service Worker not available: ' + e.message);
+            addLog('info', 'SW not available');
         }
     }
 
-    addLog('info', 'Ready. Drop NSZ files to begin.');
+    addLog('info', 'Ready');
 });
