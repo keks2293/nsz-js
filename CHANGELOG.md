@@ -1,5 +1,11 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-06-12)
+
+1. **Added "Overwrite" toggle option** — New toggle in browser UI settings panel (`index.html`) allows controlling FSA file creation behavior. Defaults to on (overwrite existing files). Added as a `.toggle-group` alongside the existing "Fix Padding" toggle in the Options setting group. JavaScript handler not yet wired in `main.js`.
+
+2. **Fixed ES modules CORS issue** — Browser `file://` protocol blocks ES module script loading. Fixed by using `python3 -m http.server 8080` to serve files via HTTP.
+
 ## ✅ Recent Changes (2026-05-30)
 
 1. **HFS0 offset convention changed to match hactool** — All HFS0 writers (`HFS0Writer`, `XCIWriter`, `_buildPartitionHfs0*` in converter.js, `nsz-cli.js` root/partition entries) now store `absolutePos - actualHeaderSize` instead of `absolutePos`. The `HFS0Reader` reconstructs the absolute offset as `baseOffset + actualHeaderSize + storedOffset`. This matches Python nsz commit `b445f666` and hactool's `absolute = base + header_size + cur_file->offset`. 7 sites updated across 3 files.
