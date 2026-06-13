@@ -64,79 +64,98 @@ export class HFS0Reader {
 }
 
 export class HFS0Writer {
-    constructor(headerSize = 0) {
-        this.files = [];
-        this._headerSize = headerSize;
+    constructor(paddingSize = 0) {
+        this.entries = [];
+        this._paddingSize = paddingSize;
     }
 
     addFile(name, data) {
-        this.files.push({ name, data });
+        const size = data instanceof ArrayBuffer ? data.byteLength : data.length;
+        this.entries.push({ name, data, size });
     }
 
-    build() {
-        const stringTable = this.files.map(f => f.name).join('\0') + '\0';
-        const stringTableBytes = new TextEncoder().encode(stringTable);
+    addEntry(name, size) {
+        this.entries.push({ name, data: null, size });
+    }
 
-        const actualHeaderSize = 0x10 + this.files.length * 0x40 + stringTableBytes.length;
-        const dataStart = Math.max(this._headerSize, actualHeaderSize);
+    _buildStringTable() {
+        return new TextEncoder().encode(this.entries.map(e => e.name).join('\0') + '\0');
+    }
 
-        const output = new Uint8Array(dataStart + this._getTotalDataSize());
-        const view = new DataView(output.buffer);
+    _getActualHeaderSize(stringBytes) {
+        return 0x10 + this.entries.length * 0x40 + stringBytes.length;
+    }
+
+    _getHeaderSize(stringBytes) {
+        return Math.max(this._paddingSize, this._getActualHeaderSize(stringBytes));
+    }
+
+    _writeHeader(output, stringBytes, dataStart) {
+        const view = new DataView(output.buffer, output.byteOffset, output.byteLength);
+        const actualHeader = this._getActualHeaderSize(stringBytes);
 
         output[0] = 0x48; output[1] = 0x46; output[2] = 0x53; output[3] = 0x30;
-        view.setUint32(4, this.files.length, true);
-        view.setUint32(8, stringTableBytes.length, true);
+        view.setUint32(4, this.entries.length, true);
+        view.setUint32(8, stringBytes.length, true);
         view.setUint32(12, 0, true);
 
-        output.set(stringTableBytes, actualHeaderSize - stringTableBytes.length);
+        const stringTableStart = 0x10 + this.entries.length * 0x40;
+        output.set(stringBytes, stringTableStart);
 
-        const nameBytes = new TextEncoder();
-        let stringOffset = 0;
+        let sOff = 0;
         let filePos = dataStart;
-
-        for (let i = 0; i < this.files.length; i++) {
-            const f = this.files[i];
-            const data = f.data;
-            const size = data instanceof ArrayBuffer ? data.byteLength : data.length;
+        for (let i = 0; i < this.entries.length; i++) {
+            const e = this.entries[i];
             const pos = 0x10 + i * 0x40;
-
-            view.setBigUint64(pos, BigInt(filePos - actualHeaderSize), true);
-            view.setBigUint64(pos + 8, BigInt(size), true);
-            view.setUint32(pos + 16, stringOffset, true);
+            view.setBigUint64(pos, BigInt(filePos - actualHeader), true);
+            view.setBigUint64(pos + 8, BigInt(e.size), true);
+            view.setUint32(pos + 16, sOff, true);
             view.setUint32(pos + 20, 0, true);
             view.setUint32(pos + 24, 0, true);
             view.setUint32(pos + 28, 0, true);
             view.setBigUint64(pos + 32, 0n, true);
+            const enc = new TextEncoder().encode(e.name);
+            sOff += enc.length + 1;
+            filePos += e.size;
+        }
+    }
 
-            const encoded = nameBytes.encode(f.name);
-            output.set(encoded, actualHeaderSize - stringTableBytes.length + stringOffset);
-            stringOffset += encoded.length + 1;
+    buildHeader() {
+        const stringBytes = this._buildStringTable();
+        const headerSize = this._getHeaderSize(stringBytes);
+        const output = new Uint8Array(headerSize);
+        this._writeHeader(output, stringBytes, headerSize);
+        return output;
+    }
 
-            const arr = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-            output.set(arr, filePos);
-            filePos += arr.length;
+    build() {
+        const stringBytes = this._buildStringTable();
+        const headerSize = this._getHeaderSize(stringBytes);
+
+        let totalDataSize = 0;
+        for (const e of this.entries) totalDataSize += e.size;
+
+        const output = new Uint8Array(headerSize + totalDataSize);
+        this._writeHeader(output, stringBytes, headerSize);
+
+        let dataPos = headerSize;
+        for (const e of this.entries) {
+            if (e.data) {
+                const arr = e.data instanceof ArrayBuffer ? new Uint8Array(e.data) : e.data;
+                output.set(arr, dataPos);
+            }
+            dataPos += e.size;
         }
 
         return output;
     }
 
-    _getTotalDataSize() {
-        let total = 0;
-        for (const f of this.files) {
-            total += f.data instanceof ArrayBuffer ? f.data.byteLength : f.data.length;
-        }
-        return total;
+    getActualHeaderSize() {
+        return this._getActualHeaderSize(this._buildStringTable());
     }
 
     getHeaderSize() {
-        if (this.files.length === 0) return 0;
-        const sample = this.files[0].name;
-        const enc = new TextEncoder();
-        let totalStrLen = 0;
-        for (const f of this.files) {
-            totalStrLen += enc.encode(f.name).length + 1;
-        }
-        return 0x10 + this.files.length * 0x40 + totalStrLen;
+        return this._getHeaderSize(this._buildStringTable());
     }
 }
 
@@ -236,75 +255,43 @@ export class XCIWriter {
         const ROOT_HFS0_OFFSET = 0xF000;
         const PARTITION_HEADER_SIZE = 0x8000;
 
-        const partitionEntries = this.partitions.map(p => ({
-            name: p.name,
-            dataSize: p.data.length
-        }));
-
-        const rootStringTable = partitionEntries.map(e => e.name).join('\0') + '\0';
-        const rootStringBytes = new TextEncoder().encode(rootStringTable);
-        const rootActualHeader = 0x10 + partitionEntries.length * 0x40 + rootStringBytes.length;
+        const rootWriter = new HFS0Writer(PARTITION_HEADER_SIZE);
+        for (const p of this.partitions) rootWriter.addEntry(p.name, p.data.length);
+        const rootActualHeader = rootWriter.getActualHeaderSize();
 
         let partitionFilePos = 0;
         let currentDataOffset = ROOT_HFS0_OFFSET + rootActualHeader;
-        for (const entry of partitionEntries) {
-            entry.fileOffset = partitionFilePos;
-            entry.dataOffset = currentDataOffset;
-            const paddedSize = Math.max(PARTITION_HEADER_SIZE, entry.dataSize);
+        const partitionEntries = [];
+        for (const p of this.partitions) {
+            const paddedSize = Math.max(PARTITION_HEADER_SIZE, p.data.length);
+            partitionEntries.push({ name: p.name, dataOffset: currentDataOffset, dataSize: p.data.length });
             currentDataOffset += paddedSize;
-            partitionFilePos += entry.dataSize;
+            partitionFilePos += p.data.length;
         }
 
         const totalPaddedSize = currentDataOffset - (ROOT_HFS0_OFFSET + rootActualHeader);
-
         const totalSize = ROOT_HFS0_OFFSET + rootActualHeader + totalPaddedSize;
         const output = new Uint8Array(totalSize);
         const view = new DataView(output.buffer);
 
-        const rootHfs0Base = ROOT_HFS0_OFFSET;
-        output[rootHfs0Base] = 0x48; output[rootHfs0Base + 1] = 0x46;
-        output[rootHfs0Base + 2] = 0x53; output[rootHfs0Base + 3] = 0x30;
-        view.setUint32(rootHfs0Base + 4, partitionEntries.length, true);
-        view.setUint32(rootHfs0Base + 8, rootStringBytes.length, true);
-        view.setUint32(rootHfs0Base + 12, 0, true);
-
-        const rootStringTableOffset = rootHfs0Base + 0x10 + partitionEntries.length * 0x40;
-        output.set(rootStringBytes, rootStringTableOffset);
-
-        let stringOffset = 0;
-        for (let i = 0; i < partitionEntries.length; i++) {
-            const entry = partitionEntries[i];
-            const pos = rootHfs0Base + 0x10 + i * 0x40;
-            view.setBigUint64(pos, BigInt(entry.dataOffset - rootHfs0Base - rootActualHeader), true);
-            view.setBigUint64(pos + 8, BigInt(entry.dataSize), true);
-            view.setUint32(pos + 16, stringOffset, true);
-            view.setUint32(pos + 20, 0, true);
-            view.setUint32(pos + 24, 0, true);
-            view.setUint32(pos + 28, 0, true);
-            view.setBigUint64(pos + 32, 0n, true);
-            const encoded = new TextEncoder().encode(entry.name);
-            output.set(encoded, rootStringTableOffset + stringOffset);
-            stringOffset += encoded.length + 1;
-        }
+        const rootHeader = rootWriter.buildHeader();
+        output.set(rootHeader, ROOT_HFS0_OFFSET);
 
         for (let i = 0; i < this.partitions.length; i++) {
             const p = this.partitions[i];
             const paddedHfs0Size = Math.max(PARTITION_HEADER_SIZE, p.data.length);
             if (paddedHfs0Size > p.data.length) {
-                const hfs0View = new DataView(p.data.buffer, p.data.byteOffset, p.data.byteLength);
-                const fileCount = hfs0View.getUint32(4, true);
-                const stringTableSize = hfs0View.getUint32(8, true);
-                const actualHfs0Header = 0x10 + fileCount * 0x40 + stringTableSize;
-                const zeroPad = new Uint8Array(paddedHfs0Size - p.data.length);
                 const realloc = new Uint8Array(paddedHfs0Size);
                 realloc.set(p.data, 0);
+                const partView = new DataView(realloc.buffer);
+                const fileCount = partView.getUint32(4, true);
+                const stringTableSize = partView.getUint32(8, true);
+                const actualHfs0Header = 0x10 + fileCount * 0x40 + stringTableSize;
                 if (actualHfs0Header < paddedHfs0Size) {
-                    const partView = new DataView(realloc.buffer);
                     for (let j = 0; j < fileCount; j++) {
                         const epos = 0x10 + j * 0x40;
                         const stored = Number(partView.getBigUint64(epos, true));
-                        const shifted = stored + (paddedHfs0Size - p.data.length);
-                        partView.setBigUint64(epos, BigInt(shifted), true);
+                        partView.setBigUint64(epos, BigInt(stored + (paddedHfs0Size - p.data.length)), true);
                     }
                 }
                 output.set(realloc, partitionEntries[i].dataOffset);
@@ -314,7 +301,6 @@ export class XCIWriter {
         }
 
         output.set(this.header, 0);
-
         view.setBigUint64(0x118, BigInt(totalSize), true);
         view.setBigUint64(0x130, BigInt(ROOT_HFS0_OFFSET), true);
         view.setBigUint64(0x138, BigInt(rootActualHeader), true);
