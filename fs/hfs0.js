@@ -27,8 +27,6 @@ export class HFS0Reader {
         const stringTableOffset = 0x10 + fileCount * 0x40;
         const stringTable = this.data.slice(stringTableOffset, stringTableOffset + stringTableSize);
 
-        let stringEndOffset = stringTableSize;
-
         for (let i = 0; i < fileCount; i++) {
             const entryOffset = 0x10 + i * 0x40;
 
@@ -37,11 +35,9 @@ export class HFS0Reader {
             const nameOffset = this.view.getUint32(entryOffset + 16, true);
 
             let name = '';
-            for (let j = nameOffset; j < stringEndOffset && stringTable[j] !== 0; j++) {
+            for (let j = nameOffset; j < stringTable.length && stringTable[j] !== 0; j++) {
                 name += String.fromCharCode(stringTable[j]);
             }
-
-            stringEndOffset = nameOffset;
 
             this.files.push({
                 name,
