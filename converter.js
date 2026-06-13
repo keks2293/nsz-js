@@ -282,6 +282,7 @@ class NSZConverter {
         onLog('info', `Found ${partitions.length} partitions: ${partitions.map(p => p.name).join(', ')}`);
 
         const PARTITION_HEADER_SIZE = 0x8000;
+        const ROOT_HFS0_PADDED_SIZE = 0x8000;
 
         // First pass: read each partition's files and determine output sizes
         const partitionMetas = [];
@@ -317,14 +318,14 @@ class NSZConverter {
             }
 
             const fileTotalSize = fileMetas.reduce((s, m) => s + m.size, 0);
-            const hfs0Data = this._buildPartitionHfs0Buffer(fileMetas);
-            const hfs0BufferSize = Math.max(PARTITION_HEADER_SIZE, hfs0Data.length);
+            const tmpWriter = new HFS0Writer(PARTITION_HEADER_SIZE);
+            for (const m of fileMetas) tmpWriter.addEntry(m.name, m.size);
+            const hfs0BufferSize = tmpWriter.getHeaderSize();
 
             partitionMetas.push({
                 name: partition.name,
                 files: fileMetas,
                 totalSize: fileTotalSize,
-                hfs0Data,
                 hfs0BufferSize,
                 raw: false
             });
@@ -335,46 +336,21 @@ class NSZConverter {
             const xciHeaderBytes = await fileReader.read(0, 0x200);
             const ROOT_HFS0_OFFSET = 0xF000;
 
-            // Build root HFS0 header
-            const rootStringTable = partitionMetas.map(p => p.name).join('\0') + '\0';
-            const rootStringBytes = new TextEncoder().encode(rootStringTable);
-            const rootActualHeader = 0x10 + partitionMetas.length * 0x40 + rootStringBytes.length;
+            const rootWriter = new HFS0Writer(ROOT_HFS0_PADDED_SIZE);
+            for (const pm of partitionMetas) {
+                rootWriter.addEntry(pm.name, pm.raw ? pm.size : pm.hfs0BufferSize);
+            }
+            const rootActualHeader = rootWriter.getActualHeaderSize();
 
             let currentDataOffset = ROOT_HFS0_OFFSET + rootActualHeader;
             const partOffsets = [];
             for (const pm of partitionMetas) {
-                partOffsets.push({ name: pm.name, offset: currentDataOffset, size: pm.raw ? pm.size : pm.hfs0BufferSize });
+                partOffsets.push({ name: pm.name, offset: currentDataOffset });
                 currentDataOffset += pm.raw ? pm.size : pm.hfs0BufferSize;
             }
-
             const totalSize = currentDataOffset;
-            const rootHeader = new Uint8Array(rootActualHeader);
-            const rootView = new DataView(rootHeader.buffer);
-            rootHeader[0] = 0x48; rootHeader[1] = 0x46; rootHeader[2] = 0x53; rootHeader[3] = 0x30;
-            rootView.setUint32(4, partitionMetas.length, true);
-            rootView.setUint32(8, rootStringBytes.length, true);
-            rootView.setUint32(12, 0, true);
 
-            const rootStringOffset = 0x10 + partitionMetas.length * 0x40;
-            rootHeader.set(rootStringBytes, rootStringOffset);
-
-            let sOff = 0;
-            for (let i = 0; i < partitionMetas.length; i++) {
-                const po = partOffsets[i];
-                const pos = 0x10 + i * 0x40;
-                rootView.setBigUint64(pos, BigInt(po.offset - ROOT_HFS0_OFFSET - rootActualHeader), true);
-                rootView.setBigUint64(pos + 8, BigInt(po.size), true);
-                rootView.setUint32(pos + 16, sOff, true);
-                rootView.setUint32(pos + 20, 0, true);
-                rootView.setUint32(pos + 24, 0, true);
-                rootView.setUint32(pos + 28, 0, true);
-                rootView.setBigUint64(pos + 32, 0n, true);
-                const enc = new TextEncoder().encode(po.name);
-                rootHeader.set(enc, rootStringOffset + sOff);
-                sOff += enc.length + 1;
-            }
-
-            // Write XCI header
+            const rootHeader = rootWriter.buildHeader();
             const xciOut = new Uint8Array(0x200);
             xciOut.set(xciHeaderBytes, 0);
             const xciView = new DataView(xciOut.buffer);
@@ -402,7 +378,9 @@ class NSZConverter {
                     continue;
                 }
 
-                const hfs0Header = this._buildPartitionHfs0Header(pm.files);
+                const pWriter = new HFS0Writer(PARTITION_HEADER_SIZE);
+                for (const m of pm.files) pWriter.addEntry(m.name, m.size);
+                const hfs0Header = pWriter.buildHeader();
                 await writable.write({ type: 'write', position: po.offset, data: hfs0Header });
 
                 let writePos = po.offset + PARTITION_HEADER_SIZE;
@@ -499,75 +477,6 @@ class NSZConverter {
             const blob = new Blob([xciData], { type: 'application/octet-stream' });
             return { blob, name: outputName, size: xciData.length };
         }
-    }
-
-    _buildPartitionHfs0Header(fileMetas) {
-        const stringTable = fileMetas.map(m => m.name).join('\0') + '\0';
-        const stringBytes = new TextEncoder().encode(stringTable);
-        const actualHeader = 0x10 + fileMetas.length * 0x40 + stringBytes.length;
-        const headerSize = Math.max(0x8000, actualHeader);
-
-        const header = new Uint8Array(headerSize);
-        const view = new DataView(header.buffer);
-        header[0] = 0x48; header[1] = 0x46; header[2] = 0x53; header[3] = 0x30;
-        view.setUint32(4, fileMetas.length, true);
-        view.setUint32(8, stringBytes.length, true);
-        view.setUint32(12, 0, true);
-        header.set(stringBytes, 0x10 + fileMetas.length * 0x40);
-
-        let filePos = 0x8000;
-        let sOff = 0;
-        for (let i = 0; i < fileMetas.length; i++) {
-            const m = fileMetas[i];
-            const pos = 0x10 + i * 0x40;
-            view.setBigUint64(pos, BigInt(filePos - actualHeader), true);
-            view.setBigUint64(pos + 8, BigInt(m.size), true);
-            view.setUint32(pos + 16, sOff, true);
-            view.setUint32(pos + 20, 0, true);
-            view.setUint32(pos + 24, 0, true);
-            view.setUint32(pos + 28, 0, true);
-            view.setBigUint64(pos + 32, 0n, true);
-            const enc = new TextEncoder().encode(m.name);
-            header.set(enc, 0x10 + fileMetas.length * 0x40 + sOff);
-            sOff += enc.length + 1;
-            filePos += m.size;
-        }
-        return header;
-    }
-
-    _buildPartitionHfs0Buffer(fileMetas) {
-        const headerSize = 0x8000;
-        const totalDataSize = fileMetas.reduce((s, m) => s + m.size, 0);
-        const output = new Uint8Array(headerSize + totalDataSize);
-        const view = new DataView(output.buffer);
-
-        const stringTable = fileMetas.map(m => m.name).join('\0') + '\0';
-        const stringBytes = new TextEncoder().encode(stringTable);
-        const actualHeader = 0x10 + fileMetas.length * 0x40 + stringBytes.length;
-
-        output[0] = 0x48; output[1] = 0x46; output[2] = 0x53; output[3] = 0x30;
-        view.setUint32(4, fileMetas.length, true);
-        view.setUint32(8, stringBytes.length, true);
-        view.setUint32(12, 0, true);
-        output.set(stringBytes, 0x10 + fileMetas.length * 0x40);
-
-        let filePos = headerSize;
-        let sOff = 0;
-        for (let i = 0; i < fileMetas.length; i++) {
-            const m = fileMetas[i];
-            const pos = 0x10 + i * 0x40;
-            view.setBigUint64(pos, BigInt(filePos - actualHeader), true);
-            view.setBigUint64(pos + 8, BigInt(m.size), true);
-            view.setUint32(pos + 16, sOff, true);
-            view.setUint32(pos + 20, 0, true);
-            view.setUint32(pos + 24, 0, true);
-            view.setUint32(pos + 28, 0, true);
-            view.setBigUint64(pos + 32, 0n, true);
-            const enc = new TextEncoder().encode(m.name);
-            output.set(enc, 0x10 + fileMetas.length * 0x40 + sOff);
-            sOff += enc.length + 1;
-        }
-        return output;
     }
 
     async extractCnmtHashes(cnmtData) {

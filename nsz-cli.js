@@ -5,6 +5,7 @@ import { PFS0, PFS0Writer } from './fs/pfs0.js';
 import { NCZDecompressor, FileDescriptorReader, BufferReader } from './fs/ncz.js';
 import { KeysParser } from './keys.js';
 import { SHA256, sha256 } from './crypto/sha256.js';
+import { HFS0Writer } from './fs/xci.js';
 
 function formatBytes(bytes) {
     if (bytes === 0) return '0 B';
@@ -180,10 +181,12 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
         partitionMetas.push({ name: partition.name, files: fileMetas, totalSize, raw: false, rawData: null });
     }
 
-    // Build root HFS0 header
-    const rootStringTable = partitionMetas.map(p => p.name).join('\0') + '\0';
-    const rootStringBytes = Buffer.from(rootStringTable, 'utf-8');
-    const rootActualHeader = 0x10 + partitionMetas.length * 0x40 + rootStringBytes.length;
+    const rootWriter = new HFS0Writer(ROOT_HFS0_PADDED_SIZE);
+    for (const pm of partitionMetas) {
+        const partSize = pm.raw ? pm.rawData.length : Math.max(PARTITION_HEADER_SIZE, pm.totalSize);
+        rootWriter.addEntry(pm.name, partSize);
+    }
+    const rootActualHeader = rootWriter.getActualHeaderSize();
 
     let currentDataPos = 0;
     const partOffsets = [];
@@ -194,10 +197,8 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
     }
     const totalFileSize = ROOT_DATA_SECTION + currentDataPos;
 
-    // Write output
     const outputFd = fs.openSync(outPath, 'w');
     try {
-        // Write XCI header
         const xciHeader = await inReader.read(0, 0x200);
         const xciHeaderOut = Buffer.alloc(0x200);
         xciHeaderOut.set(xciHeader.slice(0, 0x200), 0);
@@ -206,30 +207,8 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
         xciHeaderOut.writeBigUInt64LE(BigInt(rootActualHeader), 0x138);
         fs.writeSync(outputFd, xciHeaderOut, 0, 0x200, 0);
 
-        // Write root HFS0 header (padded to 0x8000)
-        const rootHeader = Buffer.alloc(ROOT_HFS0_PADDED_SIZE);
-        rootHeader[0] = 0x48; rootHeader[1] = 0x46; rootHeader[2] = 0x53; rootHeader[3] = 0x30;
-        rootHeader.writeUInt32LE(partitionMetas.length, 4);
-        rootHeader.writeUInt32LE(rootStringBytes.length, 8);
-        rootHeader.writeUInt32LE(0, 12);
-        rootStringBytes.copy(rootHeader, 0x10 + partitionMetas.length * 0x40);
-
-        let sOff = 0;
-        for (let i = 0; i < partitionMetas.length; i++) {
-            const po = partOffsets[i];
-            const pos = 0x10 + i * 0x40;
-            rootHeader.writeBigUInt64LE(BigInt(po.offsetInSection + ROOT_HFS0_PADDED_SIZE - rootActualHeader), pos);
-            rootHeader.writeBigUInt64LE(BigInt(po.size), pos + 8);
-            rootHeader.writeUInt32LE(sOff, pos + 16);
-            rootHeader.writeUInt32LE(0, pos + 20);
-            rootHeader.writeUInt32LE(0, pos + 24);
-            rootHeader.writeUInt32LE(0, pos + 28);
-            rootHeader.writeBigUInt64LE(0n, pos + 32);
-            const enc = Buffer.from(po.name, 'utf-8');
-            enc.copy(rootHeader, 0x10 + partitionMetas.length * 0x40 + sOff);
-            sOff += enc.length + 1;
-        }
-        fs.writeSync(outputFd, rootHeader, 0, ROOT_HFS0_PADDED_SIZE, ROOT_HFS0_OFFSET);
+        const rootHeader = Buffer.from(rootWriter.buildHeader());
+        fs.writeSync(outputFd, rootHeader, 0, rootHeader.length, ROOT_HFS0_OFFSET);
 
         // Write partitions
         for (let pi = 0; pi < partitionMetas.length; pi++) {
@@ -242,40 +221,13 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
                 continue;
             }
 
-            // Build partition HFS0 header
-            const pStringTable = pm.files.map(m => m.name).join('\0') + '\0';
-            const pStringBytes = Buffer.from(pStringTable, 'utf-8');
-            const pActualHeader = 0x10 + pm.files.length * 0x40 + pStringBytes.length;
-            const pHeaderSize = Math.max(PARTITION_HEADER_SIZE, pActualHeader);
-
-            const pHeader = Buffer.alloc(pHeaderSize);
-            pHeader[0] = 0x48; pHeader[1] = 0x46; pHeader[2] = 0x53; pHeader[3] = 0x30;
-            pHeader.writeUInt32LE(pm.files.length, 4);
-            pHeader.writeUInt32LE(pStringBytes.length, 8);
-            pHeader.writeUInt32LE(0, 12);
-            pStringBytes.copy(pHeader, 0x10 + pm.files.length * 0x40);
-
-            let pfOff = 0;
-            let pStrOff = 0;
-            for (let fi = 0; fi < pm.files.length; fi++) {
-                const m = pm.files[fi];
-                const pos = 0x10 + fi * 0x40;
-                pHeader.writeBigUInt64LE(BigInt(pHeaderSize + pfOff - pActualHeader), pos);
-                pHeader.writeBigUInt64LE(BigInt(m.size), pos + 8);
-                pHeader.writeUInt32LE(pStrOff, pos + 16);
-                pHeader.writeUInt32LE(0, pos + 20);
-                pHeader.writeUInt32LE(0, pos + 24);
-                pHeader.writeUInt32LE(0, pos + 28);
-                pHeader.writeBigUInt64LE(0n, pos + 32);
-                const enc = Buffer.from(m.name, 'utf-8');
-                enc.copy(pHeader, 0x10 + pm.files.length * 0x40 + pStrOff);
-                pStrOff += enc.length + 1;
-                pfOff += m.size;
-            }
-            fs.writeSync(outputFd, pHeader, 0, pHeaderSize, po.offset);
+            const pWriter = new HFS0Writer(PARTITION_HEADER_SIZE);
+            for (const m of pm.files) pWriter.addEntry(m.name, m.size);
+            const pHeader = Buffer.from(pWriter.buildHeader());
+            fs.writeSync(outputFd, pHeader, 0, pHeader.length, po.offset);
 
             // Write files within partition
-            let writePos = po.offset + pHeaderSize;
+            let writePos = po.offset + PARTITION_HEADER_SIZE;
             for (let fi = 0; fi < pm.files.length; fi++) {
                 const m = pm.files[fi];
                 if (m.isNcz) {
