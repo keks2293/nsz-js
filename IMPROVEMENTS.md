@@ -4,7 +4,8 @@ Prioritized areas for improvement identified 2026-05-30.
 
 ## High Impact
 
-- [ ] **HFS0 header building duplicated 6x** — `converter.js:339-375,504-570`, `nsz-cli.js:184-274`, `fs/xci.js:76-141`. `HFS0Writer` class exists but is unused by converter/CLI. Any HFS0 bug needs fixing in 6 places. Refactor to use `HFS0Writer` consistently.
+
+- [x] **HFS0 header building duplicated 6x** — `converter.js:339-375,504-570`, `nsz-cli.js:184-274`, `fs/xci.js:76-141`. `HFS0Writer` class exists but is unused by converter/CLI. Any HFS0 bug needs fixing in 6 places. Refactor to use `HFS0Writer` consistently.
 
 - [ ] **Verification logic duplicated** — `converter.js:132-162` vs `192-221`. Identical hash verification code in streaming and memory branches. Extract to shared method.
 
@@ -26,6 +27,7 @@ Prioritized areas for improvement identified 2026-05-30.
 
 ## Polish
 
+- [ ] `converter.js:6` — unused imports: `extractHashesFromCnmt` и `ContentEntry` из `ticket.js`. Функция `extractHashesFromCnmt` не вызывается нигде (есть дубликат в `extractCnmtHashes`); `ContentEntry` тоже не используется напрямую
 - [ ] No CI setup (GitHub Actions or similar)
 - [ ] SW `writable.close()` error handling could be more robust
 - [ ] `site-v2.md` suggests a UI redesign may be planned

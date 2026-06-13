@@ -1,17 +1,24 @@
 # Rules for AI Agents
 
-## Read All MD Files on Start
+## Start Checklist
 
-**Always read all `*.md` files in the project root before starting work.** These contain critical context about the project:
+- [ ] Read all `.md` files in the project root
+- [ ] Check `IMPROVEMENTS.md` for completed tasks and planned improvements
+- [ ] Check `PROGRESS.md` for recent changes and remaining issues
+- [ ] Check `TESTS.md` for test suite documentation and test vectors
+- [ ] Check `FIXES_PLAN.md` for planned fixes with file/line references
 
-- `AGENTS.md` — This file (rules, static files, workarounds)
-- `NSZ-FORMAT-ANALYSIS.md` — NCZ/XCZ/NCA format specs, crypto types, Python nsz comparison, known bugs and fixes
-- `PLAN.md` — Action plan, completed steps, success criteria
-- `PROGRESS.md` — Working components, recent fixes, remaining issues
-- `TESTS.md` — Test suite documentation, test vectors, how to run tests
-- `FIXES_PLAN.md` — Planned fixes with file/line references
+### MD Files Reference
 
-These docs contain format specifications, crypto implementation details, and known issues that are essential for correct development.
+| File | Description |
+|---|---|
+| `AGENTS.md` | This file — rules, static files, workarounds |
+| `NSZ-FORMAT-ANALYSIS.md` | NCZ/XCZ/NCA format specs, crypto types, Python nsz comparison, known bugs and fixes |
+| `PLAN.md` | Action plan, completed steps, success criteria |
+| `PROGRESS.md` | Working components, recent fixes, remaining issues |
+| `TESTS.md` | Test suite documentation, test vectors, how to run tests |
+| `FIXES_PLAN.md` | Planned fixes with file/line references |
+| `IMPROVEMENTS.md` | Improvement opportunities, planned fixes, and completed tasks |
 
 ## Update PROGRESS.md After Changes
 
