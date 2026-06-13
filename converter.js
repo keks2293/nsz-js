@@ -4,7 +4,8 @@ import { NCZDecompressor, DataReader } from './fs/ncz.js';
 import { KeysParser } from './keys.js';
 import { SHA256, sha256 } from './crypto/sha256.js';
 import { extractHashesFromCnmt, Cnmt, ContentEntry, NCAHeader } from './fs/ticket.js';
-import { XCIReader, HFS0Writer, XCIWriter } from './fs/xci.js';
+import { XCIReader, XCIWriter } from './fs/xci.js';
+import { HFS0Writer } from './fs/hfs0.js';
 
 class FileSliceReader extends DataReader {
     constructor(file, baseOffset = 0, totalLength = null) {

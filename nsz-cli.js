@@ -5,7 +5,7 @@ import { PFS0, PFS0Writer } from './fs/pfs0.js';
 import { NCZDecompressor, FileDescriptorReader, BufferReader } from './fs/ncz.js';
 import { KeysParser } from './keys.js';
 import { SHA256, sha256 } from './crypto/sha256.js';
-import { HFS0Writer } from './fs/xci.js';
+import { HFS0Writer } from './fs/hfs0.js';
 
 function formatBytes(bytes) {
     if (bytes === 0) return '0 B';
