@@ -27,3 +27,15 @@ Prioritized areas for improvement identified 2026-05-30.
 9. ❌ **SW `writable.close()` error handling** — Not needed. Browser handles failed downloads gracefully. No way to determine appropriate timeout value without profiling.
 
 10. ✅ **UI redesign** — `site-v2.md` suggests a redesign may be planned.
+
+## Speed Optimization
+
+11. ❌ **Remove SW slice(0) copy** — Attempted to remove `view.slice(0)` in SWDownloader.write. **Reverted** — zstddec yields Uint8Array views into WASM memory; Transferable would transfer entire WASM ArrayBuffer, crashing the WASM instance.
+
+12. ✅ **Remove CLI Buffer.from(chunk) copies** — `nsz-cli.js` used `Buffer.from(chunk)` before `fs.writeSync`. Removed — `fs.writeSync` accepts Uint8Array directly, no copy needed.
+
+## Memory Optimization
+
+13. ❌ **Reduce READ_CHUNK_SIZE** — `fs/ncz.js:52` uses 16MB. **Keeping as-is** — matches Python nsz `SolidCompressor.CHUNK_SZ = 0x1000000`.
+
+14. ❌ **Delete _decompressBuffered for memory savings** — Attempted to eliminate full NCA buffer allocation in memory path. **Not possible** — blob-requirement needs full buffer for `new Blob([data])`.
