@@ -23,8 +23,6 @@ Prioritized areas for improvement identified 2026-05-30.
 
 - [ ] **Missing NACP parser** — `fs/ticket.js` has NCA/CNMT/Ticket but no NACP. Python nsz has one; needed for game metadata extraction.
 
-- [ ] **File detection by extension only, not magic bytes** — `main.js:93-103`. Python nsz checks content magic for robust format detection.
-
 ## Polish
 
 - [ ] `converter.js:6` — unused imports: `extractHashesFromCnmt` и `ContentEntry` из `ticket.js`. Функция `extractHashesFromCnmt` не вызывается нигде (есть дубликат в `extractCnmtHashes`); `ContentEntry` тоже не используется напрямую
