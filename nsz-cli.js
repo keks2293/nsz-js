@@ -118,9 +118,12 @@ async function convertNCZ(inReader, inputFd, inputPath, outputPath, keys) {
         });
         const hash = hasher.hexdigest();
         console.log(`NCA SHA256: ${hash}`);
-    } finally {
+    } catch (e) {
         fs.closeSync(outputFd);
+        try { fs.unlinkSync(outPath); } catch {}
+        throw e;
     }
+    fs.closeSync(outputFd);
 
     const outStat = fs.statSync(outPath);
     console.log('');
@@ -250,9 +253,12 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
                 writePos += m.size;
             }
         }
-    } finally {
+    } catch (e) {
         fs.closeSync(outputFd);
+        try { fs.unlinkSync(outPath); } catch {}
+        throw e;
     }
+    fs.closeSync(outputFd);
 
     const outStat = fs.statSync(outPath);
     console.log('');
@@ -324,9 +330,12 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
                 fs.writeSync(outputFd, buf, 0, f.size, absWritePos);
             }
         }
-    } finally {
+    } catch (e) {
         fs.closeSync(outputFd);
+        try { fs.unlinkSync(outPath); } catch {}
+        throw e;
     }
+    fs.closeSync(outputFd);
 
     const outStat = fs.statSync(outPath);
     console.log('');
