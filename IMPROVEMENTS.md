@@ -19,8 +19,6 @@ Prioritized areas for improvement identified 2026-05-30.
 
 - [ ] **zstd CLI: reads all compressed data before piping** — `fs/ncz.js:292`. `_decompressWithStreaming` feeds entire data to zstd stdin before decompression begins. Defeats streaming. `_decompressWithStreamingStream` does this correctly.
 
-- [ ] **`HFS0Writer.getHeaderSize()` computes differently from reader** — `fs/xci.js:131-141`. Uses running sum of encoded names; reader uses raw string table slice. Potential mismatch.
-
 - [ ] **Missing NACP parser** — `fs/ticket.js` has NCA/CNMT/Ticket but no NACP. Python nsz has one; needed for game metadata extraction.
 
 ## Polish
