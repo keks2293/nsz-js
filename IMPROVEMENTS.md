@@ -17,7 +17,7 @@ Prioritized areas for improvement identified 2026-05-30.
 
 - [ ] **No `npm test` script** — `package.json:8-10`. Tests exist but require manual discovery. Prevents automated CI.
 
-- [ ] **zstd CLI: reads all compressed data before piping** — `fs/ncz.js:292`. `_decompressBuffered` feeds entire data to zstd stdin before decompression begins. Defeats streaming. `_decompressStream` does this correctly.
+- [x] **Deleted `_decompressBuffered`** — Memory path now uses `_decompressStream` with `collectChunk` wrapper. Reads input as stream, collects output into buffer. `_decompressBuffered` (entire file in memory before decompression) removed.
 
 - [ ] **Missing NACP parser** — `fs/ticket.js` has NCA/CNMT/Ticket but no NACP. Python nsz has one; needed for game metadata extraction.
 
