@@ -25,7 +25,6 @@ Prioritized areas for improvement identified 2026-05-30.
 
 ## Polish
 
-- [ ] `converter.js:6` — unused imports: `extractHashesFromCnmt` и `ContentEntry` из `ticket.js`. Функция `extractHashesFromCnmt` не вызывается нигде (есть дубликат в `extractCnmtHashes`); `ContentEntry` тоже не используется напрямую
 - [ ] No CI setup (GitHub Actions or similar)
 - [ ] SW `writable.close()` error handling could be more robust
 - [ ] `site-v2.md` suggests a UI redesign may be planned
