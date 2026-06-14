@@ -304,7 +304,7 @@ if hexHash[:32] == fileNameHash:
 
 2. **FakeSection cryptoType (FIXED)** — Was incorrectly set to 0, should be 1 (plaintext). Fixed in `ncz.js` line 80.
 
-3. **First section gap handling (FIXED)** — Missing logic to skip uncompressed gap for first section. Python code: `if firstSection: uncompressedSize = UNCOMPRESSABLE_HEADER_SIZE - sections[0].offset; i += uncompressedSize`. Added `firstSection` flag to both `_decompressWithStreaming` and `_decompressWithBlocks`.
+3. **First section gap handling (FIXED)** — Missing logic to skip uncompressed gap for first section. Python code: `if firstSection: uncompressedSize = UNCOMPRESSABLE_HEADER_SIZE - sections[0].offset; i += uncompressedSize`. Added `firstSection` flag to both `_decompressBuffered` and `_decompressWithBlocks`.
 
 4. **AES-CTR counter endianness (FIXED)** — Python's `Counter.new(64, prefix=nonce[0:8], initial_value=(offset >> 4))` uses big-endian for counter bytes. Fixed in `crypto/aesctr.mjs` to write counter bytes in big-endian order using `Buffer.writeBigUInt64BE()`.
 

@@ -26,7 +26,7 @@
 
 1. **Shared ZSTDDecoder instance in `crypto/zstd.js`** — WASM `ZSTDDecoder` is instantiated once and reused across all `decompressBuffer` calls. Eliminates repeated WASM module import + decoder init + memory allocation per decompress call. The WASM instance is captured for raw API access via `ZstdDecompressor.instance`. Removed unused `decompressStreaming` static method.
 
-2. **Eliminated `compressedChunks` pre-buffering in `fs/ncz.js`** — `_decompressWithStreamingStream` no longer reads all compressed data into an array before decompressing. Node.js path reads chunks lazily and writes to zstd stdin; browser path uses new `crypto/zstddec-stream-wrapper.js` which wraps zstddec's raw WASM exports (`ZSTD_createDCtx`/`ZSTD_decompressStream`) as an async generator with lazy `readChunk`. Peak RAM drops from file-size to 16 MB chunks.
+2. **Eliminated `compressedChunks` pre-buffering in `fs/ncz.js`** — `_decompressStream` no longer reads all compressed data into an array before decompressing. Node.js path reads chunks lazily and writes to zstd stdin; browser path uses new `crypto/zstddec-stream-wrapper.js` which wraps zstddec's raw WASM exports (`ZSTD_createDCtx`/`ZSTD_decompressStream`) as an async generator with lazy `readChunk`. Peak RAM drops from file-size to 16 MB chunks.
 
 3. **Replaced hash-wasm with Web Crypto API SHA-256** — hash-wasm WASM was 1 min slower than pure JS (WASM init overhead, SHA-256 not the bottleneck). Now uses `crypto.subtle.digest('SHA-256')` (browser) and `crypto.createHash('sha256')` (Node.js) — native, hardware-accelerated, zero init overhead. Falls back to pure JS.
 4. **Updated `TEST_RESULTS.md` with speed comparison** — hash-wasm was 2m53s vs pure JS 1m51s for 5 GB NSZ conversion.
