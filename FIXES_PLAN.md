@@ -4,8 +4,8 @@
 
 All four fixes in this document were completed in commit `dac31b6` ("Wire up progress callbacks in browser NCZ decompressor and fix PFS0 writing").
 
-1. **Progress callback in `_decompressBuffered`** ✅ — Done in `ncz.js`
-2. **Progress callback in `_decompressWithBlocks`** ✅ — Done in `ncz.js`  
+1. **Progress callback in `_decompressStream`** ✅ — Done in `ncz.js`
+2. **Progress callback in `_decompressBlocks`** ✅ — Done in `ncz.js`  
 3. **Redundant `setUint32`** ✅ — `converter.js` already correct (no duplicate)
 4. **Progress updates in `buildPFS0Memory`** ✅ — Done in `converter.js`
 

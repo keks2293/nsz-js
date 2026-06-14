@@ -1,5 +1,9 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-06-14)
+
+1. **Deleted `_decompressBuffered`** — Memory path now uses `_decompressStream` with `collectChunk` wrapper (`fs/ncz.js:220`). Reads input as stream, collects output into buffer. Removed ~80 lines of duplicated decompression logic.
+
 ## ✅ Recent Changes (2026-06-12)
 
 1. **Added "Overwrite" toggle option** — New toggle in browser UI settings panel (`index.html`) allows controlling FSA file creation behavior. Defaults to on (overwrite existing files). Added as a `.toggle-group` alongside the existing "Fix Padding" toggle in the Options setting group. JavaScript handler not yet wired in `main.js`.

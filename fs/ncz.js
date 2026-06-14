@@ -203,9 +203,9 @@ class NCZDecompressor {
             }
             if (useBlockCompression) {
                 console.log('[NCZ] Using streaming block decompression');
-                return await this._decompressWithBlocks(sections, null, ncaSize, headerEnd, progressCallback, writeChunk);
+                await this._decompressBlocks(sections, ncaSize, headerEnd, progressCallback, writeChunk);
             } else {
-                return await this._decompressStream(sections, ncaSize, headerEnd, progressCallback, writeChunk);
+                await this._decompressStream(sections, ncaSize, headerEnd, progressCallback, writeChunk);
             }
         } else {
             // Memory mode (Node.js): allocate full output buffer
@@ -213,12 +213,13 @@ class NCZDecompressor {
             if (this.ncaHeader) {
                 output.set(this.ncaHeader, 0);
             }
+            const collectChunk = async (chunk, pos) => { output.set(chunk, pos); };
             if (useBlockCompression) {
-                return await this._decompressWithBlocks(sections, output, ncaSize, headerEnd, progressCallback);
+                await this._decompressBlocks(sections, ncaSize, headerEnd, progressCallback, collectChunk);
             } else {
-                const compressedData = await this.reader.read(headerEnd, this.reader.length - headerEnd);
-                return await this._decompressBuffered(sections, compressedData, output, ncaSize, progressCallback);
+                await this._decompressStream(sections, ncaSize, headerEnd, progressCallback, collectChunk);
             }
+            return output;
         }
     }
 
@@ -274,87 +275,8 @@ class NCZDecompressor {
         return { sections, ncaSize, headerEnd: offset };
     }
 
-    async _decompressBuffered(sections, compressedData, output, ncaSize, progressCallback = null, writeChunk = null) {
-        let decompressed;
-        if (typeof process !== 'undefined' && process.versions && process.versions.node) {
-            console.log('[ZSTD] Using zstd CLI for Node.js');
-            const { spawn } = await import('node:child_process');
-            const proc = spawn('zstd', ['-d', '--no-check'], { stdio: ['pipe', 'pipe', 'pipe'] });
-            const chunks = [];
-            proc.stdout.on('data', (chunk) => chunks.push(chunk));
-            let stderr = '';
-            proc.stderr.on('data', (chunk) => stderr += chunk.toString());
-            proc.stdin.write(Buffer.from(compressedData));
-            proc.stdin.end();
-            await new Promise((resolve, reject) => {
-                proc.on('exit', (code) => {
-                    if (code === 0) resolve();
-                    else reject(new Error(`zstd failed with code ${code}: ${stderr}`));
-                });
-                proc.on('error', reject);
-            });
-            const result = Buffer.concat(chunks);
-            decompressed = new Uint8Array(result.buffer, result.byteOffset, result.byteLength);
-        } else {
-            console.log('[ZSTD] Using zstddec WASM (shared decoder)');
-            decompressed = await ZstdDecompressor.decompressBuffer(compressedData);
-        }
-
-        const streaming = writeChunk !== null;
-        if (streaming) {
-            await writeChunk(decompressed, UNCOMPRESSABLE_HEADER_SIZE);
-        } else {
-            output.set(decompressed, UNCOMPRESSABLE_HEADER_SIZE);
-        }
-
-        let decompressedOffset = UNCOMPRESSABLE_HEADER_SIZE;
-        let firstSection = true;
-
-        for (const section of sections) {
-            let i = section.offset;
-            const end = section.offset + section.size;
-
-            if (firstSection) {
-                firstSection = false;
-                const uncompressedSize = UNCOMPRESSABLE_HEADER_SIZE - sections[0].offset;
-                if (uncompressedSize > 0) {
-                    i += uncompressedSize;
-                }
-            }
-
-            let aesCtr = null;
-            if (section.cryptoType === 3 || section.cryptoType === 4) {
-                aesCtr = new AESCTR(section.cryptoKey, section.cryptoCounter);
-            }
-
-            while (i < end) {
-                const chunkSize = Math.min(SECTION_CHUNK_SIZE, end - i);
-                const relOffset = i - UNCOMPRESSABLE_HEADER_SIZE;
-                const chunk = decompressed.slice(relOffset, relOffset + chunkSize);
-
-                if (aesCtr) {
-                    const decrypted = await aesCtr.decrypt(chunk, i);
-                    if (streaming) {
-                        await writeChunk(decrypted, i);
-                    } else {
-                        output.set(decrypted, i);
-                    }
-                }
-
-                i += chunkSize;
-                decompressedOffset += chunkSize;
-
-                if (progressCallback) {
-                    progressCallback(decompressedOffset / ncaSize);
-                }
-            }
-        }
-
-        return streaming ? null : output;
-    }
-
-    async _decompressWithBlocks(sections, output, ncaSize, headerEnd, progressCallback = null, writeChunk = null) {
-        console.log('[NCZ] _decompressWithBlocks start, headerEnd:', headerEnd, 'ncaSize:', ncaSize, 'has writeChunk:', !!writeChunk);
+    async _decompressBlocks(sections, ncaSize, headerEnd, progressCallback = null, writeChunk = null) {
+        console.log('[NCZ] _decompressBlocks start, headerEnd:', headerEnd, 'ncaSize:', ncaSize);
         const blockHeaderData = await this.reader.read(headerEnd, 24);
         console.log('[NCZ] blockHeaderData read:', blockHeaderData.length, 'bytes');
         const blockHeader = new NCZBlockHeader(blockHeaderData, 0);
@@ -374,7 +296,6 @@ class NCZDecompressor {
 
         let decompressedOffset = UNCOMPRESSABLE_HEADER_SIZE;
         let firstSection = true;
-        const streaming = writeChunk !== null;
 
         for (const section of sections) {
             let i = section.offset;
@@ -403,11 +324,7 @@ class NCZDecompressor {
                     data = await aesCtr.decrypt(chunk, i);
                 }
 
-                if (streaming) {
-                    await writeChunk(data, i);
-                } else {
-                    output.set(data, i);
-                }
+                await writeChunk(data, i);
 
                 i += chunk.length;
                 decompressedOffset += chunk.length;
@@ -417,8 +334,6 @@ class NCZDecompressor {
                 }
             }
         }
-
-        return streaming ? null : output;
     }
 
     async _decompressStream(sections, ncaSize, headerEnd, progressCallback, writeChunk) {
@@ -477,7 +392,6 @@ class NCZDecompressor {
                 decompOffset = await this._processStreamDecompressedChunk(decompChunk, decompOffset, sortedSections, sectionAesCtrs, progressCallback, writeChunk, ncaSize);
             }
         }
-        return null;
     }
 
     async _processStreamDecompressedChunk(decompChunk, decompOffset, sortedSections, sectionAesCtrs, progressCallback, writeChunk, ncaSize) {
