@@ -205,7 +205,7 @@ class NCZDecompressor {
                 console.log('[NCZ] Using streaming block decompression');
                 return await this._decompressWithBlocks(sections, null, ncaSize, headerEnd, progressCallback, writeChunk);
             } else {
-                return await this._decompressWithStreamingStream(sections, ncaSize, headerEnd, progressCallback, writeChunk);
+                return await this._decompressStream(sections, ncaSize, headerEnd, progressCallback, writeChunk);
             }
         } else {
             // Memory mode (Node.js): allocate full output buffer
@@ -217,7 +217,7 @@ class NCZDecompressor {
                 return await this._decompressWithBlocks(sections, output, ncaSize, headerEnd, progressCallback);
             } else {
                 const compressedData = await this.reader.read(headerEnd, this.reader.length - headerEnd);
-                return await this._decompressWithStreaming(sections, compressedData, output, ncaSize, progressCallback);
+                return await this._decompressBuffered(sections, compressedData, output, ncaSize, progressCallback);
             }
         }
     }
@@ -274,7 +274,7 @@ class NCZDecompressor {
         return { sections, ncaSize, headerEnd: offset };
     }
 
-    async _decompressWithStreaming(sections, compressedData, output, ncaSize, progressCallback = null, writeChunk = null) {
+    async _decompressBuffered(sections, compressedData, output, ncaSize, progressCallback = null, writeChunk = null) {
         let decompressed;
         if (typeof process !== 'undefined' && process.versions && process.versions.node) {
             console.log('[ZSTD] Using zstd CLI for Node.js');
@@ -421,7 +421,7 @@ class NCZDecompressor {
         return streaming ? null : output;
     }
 
-    async _decompressWithStreamingStream(sections, ncaSize, headerEnd, progressCallback, writeChunk) {
+    async _decompressStream(sections, ncaSize, headerEnd, progressCallback, writeChunk) {
         console.log('[NCZ] Streaming (non-block) mode with chunked decompression');
         const remaining = this.reader.length - headerEnd;
         const sortedSections = [...sections].sort((a, b) => a.offset - b.offset);
