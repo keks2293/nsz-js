@@ -280,6 +280,9 @@ class NCZDecompressor {
         const blockHeaderData = await this.reader.read(headerEnd, 24);
         console.log('[NCZ] blockHeaderData read:', blockHeaderData.length, 'bytes');
         const blockHeader = new NCZBlockHeader(blockHeaderData, 0);
+        if (blockHeader.blockSizeExponent < 14 || blockHeader.blockSizeExponent > 32) {
+            throw new Error(`Corrupted NCZBLOCK header: Block size must be between 14 and 32, got ${blockHeader.blockSizeExponent}`);
+        }
         console.log('[NCZ] block magic:', JSON.stringify(blockHeader.magic), 'numBlocks:', blockHeader.numberOfBlocks, 'blockSize:', Math.pow(2, blockHeader.blockSizeExponent), 'decompressedSize:', blockHeader.decompressedSize);
         const sizeListSize = blockHeader.numberOfBlocks * 4;
         console.log('[NCZ] reading size list:', sizeListSize, 'bytes at offset', headerEnd + 24);
