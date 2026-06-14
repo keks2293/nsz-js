@@ -89,6 +89,22 @@ class NSZConverter {
             onLog('info', `Found ${cnmtHashes.size} expected NCA hashes from CNMT`);
         }
 
+        const verifyHash = (hash, name) => {
+            if (name.endsWith('.cnmt.nca')) return;
+            if (cnmtHashes.size > 0) {
+                if (cnmtHashes.has(hash)) {
+                    onLog('success', `[VERIFIED]   ${name}`);
+                } else {
+                    onLog('error', `[CORRUPTED]  ${name} - hash mismatch!`);
+                }
+            } else {
+                const expected = file.name.replace(/\.nsz$/i, '.nca');
+                if (hash.startsWith(expected.substring(0, 32))) {
+                    onLog('success', `[VERIFIED]   ${name}`);
+                }
+            }
+        };
+
         // First pass: determine output file names, sizes, and cache NCZ compressed data
         const outputMeta = [];
         for (const f of files) {
@@ -131,37 +147,14 @@ class NSZConverter {
                         });
                     const hash = hasher.hexdigest();
                     onLog('info', `NCA SHA256: ${hash}`);
-
-                    if (!meta.name.endsWith('.cnmt.nca')) {
-                        if (cnmtHashes.size > 0) {
-                            if (cnmtHashes.has(hash)) {
-                                onLog('success', `[VERIFIED]   ${meta.name}`);
-                            } else {
-                                onLog('error', `[CORRUPTED]  ${meta.name} - hash mismatch!`);
-                            }
-                        } else {
-                            const expectedFromFilename = file.name.replace(/\.nsz$/i, '.nca');
-                            if (hash.startsWith(expectedFromFilename.substring(0, 32))) {
-                                onLog('success', `[VERIFIED]   ${meta.name}`);
-                            }
-                        }
-                    }
+                    verifyHash(hash, meta.name);
                 } else {
                     onProgress(pct(dataWritten), `Copying ${f.name}...`);
                     const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
                     const hash = await sha256(data);
                     onLog('info', `SHA256: ${hash}`);
                     await writable.write({ type: 'write', position: writePos, data });
-
-                    if (cnmtHashes.size > 0 && !meta.name.endsWith('.cnmt.nca')) {
-                        if (cnmtHashes.has(hash)) {
-                            onLog('success', `[VERIFIED]   ${meta.name}`);
-                        } else if (hash in cnmtHashes) {
-                            onLog('success', `[VERIFIED]   ${meta.name}`);
-                        } else {
-                            onLog('error', `[CORRUPTED]  ${meta.name} - hash mismatch!`);
-                        }
-                    }
+                    verifyHash(hash, meta.name);
                 }
 
                 dataWritten += meta.size;
@@ -190,21 +183,7 @@ class NSZConverter {
                     const nczData = await this.decompressNCZ(file, f, (p) => onProgress(pct(dataWritten + meta.size * p), `Decompressing ${f.name}...`));
                     const hash = await sha256(nczData);
                     onLog('info', `NCA SHA256: ${hash}`);
-
-                    if (!meta.name.endsWith('.cnmt.nca')) {
-                        if (cnmtHashes.size > 0) {
-                            if (cnmtHashes.has(hash)) {
-                                onLog('success', `[VERIFIED]   ${meta.name}`);
-                            } else {
-                                onLog('error', `[CORRUPTED]  ${meta.name} - hash mismatch!`);
-                            }
-                        } else {
-                            const expectedFromFilename = file.name.replace(/\.nsz$/i, '.nca');
-                            if (hash.startsWith(expectedFromFilename.substring(0, 32))) {
-                                onLog('success', `[VERIFIED]   ${meta.name}`);
-                            }
-                        }
-                    }
+                    verifyHash(hash, meta.name);
 
                     outputFiles.push({ name: meta.name, data: nczData });
                 } else {
@@ -212,16 +191,7 @@ class NSZConverter {
                     const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
                     const hash = await sha256(data);
                     onLog('info', `SHA256: ${hash}`);
-
-                    if (cnmtHashes.size > 0 && !meta.name.endsWith('.cnmt.nca')) {
-                        if (cnmtHashes.has(hash)) {
-                            onLog('success', `[VERIFIED]   ${meta.name}`);
-                        } else if (hash in cnmtHashes) {
-                            onLog('success', `[VERIFIED]   ${meta.name}`);
-                        } else {
-                            onLog('error', `[CORRUPTED]  ${meta.name} - hash mismatch!`);
-                        }
-                    }
+                    verifyHash(hash, meta.name);
 
                     outputFiles.push({ name: meta.name, data });
                 }
