@@ -113,8 +113,7 @@ async function convertNCZ(inReader, inputFd, inputPath, outputPath, keys) {
         const hasher = new SHA256();
         await decomp.decompress(null, async (chunk, offset) => {
             hasher.update(chunk);
-            const buf = Buffer.from(chunk);
-            fs.writeSync(outputFd, buf, 0, buf.length, offset);
+            fs.writeSync(outputFd, chunk, 0, chunk.byteLength, offset);
         });
         const hash = hasher.hexdigest();
         console.log(`NCA SHA256: ${hash}`);
@@ -255,8 +254,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
                     const hasher = new SHA256();
                     await decomp.decompress(null, async (chunk, offset) => {
                         hasher.update(chunk);
-                        const buf = Buffer.from(chunk);
-                        fs.writeSync(outputFd, buf, 0, buf.length, writePos + offset);
+                        fs.writeSync(outputFd, chunk, 0, chunk.byteLength, writePos + offset);
                     });
                     const hash = hasher.hexdigest();
                     console.log(`  SHA256: ${hash}`);
@@ -349,8 +347,7 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
                 const hasher = new SHA256();
                 await decomp.decompress(null, async (chunk, offset) => {
                     hasher.update(chunk);
-                    const buf = Buffer.from(chunk);
-                    fs.writeSync(outputFd, buf, 0, buf.length, absWritePos + offset);
+                    fs.writeSync(outputFd, chunk, 0, chunk.byteLength, absWritePos + offset);
                 });
                 const hash = hasher.hexdigest();
                 console.log(`  SHA256: ${hash}`);
