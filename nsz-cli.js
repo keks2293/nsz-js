@@ -151,7 +151,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
     const partitionMetas = [];
     for (const partition of partitions) {
         if (partition.size === 0) {
-            partitionMetas.push({ name: partition.name, files: [], totalSize: 0, hfs0Data: null });
+            partitionMetas.push({ name: partition.name, files: [], totalSize: 0, hfs0Data: null, cnmtHashes: new Set() });
             continue;
         }
         let hfs0;
@@ -161,11 +161,26 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
             console.log(`  ${partition.name}: cannot parse as HFS0, copying raw (${e.message})`);
             const buf = Buffer.alloc(partition.size);
             fs.readSync(inputFd, buf, 0, partition.size, partition.offset);
-            partitionMetas.push({ name: partition.name, raw: true, rawData: buf, files: [], totalSize: partition.size, hfs0Data: null });
+            partitionMetas.push({ name: partition.name, raw: true, rawData: buf, files: [], totalSize: partition.size, hfs0Data: null, cnmtHashes: new Set() });
             continue;
         }
         const pFiles = hfs0.getFiles();
         console.log(`  ${partition.name}: ${pFiles.length} files`);
+
+        // Extract CNMT hashes from this partition
+        const cnmtHashes = new Set();
+        const cnmtFiles = pFiles.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
+        if (cnmtFiles.length > 0) {
+            const { NSZConverter } = await import('./converter.js');
+            const converter = new NSZConverter();
+            for (const cnmtFile of cnmtFiles) {
+                const cnmtData = Buffer.alloc(cnmtFile.size);
+                fs.readSync(inputFd, cnmtData, 0, cnmtFile.size, cnmtFile.offset);
+                const hashes = await converter.extractCnmtHashes(cnmtData);
+                hashes.forEach(h => cnmtHashes.add(h));
+            }
+            console.log(`  Found ${cnmtHashes.size} expected NCA hashes from CNMT in ${partition.name}`);
+        }
 
         const fileMetas = [];
         for (const f of pFiles) {
@@ -181,7 +196,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
             }
         }
         const totalSize = fileMetas.reduce((s, m) => s + m.size, 0);
-        partitionMetas.push({ name: partition.name, files: fileMetas, totalSize, raw: false, rawData: null });
+        partitionMetas.push({ name: partition.name, files: fileMetas, totalSize, raw: false, rawData: null, cnmtHashes });
     }
 
     const rootWriter = new HFS0Writer(ROOT_HFS0_PADDED_SIZE);
@@ -243,12 +258,31 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
                         const buf = Buffer.from(chunk);
                         fs.writeSync(outputFd, buf, 0, buf.length, writePos + offset);
                     });
-                    console.log(`  SHA256: ${hasher.hexdigest()}`);
+                    const hash = hasher.hexdigest();
+                    console.log(`  SHA256: ${hash}`);
+                    if (m.name.endsWith('.nca') && !m.name.endsWith('.cnmt.nca') && pm.cnmtHashes.size > 0) {
+                        if (pm.cnmtHashes.has(hash)) {
+                            console.log(`  [VERIFIED]   ${m.name} ${hash}`);
+                        } else {
+                            console.log(`  [CORRUPTED]  ${m.name} ${hash}`);
+                            throw new Error(`Verification detected hash mismatch: ${m.name}`);
+                        }
+                    }
                 } else {
                     console.log(`Copying: ${pm.name}/${m.inputName} -> ${m.name}`);
                     const buf = Buffer.alloc(m.size);
                     fs.readSync(inputFd, buf, 0, m.size, m.offset);
+                    const hash = await sha256(buf);
+                    console.log(`  SHA256: ${hash}`);
                     fs.writeSync(outputFd, buf, 0, m.size, writePos);
+                    if (m.name.endsWith('.nca') && !m.name.endsWith('.cnmt.nca') && pm.cnmtHashes.size > 0) {
+                        if (pm.cnmtHashes.has(hash)) {
+                            console.log(`  [VERIFIED]   ${m.name} ${hash}`);
+                        } else {
+                            console.log(`  [CORRUPTED]  ${m.name} ${hash}`);
+                            throw new Error(`Verification detected hash mismatch: ${m.name}`);
+                        }
+                    }
                 }
                 writePos += m.size;
             }
