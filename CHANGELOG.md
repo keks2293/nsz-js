@@ -4,6 +4,20 @@
 
 1. **Deleted `_decompressBuffered`** — Memory path now uses `_decompressStream` with `collectChunk` wrapper (`fs/ncz.js:220`). Reads input as stream, collects output into buffer. Removed ~80 lines of duplicated decompression logic.
 
+2. **Aligned hash verification with Python nsz** — Extracted `verifyHash` method, removed dead `hash in cnmtHashes` bug, split NCZ/NCA verification, moved `.nca` check to call sites, added `[VERIFIED]`/`[CORRUPTED]` with hash, `[EXISTS]` logging, `[MISSMATCH]` for standalone NCZ.
+
+3. **Per-partition XCZ hash verification** — Python nsz extracts CNMT hashes from each XCI partition independently. Now both NCZ and non-NCZ .nca files verified against partition-specific CNMT hashes.
+
+4. **blockSizeExponent validation** — Added range check (14-32) matching Python nsz `BlockDecompressorReader`.
+
+5. **Delete partial output on error** — CLI now deletes incomplete output files on conversion failure.
+
+6. **Removed CLI Buffer.from(chunk) copies** — `fs.writeSync` accepts Uint8Array directly.
+
+7. **Updated IMPROVEMENTS.md** — All items resolved, added speed/memory optimization attempts.
+
+8. **Updated README** — Added Python nsz compatibility section, verification behavior, architecture notes.
+
 ## ✅ Recent Changes (2026-06-12)
 
 1. **Added "Overwrite" toggle option** — New toggle in browser UI settings panel (`index.html`) allows controlling FSA file creation behavior. Defaults to on (overwrite existing files). Added as a `.toggle-group` alongside the existing "Fix Padding" toggle in the Options setting group. JavaScript handler not yet wired in `main.js`.
