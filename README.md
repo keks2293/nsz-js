@@ -6,12 +6,15 @@ A **100% local** pure JavaScript converter for Nintendo Switch compressed game f
 
 - **Pure JavaScript**: No server-side processing required
 - **Browser-based**: Works entirely in the browser with File System Access API
+- **Node.js CLI**: Command-line tool for batch processing
 - **Zstandard decompression**: Full support for both streaming and block compression
 - **NCA encryption**: Supports CTR and BKTR encryption modes
-- **Integrity verification**: Validates NCA file hashes against CNMT records
+- **Integrity verification**: Validates NCA file hashes against CNMT records (per-partition for XCZ)
+- **Python nsz compatible**: Output matches Python nsz byte-for-byte
 - **Large file support**: Streaming decompression for files up to 8GB+
 - **Batch processing**: Process multiple NSZ files at once
 - **Key management**: Automatic key derivation from prod.keys
+- **Error safety**: Deletes partial output on conversion failure (CLI)
 
 ## Usage
 
@@ -28,32 +31,59 @@ A **100% local** pure JavaScript converter for Nintendo Switch compressed game f
 node nsz-cli.js <input> [output] [keys.txt] [-p]
 ```
 
+Options:
+- `-p, --fix-padding` - Use 0x20-byte alignment (default: 16-byte)
+- `-h, --help` - Show usage information
+
+## Python nsz Compatibility
+
+Output is byte-identical to Python nsz for default mode. Verified against Python nsz 4.6.1.
+
+### Verification behavior
+
+- **NSZ**: NCA hashes verified against CNMT records from top-level PFS0
+- **XCZ**: NCA hashes verified against per-partition CNMT records (all partitions)
+- **Standalone NCZ**: Filename fallback verification (`hash[:32] === filename`)
+- Logs: `[VERIFIED]`, `[CORRUPTED]`, `[MISSMATCH]`, `[EXISTS]`
+
+### Matching Python nsz
+
+- PFS0 header padding (16-byte default, 0x20 with `--fix-padding`)
+- HFS0 offset convention (matches hactool)
+- Block size validation (14-32 exponent range)
+- Error handling (partial output cleanup on failure)
+
 ## Architecture
 
 ```
 nsz-js/
-├── index.html          # Main browser UI
-├── main.js             # Browser UI logic and event handling
-├── converter.js        # Main NSZ to NSP conversion orchestrator
-├── nsz-cli.js          # Node.js CLI entry point
-├── keys.js             # Browser key parsing and derivation
-├── fs/                 # File format modules (mirrors Python nsz Fs/)
-│   ├── pfs0.js         # PFS0 container parsing and writing
-│   ├── ncz.js          # NCZ decompression + DataReader abstractions
-│   ├── xci.js          # XCI/HFS0 container support
-│   └── ticket.js       # Ticket, CNMT, NCA header parsing
-├── crypto/             # Cryptographic utilities
-│   ├── aes128.js       # AES-128 ECB/CBC implementation
-│   ├── aesctr.mjs      # AES-CTR mode (Node.js native crypto / Web Crypto API)
-│   ├── sha256.js       # SHA-256 hash function
-│   └── zstd.js         # Zstandard decompression (uses zstddec WASM)
-├── static/             # Static dependencies for browser (offline use)
-│   ├── zstddec.mjs     # WASM-based zstd decompression
-│   └── prod.keys       # Nintendo Switch keys file
-├── test_*.mjs          # Test suites
-├── test_*.{cjs,py,html}# Additional tests
-├── nsz-convert-ref.py  # Python reference implementation
-├── .md files           # Documentation
+├── index.html              # Main browser UI
+├── main.js                 # Browser UI logic and event handling
+├── converter.js            # Main NSZ to NSP conversion orchestrator
+├── nsz-cli.js              # Node.js CLI entry point
+├── keys.js                 # Browser key parsing and derivation
+├── download-worker.js      # Service Worker for streaming downloads
+├── fs/                     # File format modules (mirrors Python nsz Fs/)
+│   ├── pfs0.js             # PFS0 container parsing and writing
+│   ├── ncz.js              # NCZ decompression, DataReader hierarchy, AsyncBlockDecompressorReader
+│   ├── xci.js              # XCI/HFS0 container support (XCIReader, XCIWriter)
+│   ├── hfs0.js             # HFS0 container parsing and writing
+│   ├── ticket.js           # Ticket parsing
+│   ├── cnmt.js             # CNMT (Content Metadata) parsing
+│   └── nca.js              # NCA header parsing
+├── crypto/                 # Cryptographic utilities
+│   ├── aes128.js           # AES-128 ECB/CBC implementation
+│   ├── aesctr.mjs          # AES-CTR mode (Node.js native crypto / Web Crypto API)
+│   ├── sha256.js           # SHA-256 hash function
+│   ├── zstd.js             # Zstandard decompression (uses zstddec WASM)
+│   └── zstddec-stream-wrapper.js  # WASM streaming decompression wrapper
+├── static/                 # Static dependencies for browser (offline use)
+│   ├── zstddec.mjs         # WASM-based zstd decompression
+│   └── prod.keys           # Nintendo Switch keys file
+├── test_*.mjs              # Test suites
+├── test_browser.html       # Browser tests
+├── nsz-convert-ref.py      # Python reference implementation
+├── .md files               # Documentation
 ```
 
 ## File Descriptions
@@ -64,9 +94,12 @@ nsz-js/
 - **main.js** - UI controller handling file selection, drag-drop, conversion triggers, and progress updates
 - **converter.js** - Core converter class `NSZConverter` that orchestrates NCZ decompression, PFS0 rebuilding, and hash verification
 - **fs/pfs0.js** - `PFS0Reader` and `PFS0Writer` classes for parsing and building PFS0 containers
-- **fs/ncz.js** - `NCZDecompressor` class for decompressing NCZ files with section-based, block-based (NCZBLOCK), and streaming compression. Contains DataReader hierarchy (`DataReader`, `FileDescriptorReader`, `BufferReader`, `FileSliceReader`, `ChunkedBufferReader`)
-- **fs/xci.js** - `XCIReader`, `XCIWriter`, `HFS0Reader`, and `HFS0Writer` for XCI/HFS0 container support
-- **fs/ticket.js** - Classes for parsing Ticket, CNMT (Content Metadata), NCA headers, and BKTR structures
+- **fs/ncz.js** - `NCZDecompressor` class for decompressing NCZ files with section-based, block-based (NCZBLOCK), and streaming compression. Contains DataReader hierarchy (`DataReader`, `BufferReader`, `ChunkedBufferReader`, `FileDescriptorReader`) and `AsyncBlockDecompressorReader`
+- **fs/xci.js** - `XCIReader` and `XCIWriter` for XCI container support
+- **fs/hfs0.js** - `HFS0Reader` and `HFS0Writer` for HFS0 container support
+- **fs/ticket.js** - `Ticket` class for parsing ticket files
+- **fs/cnmt.js** - `Cnmt` and `ContentEntry` classes for parsing Content Metadata
+- **fs/nca.js** - `NCAHeader` class for parsing NCA headers
 - **keys.js** - `KeysParser` class for parsing prod.keys files and deriving title KEKs and key area keys
 
 ### Crypto Files
@@ -149,3 +182,18 @@ The implementation includes full key derivation from prod.keys:
 ### Node.js
 - Node.js 14+ with ES module support
 - `zstd` CLI binary in PATH (for streaming decompression) or falls back to zstddec WASM
+
+## Implementation Notes
+
+### Decompression architecture
+
+All decompression paths (streaming, memory, block) use a unified `writeChunk` callback pattern:
+- **Streaming**: `writeChunk` writes to File System Access API or Service Worker stream
+- **Memory**: `collectChunk` wrapper writes to pre-allocated output buffer
+
+### Hash verification
+
+`verifyHash(hash, name, fileHashes)` is the single verification entry point:
+- `.nca` check is at call sites (matching Python nsz structure)
+- Explicit `fileHashes` parameter (no closure fallback)
+- Throws on mismatch (matching Python nsz `VerificationException`)
