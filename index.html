@@ -54,6 +54,20 @@
             padding-top: 8px;
         }
 
+        /* ── Main Layout ── */
+        .main {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .main-right {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 8px 0 0;
+        }
+
         /* ── Header ── */
         .header {
             text-align: center;
@@ -98,6 +112,9 @@
             background: var(--bg-raised);
             position: relative;
             overflow: hidden;
+            height: clamp(120px, 22vw, 200px);
+            display: flex;
+            flex-direction: column;
         }
 
         .drop-zone:hover,
@@ -112,8 +129,13 @@
         }
 
         .drop-zone-empty {
-            padding: 28px 16px;
+            padding: 16px;
             text-align: center;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
         }
 
         .drop-zone.has-files .drop-zone-empty { display: none; }
@@ -203,11 +225,11 @@
         }
 
         /* ── File List ── */
-        .drop-zone-list { display: none; }
-        .drop-zone.has-files .drop-zone-list { display: block; }
+        .drop-zone-list { display: none; flex: 1; overflow: hidden; }
+        .drop-zone.has-files .drop-zone-list { display: flex; flex-direction: column; }
 
         .files-body {
-            max-height: 140px;
+            flex: 1;
             overflow-y: auto;
             scrollbar-width: thin;
             scrollbar-color: var(--border) transparent;
@@ -327,14 +349,11 @@
 
         /* ── Progress ── */
         .progress {
-            display: none;
             background: var(--bg-card);
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 14px;
         }
-
-        .progress.visible { display: block; }
 
         .progress-top {
             display: flex;
@@ -370,6 +389,7 @@
             display: flex;
             justify-content: space-between;
             margin-top: 6px;
+            min-height: 1.2em;
         }
 
         .progress-status, .progress-speed {
@@ -381,7 +401,6 @@
 
         /* ── Log ── */
         .log {
-            display: none;
             background: var(--bg);
             border: 1px solid var(--border);
             border-radius: 12px;
@@ -461,11 +480,20 @@
         .status.err { color: var(--red); }
 
         /* ── Desktop ── */
-        @media (min-width: 640px) {
+        @media (min-width: 900px) {
             body { padding: 40px; padding-top: 60px; }
 
             .app {
-                max-width: 640px;
+                max-width: 1280px;
+                min-height: calc(100dvh - 100px);
+                gap: 16px;
+            }
+
+            .main {
+                flex: 1;
+                min-height: 0;
+                display: grid;
+                grid-template-columns: 1fr 1fr;
                 gap: 16px;
             }
 
@@ -484,9 +512,26 @@
             .header h1 { font-size: 1.8em; }
             .header p { font-size: 14px; color: var(--text-dim); margin-top: 8px; }
 
+            .main-left {
+                display: flex;
+                flex-direction: column;
+            }
+
             .drop-zone {
+                flex: 1;
                 border-radius: 14px;
             }
+
+            .main-right {
+                position: static;
+                background: none;
+                padding: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+
+
 
             .drop-zone-empty { padding: 40px 24px; }
 
@@ -542,64 +587,69 @@
             <p>100% local — no uploads, no servers</p>
         </div>
 
-        <div class="drop-zone" id="dropZone">
-            <div class="drop-zone-empty">
-                <div class="drop-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                        <polyline points="17 8 12 3 7 8"/>
-                        <line x1="12" y1="3" x2="12" y2="15"/>
-                    </svg>
+        <div class="main">
+            <div class="main-left">
+                <div class="drop-zone" id="dropZone">
+                    <div class="drop-zone-empty">
+                        <div class="drop-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                                <polyline points="17 8 12 3 7 8"/>
+                                <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                        </div>
+                        <div class="drop-text">Drop files here or tap to browse</div>
+                        <div class="drop-hint"><b>.nsz</b> → .nsp &nbsp;|&nbsp; <b>.xcz</b> → .xci</div>
+                    </div>
+                    <div class="drop-zone-compact"><span>+ Drop more or tap to add</span></div>
+                    <div class="drop-zone-list">
+                        <div class="files-body" id="fileListScroll"></div>
+                    </div>
+                    <input type="file" id="fileInput" multiple accept=".nsz,.xcz">
                 </div>
-                <div class="drop-text">Drop files here or tap to browse</div>
-                <div class="drop-hint"><b>.nsz</b> → .nsp &nbsp;|&nbsp; <b>.xcz</b> → .xci</div>
             </div>
-            <div class="drop-zone-compact"><span>+ Drop more or tap to add</span></div>
-            <div class="drop-zone-list">
-                <div class="files-body" id="fileListScroll"></div>
-            </div>
-            <input type="file" id="fileInput" multiple accept=".nsz,.xcz">
-        </div>
+            <div class="main-right">
+                    <div class="section">
+                        <div class="settings">
+                            <div class="setting">
+                                <div class="setting-label">Download</div>
+                                <div class="pills" id="modeOptions">
+                                    <button class="pill on" data-mode="auto"><input type="radio" name="mode" value="auto" checked>Auto</button>
+                                    <button class="pill" data-mode="fsa"><input type="radio" name="mode" value="fsa">File System</button>
+                                    <button class="pill" data-mode="sw"><input type="radio" name="mode" value="sw">Stream</button>
+                                    <button class="pill" data-mode="blob"><input type="radio" name="mode" value="blob">Blob</button>
+                                </div>
+                            </div>
+                            <div class="setting">
+                                <div class="setting-label">Options</div>
+                                <div class="pills" id="optionsButtons">
+                                    <button class="pill" id="fixPaddingBtn">Fix Padding</button>
+                                    <button class="pill" id="overwriteBtn">Overwrite</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="actions">
+                            <button class="btn btn-go" id="convertBtn" disabled>Convert</button>
+                        </div>
+                    </div>
 
-        <div class="section">
-            <div class="settings">
-                <div class="setting">
-                    <div class="setting-label">Download</div>
-                    <div class="pills" id="modeOptions">
-                        <button class="pill on" data-mode="auto"><input type="radio" name="mode" value="auto" checked>Auto</button>
-                        <button class="pill" data-mode="fsa"><input type="radio" name="mode" value="fsa">File System</button>
-                        <button class="pill" data-mode="sw"><input type="radio" name="mode" value="sw">Stream</button>
-                        <button class="pill" data-mode="blob"><input type="radio" name="mode" value="blob">Blob</button>
+                <div class="progress" id="progressContainer">
+                    <div class="progress-top">
+                        <span class="progress-label" id="progressTitle">Ready</span>
+                        <span class="progress-pct" id="progressPercent">0%</span>
+                    </div>
+                    <div class="bar">
+                        <div class="bar-fill" id="progressFill"></div>
+                    </div>
+                    <div class="progress-bottom">
+                        <span class="progress-status" id="progressText"></span>
+                        <span class="progress-speed" id="progressSpeed"></span>
                     </div>
                 </div>
-                <div class="setting">
-                    <div class="setting-label">Options</div>
-                    <div class="pills" id="optionsButtons">
-                        <button class="pill" id="fixPaddingBtn">Fix Padding</button>
-                        <button class="pill" id="overwriteBtn">Overwrite</button>
-                    </div>
-                </div>
-            </div>
-            <div class="actions">
-                <button class="btn btn-go" id="convertBtn" disabled>Convert</button>
+
+                <div class="log" id="logContainer"></div>
             </div>
         </div>
-
-        <div class="progress" id="progressContainer">
-            <div class="progress-top">
-                <span class="progress-label" id="progressTitle">Converting...</span>
-                <span class="progress-pct" id="progressPercent">0%</span>
-            </div>
-            <div class="bar">
-                <div class="bar-fill" id="progressFill"></div>
-            </div>
-            <div class="progress-bottom">
-                <span class="progress-status" id="progressText">Preparing...</span>
-                <span class="progress-speed" id="progressSpeed"></span>
-            </div>
-        </div>
-
-        <div class="log" id="logContainer"></div>
 
         <div class="status" id="status"></div>
     </div>

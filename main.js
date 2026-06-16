@@ -356,6 +356,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         status.textContent = 'Done!';
         status.className = 'status ok';
         convertBtn.disabled = false;
+        updateProgress(1, 'Done');
     });
 
     await converter.init().catch(e => {
