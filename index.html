@@ -297,6 +297,40 @@
         .file-x:hover { background: rgba(248, 113, 113, 0.15); color: var(--red); border-color: var(--red); }
         .file-x svg { width: 13px; height: 13px; }
 
+        .file-status-icon {
+            width: 20px;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        .file-ok .file-status-icon { color: #22c55e; }
+        .file-err .file-status-icon { color: var(--red); }
+        .file-skip .file-status-icon { color: var(--text-faint); }
+
+        .file-pprogress {
+            height: 3px;
+            background: var(--border);
+            border-radius: 2px;
+            margin-top: 4px;
+            overflow: hidden;
+        }
+
+        .file-pprogress-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--accent);
+            border-radius: 2px;
+        }
+
+        .file-ok .file-badge { opacity: 0.4; }
+        .file-err .file-badge { opacity: 0.4; }
+        .file-skip .file-badge { opacity: 0.3; }
+        .file-ok .file-pprogress { display: none; }
+        .file-err .file-pprogress { display: none; }
+        .file-skip .file-pprogress { display: none; }
+
         /* ── Settings ── */
         .settings {
             display: grid;

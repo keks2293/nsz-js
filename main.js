@@ -95,6 +95,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     const converter = new NSZConverter();
     const files = [];
+    const fileStatus = [];
 
     function formatBytes(bytes) {
         if (bytes === 0) return '0 B';
@@ -141,18 +142,23 @@ window.addEventListener('DOMContentLoaded', async () => {
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
             const ext = file.name.split('.').pop().toLowerCase();
+            const st = fileStatus[i] || '';
 
             const item = document.createElement('div');
-            item.className = 'file';
+            item.className = 'file' + (st === 'ok' ? ' file-ok' : st === 'err' ? ' file-err' : st === 'skip' ? ' file-skip' : '');
 
             const badgeClass = ['nsz'].includes(ext) ? 'nsz' : ext;
+
+            const statusIcon = st === 'ok' ? '✓' : st === 'err' ? '✗' : st === 'skip' ? '–' : '';
 
             item.innerHTML = `
                 <div class="file-badge ${badgeClass}">${ext.toUpperCase()}</div>
                 <div class="file-meta">
                     <div class="file-name">${escapeHtml(file.name)}</div>
                     <div class="file-size">${formatBytes(file.size)}</div>
+                    <div class="file-pprogress" id="fp${i}"><div class="file-pprogress-fill" id="fpf${i}"></div></div>
                 </div>
+                <div class="file-status-icon">${statusIcon}</div>
                 <button class="file-x" data-index="${i}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
@@ -167,6 +173,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             btn.addEventListener('click', (e) => {
                 const index = parseInt(e.currentTarget.dataset.index);
                 files.splice(index, 1);
+                fileStatus.splice(index, 1);
                 updateFileList();
             });
         });
@@ -174,6 +181,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         const hasFiles = files.length > 0;
         dropZone.classList.toggle('has-files', hasFiles);
         convertBtn.disabled = !hasFiles;
+    }
+
+    function updateFileProgress(index, pct) {
+        const fill = document.getElementById(`fpf${index}`);
+        if (fill) fill.style.width = `${pct}%`;
     }
 
     function escapeHtml(text) {
@@ -280,6 +292,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         const totalFiles = files.length;
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
+            if (fileStatus[i] === 'ok' || fileStatus[i] === 'skip' || fileStatus[i] === 'err') continue;
             addLog('info', `Processing ${i + 1}/${totalFiles}: ${file.name}`);
             progressTitle.textContent = file.name;
 
@@ -300,9 +313,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                             try {
                                 fileHandle = await directoryHandle.getFileHandle(outputName);
                                 addLog('warn', `Exists, skipping: ${outputName}`);
-                                files.splice(i, 1);
-                                i--;
-                                fileInput.value = '';
+                                fileStatus[i] = 'skip';
                                 updateFileList();
                                 continue;
                             } catch {
@@ -328,15 +339,23 @@ window.addEventListener('DOMContentLoaded', async () => {
                 }
 
                 let result;
+                updateFileProgress(i, 0);
                 if (fileType === 'xcz') {
                     result = await converter.decompressXCZtoXCI(file, {
-                        onProgress: (p, t) => updateProgress((i + p) / totalFiles, t),
+                        onProgress: (p, t) => {
+                            updateProgress((i + p) / totalFiles, t);
+                            updateFileProgress(i, p * 100);
+                        },
                         onLog: addLog,
                         writable
                     });
                 } else {
                     result = await converter.decompressNSZtoNSP(file, {
-                        onProgress: (p, t) => updateProgress((i + Math.max(0, Math.min(1, (p - 0.02) / 0.98))) / totalFiles, t),
+                        onProgress: (p, t) => {
+                            const remapped = Math.max(0, Math.min(1, (p - 0.02) / 0.98));
+                            updateProgress((i + remapped) / totalFiles, t);
+                            updateFileProgress(i, remapped * 100);
+                        },
                         onLog: addLog,
                         writable,
                         fixPadding
@@ -358,12 +377,12 @@ window.addEventListener('DOMContentLoaded', async () => {
                     addLog('ok', `${result.name}`);
                 }
 
-                files.splice(i, 1);
-                i--;
-                fileInput.value = '';
+                fileStatus[i] = 'ok';
                 updateFileList();
             } catch (error) {
                 addLog('err', `Failed: ${error.message}`);
+                fileStatus[i] = 'err';
+                updateFileList();
             }
         }
 
