@@ -277,9 +277,10 @@ window.addEventListener('DOMContentLoaded', async () => {
             return iframe;
         });
 
+        const totalFiles = files.length;
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
-            addLog('info', `Processing ${i + 1}/${files.length}: ${file.name}`);
+            addLog('info', `Processing ${i + 1}/${totalFiles}: ${file.name}`);
             progressTitle.textContent = file.name;
 
             try {
@@ -329,13 +330,13 @@ window.addEventListener('DOMContentLoaded', async () => {
                 let result;
                 if (fileType === 'xcz') {
                     result = await converter.decompressXCZtoXCI(file, {
-                        onProgress: (p, t) => updateProgress((i + p) / files.length, t),
+                        onProgress: (p, t) => updateProgress((i + p) / totalFiles, t),
                         onLog: addLog,
                         writable
                     });
                 } else {
                     result = await converter.decompressNSZtoNSP(file, {
-                        onProgress: (p, t) => updateProgress(Math.max(0, Math.min(1, (p - 0.02) / 0.98)), t),
+                        onProgress: (p, t) => updateProgress((i + Math.max(0, Math.min(1, (p - 0.02) / 0.98))) / totalFiles, t),
                         onLog: addLog,
                         writable,
                         fixPadding
