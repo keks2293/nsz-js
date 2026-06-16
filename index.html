@@ -251,36 +251,6 @@
         .file-x:hover { background: rgba(248, 113, 113, 0.15); color: var(--red); }
         .file-x svg { width: 13px; height: 13px; }
 
-        /* ── Info Bar ── */
-        .info-bar {
-            display: none;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 1px;
-            background: var(--border);
-        }
-
-        .info-bar.visible { display: grid; }
-
-        .info-cell {
-            text-align: center;
-            background: var(--bg-card);
-            padding: 12px 6px;
-        }
-
-        .info-val {
-            font-size: 18px;
-            font-weight: 700;
-            font-family: 'SF Mono', monospace;
-        }
-
-        .info-lbl {
-            font-size: 10px;
-            color: var(--text-faint);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            margin-top: 2px;
-        }
-
         /* ── Settings ── */
         .settings {
             display: grid;
@@ -517,8 +487,6 @@
             .drop-hint { font-size: 12px; }
 
             .section { border-radius: 14px; }
-            .info-val { font-size: 22px; }
-            .info-cell { padding: 16px 8px; }
 
             .setting { padding: 14px 16px; }
 
@@ -578,21 +546,6 @@
                 <span class="section-badge" id="fileCount">0</span>
             </div>
             <div class="files-body" id="fileListScroll"></div>
-        </div>
-
-        <div class="section info-bar" id="fileInfoPanel">
-            <div class="info-cell">
-                <div class="info-val" id="infoTotalSize">—</div>
-                <div class="info-lbl">Size</div>
-            </div>
-            <div class="info-cell">
-                <div class="info-val" id="infoFiles">—</div>
-                <div class="info-lbl">Files</div>
-            </div>
-            <div class="info-cell">
-                <div class="info-val" id="infoFormats">—</div>
-                <div class="info-lbl">Types</div>
-            </div>
         </div>
 
         <div class="section settings">

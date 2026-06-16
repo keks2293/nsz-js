@@ -68,10 +68,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     const fileList = document.getElementById('fileList');
     const fileListScroll = document.getElementById('fileListScroll');
     const fileCount = document.getElementById('fileCount');
-    const fileInfoPanel = document.getElementById('fileInfoPanel');
-    const infoTotalSize = document.getElementById('infoTotalSize');
-    const infoFiles = document.getElementById('infoFiles');
-    const infoFormats = document.getElementById('infoFormats');
     const progressContainer = document.getElementById('progressContainer');
     const progressFill = document.getElementById('progressFill');
     const progressPercent = document.getElementById('progressPercent');
@@ -131,14 +127,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     function updateFileList() {
         fileListScroll.innerHTML = '';
 
-        const extCounts = {};
-        let totalSize = 0;
-
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
-            totalSize += file.size;
             const ext = file.name.split('.').pop().toLowerCase();
-            extCounts[ext] = (extCounts[ext] || 0) + 1;
 
             const item = document.createElement('div');
             item.className = 'file';
@@ -171,14 +162,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 
         const hasFiles = files.length > 0;
         fileList.classList.toggle('visible', hasFiles);
-        fileInfoPanel.classList.toggle('visible', hasFiles);
         clearBtn.classList.toggle('hidden', !hasFiles);
         convertBtn.disabled = !hasFiles;
 
         fileCount.textContent = files.length;
-        infoTotalSize.textContent = formatBytes(totalSize);
-        infoFiles.textContent = files.length;
-        infoFormats.textContent = Object.keys(extCounts).map(e => e.toUpperCase()).join(', ');
     }
 
     function escapeHtml(text) {
