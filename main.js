@@ -78,7 +78,19 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     let fixPadding = false;
     let overwrite = false;
-    let downloadMode = 'auto';
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    let downloadMode = isMobile ? 'sw' : 'fsa';
+
+    // on mobile, switch active pill to Stream
+    if (isMobile) {
+        document.querySelectorAll('.pill[data-mode]').forEach(b => b.classList.remove('on'));
+        const swPill = document.querySelector('.pill[data-mode="sw"]');
+        if (swPill) {
+            swPill.classList.add('on');
+            const radio = swPill.querySelector('input');
+            if (radio) radio.checked = true;
+        }
+    }
 
     const converter = new NSZConverter();
     const files = [];
@@ -239,11 +251,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         addLog('info', `Starting conversion (${downloadMode})...`);
         await loadDefaultKeys();
 
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
         let directoryHandle = null;
 
-        if ('showDirectoryPicker' in window && (downloadMode === 'fsa' || (downloadMode === 'auto' && !isMobile))) {
+        if ('showDirectoryPicker' in window && downloadMode === 'fsa') {
             try {
                 directoryHandle = await window.showDirectoryPicker({ startIn: 'downloads' });
                 addLog('info', 'Saving to selected directory');
@@ -277,7 +287,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
                 let writable = null;
                 if (downloadMode === 'blob') {
-                } else if (directoryHandle && (downloadMode === 'auto' || downloadMode === 'fsa')) {
+                } else if (directoryHandle && downloadMode === 'fsa') {
                     try {
                         let fileHandle;
                         if (overwrite) {
@@ -301,7 +311,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     }
                 }
 
-                if (!writable && (downloadMode === 'auto' || downloadMode === 'sw' || downloadMode === 'fsa') && 'serviceWorker' in navigator && location.protocol !== 'file:') {
+                if (!writable && (downloadMode === 'sw' || downloadMode === 'fsa') && 'serviceWorker' in navigator && location.protocol !== 'file:') {
                     try {
                         const dl = new SWDownloader(outputName, fileIframes[i]);
                         await dl.start();
