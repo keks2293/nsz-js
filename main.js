@@ -65,16 +65,13 @@ window.addEventListener('unhandledrejection', (e) => {
 window.addEventListener('DOMContentLoaded', async () => {
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
-    const fileList = document.getElementById('fileList');
     const fileListScroll = document.getElementById('fileListScroll');
-    const fileCount = document.getElementById('fileCount');
     const progressContainer = document.getElementById('progressContainer');
     const progressFill = document.getElementById('progressFill');
     const progressPercent = document.getElementById('progressPercent');
     const progressText = document.getElementById('progressText');
     const logContainer = document.getElementById('logContainer');
     const convertBtn = document.getElementById('convertBtn');
-    const clearBtn = document.getElementById('clearBtn');
     const fixPaddingBtn = document.getElementById('fixPaddingBtn');
     const overwriteBtn = document.getElementById('overwriteBtn');
     const status = document.getElementById('status');
@@ -161,11 +158,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         });
 
         const hasFiles = files.length > 0;
-        fileList.classList.toggle('visible', hasFiles);
-        clearBtn.classList.toggle('hidden', !hasFiles);
+        dropZone.classList.toggle('has-files', hasFiles);
         convertBtn.disabled = !hasFiles;
-
-        fileCount.textContent = files.length;
     }
 
     function escapeHtml(text) {
@@ -208,12 +202,6 @@ window.addEventListener('DOMContentLoaded', async () => {
         for (const file of e.target.files) {
             if (isCompressedGame(file.name)) files.push(file);
         }
-        updateFileList();
-    });
-
-    clearBtn.addEventListener('click', () => {
-        files.length = 0;
-        fileInput.value = '';
         updateFileList();
     });
 
