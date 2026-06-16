@@ -419,19 +419,14 @@
             transition: width 0.3s ease;
         }
 
-        .progress-bottom {
+        .progress-info {
             display: flex;
             justify-content: space-between;
-            margin-top: 6px;
-            min-height: 1.2em;
-        }
-
-        .progress-status, .progress-speed {
+            margin-top: 4px;
             font-size: 11px;
             color: var(--text-faint);
+            height: 15px;
         }
-
-        .progress-speed { font-family: monospace; }
 
         /* ── Log ── */
         .log {
@@ -674,9 +669,9 @@
                     <div class="bar">
                         <div class="bar-fill" id="progressFill"></div>
                     </div>
-                    <div class="progress-bottom">
-                        <span class="progress-status" id="progressText"></span>
+                    <div class="progress-info">
                         <span class="progress-speed" id="progressSpeed"></span>
+                        <span class="progress-time" id="progressTime"></span>
                     </div>
                 </div>
 
