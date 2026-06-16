@@ -69,13 +69,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     const progressContainer = document.getElementById('progressContainer');
     const progressFill = document.getElementById('progressFill');
     const progressPercent = document.getElementById('progressPercent');
-    const progressText = document.getElementById('progressText');
     const logContainer = document.getElementById('logContainer');
     const convertBtn = document.getElementById('convertBtn');
     const fixPaddingBtn = document.getElementById('fixPaddingBtn');
     const overwriteBtn = document.getElementById('overwriteBtn');
     const progressTitle = document.getElementById('progressTitle');
     const status = document.getElementById('status');
+    const progressSpeed = document.getElementById('progressSpeed');
+    const progressTime = document.getElementById('progressTime');
 
     let fixPadding = false;
     let overwrite = false;
@@ -126,14 +127,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 
     let lastPercent = -1;
-    function updateProgress(progress, text) {
+    function updateProgress(progress) {
         const percent = Math.round(progress * 100);
         if (percent !== lastPercent) {
             lastPercent = percent;
             progressFill.style.width = `${percent}%`;
             progressPercent.textContent = `${percent}%`;
         }
-        progressText.textContent = text;
     }
 
     function updateFileList() {
@@ -258,12 +258,52 @@ window.addEventListener('DOMContentLoaded', async () => {
         progressContainer.classList.add('visible');
         logContainer.classList.add('visible');
         convertBtn.disabled = true;
+        progressSpeed.textContent = '';
+        progressTime.textContent = '';
         status.textContent = '';
         status.className = 'status';
 
-        updateProgress(0, 'Starting...');
+        updateProgress(0);
         addLog('info', `Starting conversion (${downloadMode})...`);
         await loadDefaultKeys();
+
+        const totalBytes = files.reduce((s, f) => s + f.size, 0);
+        const startTime = Date.now();
+
+        const speedSamples = [];
+        function updateStats(overallProgress) {
+            const now = Date.now();
+            const bytesDone = totalBytes * Math.min(1, Math.max(0, overallProgress));
+
+            speedSamples.push({ t: now, b: bytesDone });
+            while (speedSamples.length > 1 && speedSamples[speedSamples.length - 1].t - speedSamples[0].t > 5000) {
+                speedSamples.shift();
+            }
+
+            progressSpeed.textContent = '';
+
+            const elapsed = (now - startTime) / 1000;
+            const elapsedStr = elapsed >= 60
+                ? `${Math.floor(elapsed / 60)}m ${Math.floor(elapsed % 60)}s`
+                : `${Math.floor(elapsed)}s`;
+
+            if (speedSamples.length >= 3 && bytesDone > totalBytes * 0.02) {
+                const first = speedSamples[0];
+                const last = speedSamples[speedSamples.length - 1];
+                const dur = (last.t - first.t) / 1000;
+                const speed = (last.b - first.b) / dur;
+                if (isFinite(speed) && speed > 0) {
+                    progressSpeed.textContent = `${(speed / 1048576).toFixed(1)} MB/s`;
+                    const remaining = (totalBytes - bytesDone) / speed;
+                    const remainingStr = remaining >= 60
+                        ? `${Math.floor(remaining / 60)}m ${Math.floor(remaining % 60)}s`
+                        : `${Math.floor(remaining)}s`;
+                    progressTime.textContent = `${elapsedStr} / ${remainingStr}`;
+                    return;
+                }
+            }
+            progressTime.textContent = elapsedStr;
+        }
 
         let directoryHandle = null;
 
@@ -343,8 +383,10 @@ window.addEventListener('DOMContentLoaded', async () => {
                 if (fileType === 'xcz') {
                     result = await converter.decompressXCZtoXCI(file, {
                         onProgress: (p, t) => {
-                            updateProgress((i + p) / totalFiles, t);
+                            const overall = (i + p) / totalFiles;
+                            updateProgress(overall);
                             updateFileProgress(i, p * 100);
+                            updateStats(overall);
                         },
                         onLog: addLog,
                         writable
@@ -353,8 +395,10 @@ window.addEventListener('DOMContentLoaded', async () => {
                     result = await converter.decompressNSZtoNSP(file, {
                         onProgress: (p, t) => {
                             const remapped = Math.max(0, Math.min(1, (p - 0.02) / 0.98));
-                            updateProgress((i + remapped) / totalFiles, t);
+                            const overall = (i + remapped) / totalFiles;
+                            updateProgress(overall);
                             updateFileProgress(i, remapped * 100);
+                            updateStats(overall);
                         },
                         onLog: addLog,
                         writable,
@@ -390,7 +434,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         status.className = 'status ok';
         convertBtn.disabled = false;
         progressTitle.textContent = 'Done';
-        updateProgress(1, '');
+        updateProgress(1);
     });
 
     await converter.init().catch(e => {
