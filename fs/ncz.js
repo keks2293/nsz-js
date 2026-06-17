@@ -359,6 +359,16 @@ class NCZDecompressor {
                 proc.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`zstd failed: ${stderr}`)));
                 proc.on('error', reject);
             });
+
+            // Read stdout concurrently to avoid pipe deadlock
+            const stdoutReader = (async () => {
+                let decompOffset = UNCOMPRESSABLE_HEADER_SIZE;
+                for await (const nodeChunk of proc.stdout) {
+                    const dc = new Uint8Array(nodeChunk.buffer, nodeChunk.byteOffset, nodeChunk.byteLength);
+                    decompOffset = await this._processStreamDecompressedChunk(dc, decompOffset, sortedSections, sectionAesCtrs, progressCallback, writeChunk, ncaSize);
+                }
+            })();
+
             let pos = headerEnd;
             let toRead = remaining;
             while (toRead > 0) {
@@ -371,11 +381,8 @@ class NCZDecompressor {
                 toRead -= size;
             }
             proc.stdin.end();
-            let decompOffset = UNCOMPRESSABLE_HEADER_SIZE;
-            for await (const nodeChunk of proc.stdout) {
-                const dc = new Uint8Array(nodeChunk.buffer, nodeChunk.byteOffset, nodeChunk.byteLength);
-                decompOffset = await this._processStreamDecompressedChunk(dc, decompOffset, sortedSections, sectionAesCtrs, progressCallback, writeChunk, ncaSize);
-            }
+
+            await stdoutReader;
             await exitPromise;
         } else {
             console.log('[ZSTD] Using zstddec WASM streaming decompression (async)');
