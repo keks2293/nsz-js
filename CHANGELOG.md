@@ -1,5 +1,9 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-06-17)
+
+1. **Added Verify toggle to browser UI** — New `Verify` button in Options (`index.html`) defaults to OFF, skipping SHA-256 hash computation. Gives ~6x speedup in browser streaming path (pure JS SHA-256 is the dominant bottleneck). Guarded by `verify` option in all 3 converter methods (`decompressNSZtoNSP`, `decompressNCZtoNCA`, `decompressXCZtoXCI`). Default `verify=false` — no change for CLI (uses native `crypto.createHash` independently).
+
 ## ✅ Recent Changes (2026-06-14)
 
 1. **Deleted `_decompressBuffered`** — Memory path now uses `_decompressStream` with `collectChunk` wrapper (`fs/ncz.js:220`). Reads input as stream, collects output into buffer. Removed ~80 lines of duplicated decompression logic.
