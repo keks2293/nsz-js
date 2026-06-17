@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 import fs from 'fs';
+import crypto from 'crypto';
 import { PFS0, PFS0Writer } from './fs/pfs0.js';
 import { NCZDecompressor, FileDescriptorReader, BufferReader } from './fs/ncz.js';
 import { KeysParser } from './keys.js';
-import { SHA256, sha256 } from './crypto/sha256.js';
 import { HFS0Writer } from './fs/hfs0.js';
 
 function formatBytes(bytes) {
@@ -110,13 +110,12 @@ async function convertNCZ(inReader, inputFd, inputPath, outputPath, keys) {
 
     const outputFd = fs.openSync(outPath, 'w');
     try {
-        const hasher = new SHA256();
+        const hasher = crypto.createHash('sha256');
         await decomp.decompress(null, async (chunk, offset) => {
             hasher.update(chunk);
             fs.writeSync(outputFd, chunk, 0, chunk.byteLength, offset);
         });
-        const hash = hasher.hexdigest();
-        console.log(`NCA SHA256: ${hash}`);
+        console.log(`NCA SHA256: ${hasher.digest('hex')}`);
     } catch (e) {
         fs.closeSync(outputFd);
         try { fs.unlinkSync(outPath); } catch {}
@@ -251,12 +250,12 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
                     console.log(`Decompressing: ${pm.name}/${m.inputName} -> ${m.name}`);
                     const nczReader = new FileDescriptorReader(inputFd, m.offset, m.nczLen);
                     const decomp = new NCZDecompressor(nczReader, keys);
-                    const hasher = new SHA256();
+                    const hasher = crypto.createHash('sha256');
                     await decomp.decompress(null, async (chunk, offset) => {
                         hasher.update(chunk);
                         fs.writeSync(outputFd, chunk, 0, chunk.byteLength, writePos + offset);
                     });
-                    const hash = hasher.hexdigest();
+                    const hash = hasher.digest('hex');
                     console.log(`  SHA256: ${hash}`);
                     if (m.name.endsWith('.nca') && !m.name.endsWith('.cnmt.nca') && pm.cnmtHashes.size > 0) {
                         if (pm.cnmtHashes.has(hash)) {
@@ -270,7 +269,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
                     console.log(`Copying: ${pm.name}/${m.inputName} -> ${m.name}`);
                     const buf = Buffer.alloc(m.size);
                     fs.readSync(inputFd, buf, 0, m.size, m.offset);
-                    const hash = await sha256(buf);
+                    const hash = crypto.createHash('sha256').update(buf).digest('hex');
                     console.log(`  SHA256: ${hash}`);
                     fs.writeSync(outputFd, buf, 0, m.size, writePos);
                     if (m.name.endsWith('.nca') && !m.name.endsWith('.cnmt.nca') && pm.cnmtHashes.size > 0) {
@@ -344,19 +343,19 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
                 console.log(`Decompressing: ${f.name} -> ${meta.name}`);
                 const nczReader = new FileDescriptorReader(inputFd, f.offset, f.size);
                 const decomp = new NCZDecompressor(nczReader, keys);
-                const hasher = new SHA256();
+                const hasher = crypto.createHash('sha256');
                 await decomp.decompress(null, async (chunk, offset) => {
                     hasher.update(chunk);
                     fs.writeSync(outputFd, chunk, 0, chunk.byteLength, absWritePos + offset);
                 });
-                const hash = hasher.hexdigest();
+                const hash = hasher.digest('hex');
                 console.log(`  SHA256: ${hash}`);
                 console.log(`  Size: ${meta.size} bytes`);
             } else {
                 console.log(`Copying: ${f.name} -> ${meta.name}`);
                 const buf = Buffer.alloc(f.size);
                 fs.readSync(inputFd, buf, 0, f.size, f.offset);
-                const hash = await sha256(buf);
+                const hash = crypto.createHash('sha256').update(buf).digest('hex');
                 console.log(`  SHA256: ${hash}`);
                 fs.writeSync(outputFd, buf, 0, f.size, absWritePos);
             }
