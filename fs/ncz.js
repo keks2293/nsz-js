@@ -2,7 +2,7 @@ import { ZstdDecompressor } from '../crypto/zstd.js';
 import { AESCTR } from '../crypto/aesctr.mjs';
 
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
-const SECTION_CHUNK_SIZE = 0x100000; // 1MB - larger chunks reduce write calls, native AES is fast
+const SECTION_CHUNK_SIZE = 0x1000000; // 16MB
 
 function allocByte(n) {
     return new Uint8Array(n);
