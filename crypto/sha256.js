@@ -1,8 +1,3 @@
-let _nodeCrypto = null;
-try {
-    _nodeCrypto = await import('crypto');
-} catch (_) {}
-
 const K = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
     0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -148,36 +143,8 @@ export class SHA256 {
     }
 }
 
-let _implLogged = false;
-
 export async function sha256(data) {
     if (data instanceof ArrayBuffer) data = new Uint8Array(data);
-
-    // Browser Web Crypto API (hardware-accelerated)
-    if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
-        try {
-            if (!_implLogged) { console.log('SHA-256: Web Crypto API'); _implLogged = true; }
-            const hash = await crypto.subtle.digest('SHA-256', data);
-            const bytes = new Uint8Array(hash);
-            let hex = '';
-            for (let i = 0; i < bytes.length; i++) {
-                hex += bytes[i].toString(16).padStart(2, '0');
-            }
-            return hex;
-        } catch (_) {}
-    }
-
-    // Node.js crypto (OpenSSL-accelerated)
-    if (_nodeCrypto) {
-        try {
-            if (!_implLogged) { console.log('SHA-256: Node.js crypto'); _implLogged = true; }
-            const c = _nodeCrypto.default || _nodeCrypto;
-            return c.createHash('sha256').update(data).digest('hex');
-        } catch (_) {}
-    }
-
-    // Pure JS fallback
-    if (!_implLogged) { console.log('SHA-256: pure JS'); _implLogged = true; }
     const hash = new SHA256();
     hash.update(data);
     return hash.hexdigest();
