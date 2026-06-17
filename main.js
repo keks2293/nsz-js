@@ -368,6 +368,12 @@ window.addEventListener('DOMContentLoaded', async () => {
 
                 if (!writable && (downloadMode === 'sw' || downloadMode === 'fsa') && 'serviceWorker' in navigator && location.protocol !== 'file:') {
                     try {
+                        if (!window._swRegistered) {
+                            await navigator.serviceWorker.register('download-worker.js');
+                            await navigator.serviceWorker.ready;
+                            window._swRegistered = true;
+                            addLog('info', 'SW ready');
+                        }
                         const dl = new SWDownloader(outputName, fileIframes[i]);
                         await dl.start();
                         dl.triggerDownload();
@@ -440,16 +446,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     await converter.init().catch(e => {
         addLog('warn', 'Zstd init failed: ' + e.message);
     });
-
-    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-        try {
-            await navigator.serviceWorker.register('download-worker.js');
-            await navigator.serviceWorker.ready;
-            addLog('info', 'SW ready');
-        } catch (e) {
-            addLog('info', 'SW not available');
-        }
-    }
 
     addLog('info', 'Ready');
 });
