@@ -121,7 +121,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         const cls = type === 'success' ? 'ok' : type === 'error' ? 'err' : type === 'warning' ? 'warn' : 'info';
         const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const entry = document.createElement('div');
-        entry.innerHTML = `<span class="t">${time}</span><span class="${cls}">${escapeHtml(message)}</span>`;
+        entry.innerHTML = `<span class="t">${time}</span> <span class="${cls}">${escapeHtml(message)}</span>`;
         logContainer.appendChild(entry);
         logContainer.scrollTop = logContainer.scrollHeight;
     }
