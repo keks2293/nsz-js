@@ -66,7 +66,7 @@ class NSZConverter {
     }
 
     async decompressNSZtoNSP(file, options = {}) {
-        const { onProgress = () => {}, onLog = () => {}, writable = null, fixPadding = false } = options;
+        const { onProgress = () => {}, onLog = () => {}, writable = null, fixPadding = false, verify = false } = options;
 
         onLog('info', `Processing: ${file.name} (${this.formatBytes(file.size)})`);
         await this.init();
@@ -132,29 +132,33 @@ class NSZConverter {
                 const writePos = writer.headerSize + writer.files[idx].offset;
 
                 if (meta.isNcz) {
-                    const hasher = new SHA256();
+                    const hasher = verify && new SHA256();
                     const reader = new FileSliceReader(meta.file, meta.fileOffset, meta.nczLen);
                     const decompressor = new NCZDecompressor(reader, this.keys);
                     await decompressor.decompress(
                         (p) => onProgress(pct(dataWritten + meta.size * p), `Decompressing ${f.name}...`),
                         async (chunk, offset) => {
-                            hasher.update(chunk);
+                            if (hasher) hasher.update(chunk);
                             await writable.write({ type: 'write', position: writePos + offset, data: chunk });
                         });
-                    const hash = hasher.hexdigest();
-                    onLog('info', `NCA SHA256: ${hash}`);
-                    if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                        verifyHash(hash, meta.name, cnmtHashes);
+                    if (hasher) {
+                        const hash = hasher.hexdigest();
+                        onLog('info', `NCA SHA256: ${hash}`);
+                        if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                            verifyHash(hash, meta.name, cnmtHashes);
+                        }
                     }
                 } else {
                     onProgress(pct(dataWritten), `Copying ${f.name}...`);
                     const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
-                    const hash = await sha256(data);
-                    onLog('info', `SHA256: ${hash}`);
-                    await writable.write({ type: 'write', position: writePos, data });
-                    if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                        verifyHash(hash, meta.name, cnmtHashes);
+                    if (verify) {
+                        const hash = await sha256(data);
+                        onLog('info', `SHA256: ${hash}`);
+                        if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                            verifyHash(hash, meta.name, cnmtHashes);
+                        }
                     }
+                    await writable.write({ type: 'write', position: writePos, data });
                 }
 
                 dataWritten += meta.size;
@@ -181,20 +185,24 @@ class NSZConverter {
 
                 if (meta.isNcz) {
                     const nczData = await this.decompressNCZ(file, f, (p) => onProgress(pct(dataWritten + meta.size * p), `Decompressing ${f.name}...`));
-                    const hash = await sha256(nczData);
-                    onLog('info', `NCA SHA256: ${hash}`);
-                    if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                        verifyHash(hash, meta.name, cnmtHashes);
+                    if (verify) {
+                        const hash = await sha256(nczData);
+                        onLog('info', `NCA SHA256: ${hash}`);
+                        if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                            verifyHash(hash, meta.name, cnmtHashes);
+                        }
                     }
 
                     outputFiles.push({ name: meta.name, data: nczData });
                 } else {
                     onProgress(pct(dataWritten), `Copying ${f.name}...`);
                     const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
-                    const hash = await sha256(data);
-                    onLog('info', `SHA256: ${hash}`);
-                    if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                        verifyHash(hash, meta.name, cnmtHashes);
+                    if (verify) {
+                        const hash = await sha256(data);
+                        onLog('info', `SHA256: ${hash}`);
+                        if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                            verifyHash(hash, meta.name, cnmtHashes);
+                        }
                     }
 
                     outputFiles.push({ name: meta.name, data });
@@ -221,7 +229,7 @@ class NSZConverter {
     }
 
     async decompressNCZtoNCA(file, options = {}) {
-        const { onProgress = () => {}, onLog = () => {}, writable = null } = options;
+        const { onProgress = () => {}, onLog = () => {}, writable = null, verify = false } = options;
         const reader = new FileSliceReader(file);
         const decompressor = new NCZDecompressor(reader, this.keys);
         const outputName = file.name.replace(/\.ncz$/i, '.nca');
@@ -229,19 +237,21 @@ class NSZConverter {
         if (writable) {
             onLog('info', 'Using streaming output (File System Access)');
             let maxPos = 0;
-            const hasher = new SHA256();
+            const hasher = verify && new SHA256();
             await decompressor.decompress((p) => onProgress(p, 'Decompressing...'), async (chunk, position) => {
-                hasher.update(chunk);
+                if (hasher) hasher.update(chunk);
                 await writable.write({ type: 'write', position, data: chunk });
                 const end = position + chunk.byteLength;
                 if (end > maxPos) maxPos = end;
             });
-            const hash = hasher.hexdigest();
-            const fileNameHash = file.name.replace(/\.ncz$/i, '').toLowerCase();
-            if (hash.substring(0, 32) === fileNameHash) {
-                onLog('success', `[VERIFIED]   ${outputName}`);
-            } else {
-                onLog('warn', `[MISSMATCH]  Filename startes with ${fileNameHash} but ${hash.substring(0, 32)} was expected - hash verified failed!`);
+            if (hasher) {
+                const hash = hasher.hexdigest();
+                const fileNameHash = file.name.replace(/\.ncz$/i, '').toLowerCase();
+                if (hash.substring(0, 32) === fileNameHash) {
+                    onLog('success', `[VERIFIED]   ${outputName}`);
+                } else {
+                    onLog('warn', `[MISSMATCH]  Filename startes with ${fileNameHash} but ${hash.substring(0, 32)} was expected - hash verified failed!`);
+                }
             }
             onProgress(1.0, 'Done!');
             onLog('success', `Output: ${outputName} (${this.formatBytes(maxPos)})`);
@@ -250,12 +260,14 @@ class NSZConverter {
 
         onLog('info', 'Using memory download');
         const ncaData = await decompressor.decompress(onProgress);
-        const hash = await sha256(ncaData);
-        const fileNameHash = file.name.replace(/\.ncz$/i, '').toLowerCase();
-        if (hash.substring(0, 32) === fileNameHash) {
-            onLog('success', `[VERIFIED]   ${outputName}`);
-        } else {
-            onLog('warn', `[MISSMATCH]  Filename startes with ${fileNameHash} but ${hash.substring(0, 32)} was expected - hash verified failed!`);
+        if (verify) {
+            const hash = await sha256(ncaData);
+            const fileNameHash = file.name.replace(/\.ncz$/i, '').toLowerCase();
+            if (hash.substring(0, 32) === fileNameHash) {
+                onLog('success', `[VERIFIED]   ${outputName}`);
+            } else {
+                onLog('warn', `[MISSMATCH]  Filename startes with ${fileNameHash} but ${hash.substring(0, 32)} was expected - hash verified failed!`);
+            }
         }
         onProgress(1.0, 'Done!');
         const blob = new Blob([ncaData], { type: 'application/octet-stream' });
@@ -263,7 +275,7 @@ class NSZConverter {
     }
 
     async decompressXCZtoXCI(file, options = {}) {
-        const { onProgress = () => {}, onLog = () => {}, writable = null } = options;
+        const { onProgress = () => {}, onLog = () => {}, writable = null, verify = false } = options;
         onLog('info', 'Parsing XCI container...');
         const fileReader = new FileSliceReader(file);
         const xci = new XCIReader(fileReader);
@@ -390,29 +402,33 @@ class NSZConverter {
                 for (let fi = 0; fi < pm.files.length; fi++) {
                     const meta = pm.files[fi];
                     if (meta.isNcz) {
-                        const hasher = new SHA256();
+                        const hasher = verify && new SHA256();
                         const reader = new FileSliceReader(file, meta.fileOffset, meta.nczLen);
                         const decomp = new NCZDecompressor(reader, this.keys);
                         await decomp.decompress(
                             (p) => onProgress(pct(dataOverall + meta.size * p), `Decompressing ${meta.inputName}...`),
                             async (chunk, offset) => {
-                                hasher.update(chunk);
+                                if (hasher) hasher.update(chunk);
                                 await writable.write({ type: 'write', position: writePos + offset, data: chunk });
                             });
-                        const hash = hasher.hexdigest();
-                        onLog('info', `  SHA256: ${hash}`);
-                        if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                            verifyHash(hash, meta.name, pm.cnmtHashes);
+                        if (hasher) {
+                            const hash = hasher.hexdigest();
+                            onLog('info', `  SHA256: ${hash}`);
+                            if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                                verifyHash(hash, meta.name, pm.cnmtHashes);
+                            }
                         }
                     } else {
                         onProgress(pct(dataOverall), `Copying ${meta.inputName}...`);
                         const data = await file.slice(meta.offset, meta.offset + meta.size).arrayBuffer();
-                        const hash = await sha256(data);
-                        onLog('info', `  SHA256: ${hash}`);
-                        await writable.write({ type: 'write', position: writePos, data });
-                        if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                            verifyHash(hash, meta.name, pm.cnmtHashes);
+                        if (verify) {
+                            const hash = await sha256(data);
+                            onLog('info', `  SHA256: ${hash}`);
+                            if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                                verifyHash(hash, meta.name, pm.cnmtHashes);
+                            }
                         }
+                        await writable.write({ type: 'write', position: writePos, data });
                     }
                     writePos += meta.size;
                     dataOverall += meta.size;
@@ -460,18 +476,22 @@ class NSZConverter {
                         const nczReader = new FileSliceReader(file, meta.fileOffset, meta.nczLen);
                         const decompressor = new NCZDecompressor(nczReader, this.keys);
                         fileData = await decompressor.decompress((p) => onProgress(pct(dataOverall + meta.size * p), `Decompressing ${meta.inputName}...`));
-                        const hash = await sha256(fileData);
-                        onLog('info', `  SHA256: ${hash}`);
-                        if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                            verifyHash(hash, meta.name, pm.cnmtHashes);
+                        if (verify) {
+                            const hash = await sha256(fileData);
+                            onLog('info', `  SHA256: ${hash}`);
+                            if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                                verifyHash(hash, meta.name, pm.cnmtHashes);
+                            }
                         }
                     } else {
                         onProgress(pct(dataOverall), `Copying ${meta.inputName}...`);
                         fileData = new Uint8Array(await file.slice(meta.offset, meta.offset + meta.size).arrayBuffer());
-                        const hash = await sha256(fileData);
-                        onLog('info', `  SHA256: ${hash}`);
-                        if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                            verifyHash(hash, meta.name, pm.cnmtHashes);
+                        if (verify) {
+                            const hash = await sha256(fileData);
+                            onLog('info', `  SHA256: ${hash}`);
+                            if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                                verifyHash(hash, meta.name, pm.cnmtHashes);
+                            }
                         }
                     }
 
