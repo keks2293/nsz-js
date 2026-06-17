@@ -74,12 +74,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     const fixPaddingBtn = document.getElementById('fixPaddingBtn');
     const overwriteBtn = document.getElementById('overwriteBtn');
     const progressTitle = document.getElementById('progressTitle');
+    const verifyBtn = document.getElementById('verifyBtn');
     const status = document.getElementById('status');
     const progressSpeed = document.getElementById('progressSpeed');
     const progressTime = document.getElementById('progressTime');
 
     let fixPadding = false;
     let overwrite = false;
+    let verify = false;
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     let downloadMode = isMobile ? 'sw' : 'fsa';
 
@@ -241,6 +243,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         overwriteBtn.classList.toggle('on', overwrite);
     });
 
+    verifyBtn.addEventListener('click', () => {
+        verify = !verify;
+        verifyBtn.classList.toggle('on', verify);
+    });
+
     document.querySelectorAll('.pill[data-mode]').forEach(btn => {
         btn.addEventListener('click', () => {
             const radio = btn.querySelector('input');
@@ -395,7 +402,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                             updateStats(overall);
                         },
                         onLog: addLog,
-                        writable
+                        writable,
+                        verify
                     });
                 } else {
                     result = await converter.decompressNSZtoNSP(file, {
@@ -408,7 +416,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                         },
                         onLog: addLog,
                         writable,
-                        fixPadding
+                        fixPadding,
+                        verify
                     });
                 }
 
