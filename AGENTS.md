@@ -62,8 +62,6 @@ When original files from npm don't work directly in the target environment:
 - **Problem**: `zstddec` streaming ESM build has a bug in `decode()` when passing explicit `uncompressedSize` — produces truncated/all-zeros output for large streams (>1GB).
   **Solution**: In `ncz.js` (around line 310), call `decoder.decode(compressedData, 0)` (auto-detect size). This works correctly: calls `ZSTD_findDecompressedSize` internally, falls back to streaming API if size is unknown.
 
-### Browser Usage
-
 Browser HTML files load dependencies:
 ```html
 <!-- zstddec.mjs is imported via ES module in crypto/zstd.js and fs/ncz.js -->
