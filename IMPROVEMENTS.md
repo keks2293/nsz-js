@@ -39,3 +39,9 @@ Prioritized areas for improvement identified 2026-05-30.
 13. ❌ **Reduce READ_CHUNK_SIZE** — `fs/ncz.js:52` uses 16MB. **Keeping as-is** — matches Python nsz `SolidCompressor.CHUNK_SZ = 0x1000000`.
 
 14. ❌ **Delete _decompressBuffered for memory savings** — Attempted to eliminate full NCA buffer allocation in memory path. **Not possible** — blob-requirement needs full buffer for `new Blob([data])`.
+
+## Info
+
+- ❌ **SW download behavior**: Wanted the same UX as FSA mode: first show a folder picker, then download to the chosen location. This is impossible with SW — SW always saves to browser Downloads folder. Save As dialog is controlled by browser settings, not by SW code — no API exists to show it programmatically. [Chrome setting: chrome://settings/downloads → "Ask where to save each file before downloading"](chrome://settings/downloads).
+
+- ✅ **Lazy SW registration on first use in convert handler (`main.js`)** — SW no longer registers at DOMContentLoaded. Registration happens only when convert is triggered in SW or FSA mode, guarded by `window._swRegistered` flag.
