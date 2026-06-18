@@ -144,7 +144,6 @@ To update dependencies: `npm install zstddec@x.x.x` then copy files to `static/`
 | Input | Output | Description |
 |-------|--------|-------------|
 | `.nsz` | `.nsp` | Compressed NSP container |
-| `.ncz` | `.nca` | Standalone compressed NCA file |
 | `.xcz` | `.xci` | Compressed XCI (game card) image |
 
 ### Internal formats
