@@ -2,7 +2,7 @@
 
 ## ✅ Recent Changes (2026-06-18)
 
-1. **Simplified progress calculation — removed fixed 2% offset, byte-weighted overall** — Replaced `pct = (bytes) => 0.02 + 0.93 * (bytes / totalDataSize)` with `0.95 * (bytes / totalDataSize)` in all 4 places in converter.js (lines 126, 179, 383, 458). Removed `onProgress(0.02, 'Reading container...')` call. Removed NSZ remapping `(p - 0.02) / 0.98` in main.js. Changed overall progress from file-count-weighted `(i + p) / totalFiles` to byte-weighted `(accumulatedBytes + file.size * p) / totalBytes`.
+1. **Simplified progress calculation — removed fixed offsets, byte-weighted overall** — Replaced `pct = (bytes) => 0.02 + 0.93 * (bytes / totalDataSize)` with `bytes / totalDataSize` in all 4 places in converter.js. Removed `onProgress(0.02, 'Reading container...')` call. Removed all `0.95` building-phase progress calls. Removed NSZ remapping `(p - 0.02) / 0.98` in main.js. Changed overall progress from file-count-weighted `(i + p) / totalFiles` to byte-weighted `(accumulatedBytes + file.size * p) / totalBytes`.
 
 2. **Hidden Overwrite toggle for non-FSA modes** — Overwrite only works in FSA mode; now hidden when Stream or Blob is selected. Added `.pill.hidden` CSS class (index.html:383), toggle logic in download mode switch handler (main.js:259) and init (main.js:98).
 

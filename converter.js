@@ -123,7 +123,7 @@ class NSZConverter {
 
             let dataWritten = 0;
             const totalDataSize = outputMeta.reduce((s, m) => s + m.size, 0);
-            const pct = (bytes) => 0.95 * (bytes / totalDataSize);
+            const pct = (bytes) => bytes / totalDataSize;
 
             for (let idx = 0; idx < files.length; idx++) {
                 const meta = outputMeta[idx];
@@ -176,7 +176,7 @@ class NSZConverter {
             const outputFiles = [];
             const totalDataSize = outputMeta.reduce((s, m) => s + m.size, 0);
             let dataWritten = 0;
-            const pct = (bytes) => 0.95 * (bytes / totalDataSize);
+            const pct = (bytes) => bytes / totalDataSize;
 
             for (let idx = 0; idx < files.length; idx++) {
                 const meta = outputMeta[idx];
@@ -212,7 +212,7 @@ class NSZConverter {
                 onProgress(pct(dataWritten), `File ${idx + 1}/${files.length} done`);
             }
 
-            onProgress(0.95, 'Building PFS0 container...');
+            onLog('info', 'Building PFS0 container...');
             return this.buildPFS0(outputFiles, { file, onLog, fixPadding, onProgress });
         }
     }
@@ -379,7 +379,7 @@ class NSZConverter {
             // Build/store partition HFS0 buffers, then write them
             const totalDataSize = partitionMetas.reduce((s, m) => s + m.totalSize, 0);
             let dataOverall = 0;
-            const pct = (bytes) => 0.95 * (bytes / totalDataSize);
+            const pct = (bytes) => bytes / totalDataSize;
 
             for (let pi = 0; pi < partitionMetas.length; pi++) {
                 const pm = partitionMetas[pi];
@@ -454,7 +454,7 @@ class NSZConverter {
             const xciWriter = new XCIWriter(await fileReader.read(0, 0x200));
             const totalDataSize = partitionMetas.reduce((s, m) => s + m.totalSize, 0);
             let dataOverall = 0;
-            const pct = (bytes) => 0.95 * (bytes / totalDataSize);
+            const pct = (bytes) => bytes / totalDataSize;
 
             for (const pm of partitionMetas) {
                 if (pm.raw) {
@@ -505,7 +505,7 @@ class NSZConverter {
                 onLog('info', `  HFS0 partition ${pm.name} built: ${hfs0Data.length} bytes`);
             }
 
-            onProgress(0.95, 'Building XCI...');
+            onLog('info', 'Building XCI...');
             const xciData = xciWriter.build();
             onLog('info', `XCI built: ${xciData.length} bytes`);
 
@@ -551,13 +551,12 @@ class NSZConverter {
             writer.add(f.name, data instanceof ArrayBuffer ? data.byteLength : data.length);
         }
 
-        onLog('info', 'Using memory download');
-        return this.buildPFS0Memory(writer, files, onProgress, outputName);
+        return this.buildPFS0Memory(writer, files, onProgress, onLog, outputName);
     }
 
-    async buildPFS0Memory(writer, files, onProgress, outputName) {
+    async buildPFS0Memory(writer, files, onProgress, onLog, outputName) {
         const header = writer.buildHeader();
-        onProgress(0.95, 'Building file in memory...');
+        onLog('info', 'Building file in memory...');
 
         const totalDataSize = writer.files.reduce((s, f) => s + f.size, 0);
         const totalSize = header.length + totalDataSize;
@@ -567,7 +566,6 @@ class NSZConverter {
             const data = files[i].data;
             const arr = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
             parts.push(arr);
-            onProgress(0.95 + (0.05 * (i + 1) / writer.files.length), `Building file ${i + 1}/${writer.files.length}...`);
         }
 
         const blob = new Blob(parts, { type: 'application/octet-stream' });
