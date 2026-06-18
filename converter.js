@@ -76,7 +76,7 @@ class NSZConverter {
         const files = pfs0Reader.getFiles();
         onLog('info', `PFS0 header: ${files.length} files`);
         onLog('info', `Found ${files.length} files in container`);
-        onProgress(0.02, 'Reading container...');
+
 
         const cnmtFiles = files.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
         const cnmtHashes = new Set();
@@ -123,7 +123,7 @@ class NSZConverter {
 
             let dataWritten = 0;
             const totalDataSize = outputMeta.reduce((s, m) => s + m.size, 0);
-            const pct = (bytes) => 0.02 + 0.93 * (bytes / totalDataSize);
+            const pct = (bytes) => 0.95 * (bytes / totalDataSize);
 
             for (let idx = 0; idx < files.length; idx++) {
                 const meta = outputMeta[idx];
@@ -176,7 +176,7 @@ class NSZConverter {
             const outputFiles = [];
             const totalDataSize = outputMeta.reduce((s, m) => s + m.size, 0);
             let dataWritten = 0;
-            const pct = (bytes) => 0.02 + 0.93 * (bytes / totalDataSize);
+            const pct = (bytes) => 0.95 * (bytes / totalDataSize);
 
             for (let idx = 0; idx < files.length; idx++) {
                 const meta = outputMeta[idx];
@@ -379,7 +379,7 @@ class NSZConverter {
             // Build/store partition HFS0 buffers, then write them
             const totalDataSize = partitionMetas.reduce((s, m) => s + m.totalSize, 0);
             let dataOverall = 0;
-            const pct = (bytes) => 0.02 + 0.93 * (bytes / totalDataSize);
+            const pct = (bytes) => 0.95 * (bytes / totalDataSize);
 
             for (let pi = 0; pi < partitionMetas.length; pi++) {
                 const pm = partitionMetas[pi];
@@ -454,7 +454,7 @@ class NSZConverter {
             const xciWriter = new XCIWriter(await fileReader.read(0, 0x200));
             const totalDataSize = partitionMetas.reduce((s, m) => s + m.totalSize, 0);
             let dataOverall = 0;
-            const pct = (bytes) => 0.02 + 0.93 * (bytes / totalDataSize);
+            const pct = (bytes) => 0.95 * (bytes / totalDataSize);
 
             for (const pm of partitionMetas) {
                 if (pm.raw) {
