@@ -1,5 +1,9 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-06-18)
+
+1. **Fixed log block expanding beyond viewport on desktop** — Changed `.app` from `min-height` to `height: calc(100dvh - 100px)` (`index.html:517`), constraining the entire app to viewport height. Desktop `.log` keeps `max-height: none` to override the mobile `max-height: 110px`, fills remaining space with `flex: 1` within the viewport-constrained page.
+
 ## ✅ Recent Changes (2026-06-17)
 
 1. **Added Verify toggle to browser UI** — New `Verify` button in Options (`index.html`) defaults to OFF, skipping SHA-256 hash computation. Gives ~6x speedup in browser streaming path (pure JS SHA-256 is the dominant bottleneck). Guarded by `verify` option in all 3 converter methods (`decompressNSZtoNSP`, `decompressNCZtoNCA`, `decompressXCZtoXCI`). Default `verify=false` — no change for CLI (uses native `crypto.createHash` independently).
