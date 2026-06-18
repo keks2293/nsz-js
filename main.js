@@ -339,11 +339,11 @@ window.addEventListener('DOMContentLoaded', async () => {
             return iframe;
         });
 
-        const totalFiles = files.length;
+        let accumulatedBytes = 0;
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
             if (fileStatus[i] === 'ok' || fileStatus[i] === 'skip' || fileStatus[i] === 'err') continue;
-            addLog('info', `Processing ${i + 1}/${totalFiles}: ${file.name}`);
+            addLog('info', `Processing ${i + 1}/${files.length}: ${file.name}`);
             progressTitle.textContent = file.name;
 
             try {
@@ -365,6 +365,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                                 addLog('warn', `Exists, skipping: ${outputName}`);
                                 fileStatus[i] = 'skip';
                                 updateFileList();
+                                accumulatedBytes += file.size;
                                 continue;
                             } catch {
                                 fileHandle = await directoryHandle.getFileHandle(outputName, { create: true });
@@ -396,27 +397,22 @@ window.addEventListener('DOMContentLoaded', async () => {
 
                 let result;
                 updateFileProgress(i, 0);
+                const onProgress = (p, t) => {
+                    const overall = (accumulatedBytes + file.size * p) / totalBytes;
+                    updateProgress(overall);
+                    updateFileProgress(i, p * 100);
+                    updateStats(overall);
+                };
                 if (fileType === 'xcz') {
                     result = await converter.decompressXCZtoXCI(file, {
-                        onProgress: (p, t) => {
-                            const overall = (i + p) / totalFiles;
-                            updateProgress(overall);
-                            updateFileProgress(i, p * 100);
-                            updateStats(overall);
-                        },
+                        onProgress,
                         onLog: addLog,
                         writable,
                         verify
                     });
                 } else {
                     result = await converter.decompressNSZtoNSP(file, {
-                        onProgress: (p, t) => {
-                            const remapped = Math.max(0, Math.min(1, (p - 0.02) / 0.98));
-                            const overall = (i + remapped) / totalFiles;
-                            updateProgress(overall);
-                            updateFileProgress(i, remapped * 100);
-                            updateStats(overall);
-                        },
+                        onProgress,
                         onLog: addLog,
                         writable,
                         fixPadding,
@@ -441,6 +437,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
                 fileStatus[i] = 'ok';
                 updateFileList();
+                accumulatedBytes += file.size;
             } catch (error) {
                 addLog('err', `Failed: ${error.message}`);
                 fileStatus[i] = 'err';
