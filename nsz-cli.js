@@ -44,7 +44,6 @@ async function main() {
         console.log('');
         console.log('Input formats:');
         console.log('  .nsz   -> .nsp');
-        console.log('  .ncz                -> .nca');
         console.log('  .xcz                -> .xci');
         console.log('');
         console.log('Options:');
@@ -76,7 +75,6 @@ async function main() {
         console.log('Warning: No keys loaded - encrypted NCZ files may fail to decrypt');
     }
 
-    const isNcz = inputPath.toLowerCase().endsWith('.ncz');
     const isXcz = inputPath.toLowerCase().endsWith('.xcz');
     const inStat = fs.statSync(inputPath);
     const inputSize = inStat.size;
@@ -87,9 +85,7 @@ async function main() {
     const inReader = new FileDescriptorReader(inputFd, 0, inputSize);
 
     try {
-        if (isNcz) {
-            await convertNCZ(inReader, inputFd, inputPath, outputPath, keys);
-        } else if (isXcz) {
+        if (isXcz) {
             await convertXCZ(inReader, inputFd, inputPath, outputPath, keys);
         } else {
             await convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPadding);
@@ -97,36 +93,6 @@ async function main() {
     } finally {
         fs.closeSync(inputFd);
     }
-}
-
-async function convertNCZ(inReader, inputFd, inputPath, outputPath, keys) {
-    console.log('Detected standalone NCZ file');
-    const outPath = outputPath || inputPath.replace(/\.ncz$/i, '.nca');
-    console.log(`Output: ${outPath}`);
-
-    const decomp = new NCZDecompressor(inReader, keys);
-    const { ncaSize } = await decomp.getSections();
-    console.log(`NCA size: ${formatBytes(ncaSize)}`);
-
-    const outputFd = fs.openSync(outPath, 'w');
-    try {
-        const hasher = crypto.createHash('sha256');
-        await decomp.decompress(null, async (chunk, offset) => {
-            hasher.update(chunk);
-            fs.writeSync(outputFd, chunk, 0, chunk.byteLength, offset);
-        });
-        console.log(`NCA SHA256: ${hasher.digest('hex')}`);
-    } catch (e) {
-        fs.closeSync(outputFd);
-        try { fs.unlinkSync(outPath); } catch {}
-        throw e;
-    }
-    fs.closeSync(outputFd);
-
-    const outStat = fs.statSync(outPath);
-    console.log('');
-    console.log('=== DONE ===');
-    console.log(`Output: ${outPath} (${formatBytes(outStat.size)})`);
 }
 
 async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
