@@ -6,7 +6,7 @@
 
 2. **Hidden Overwrite toggle for non-FSA modes** — Overwrite only works in FSA mode; now hidden when Stream or Blob is selected. Added `.pill.hidden` CSS class (index.html:383), toggle logic in download mode switch handler (main.js:259) and init (main.js:98).
 
-3. **Fixed log block expanding beyond viewport on desktop** — Changed `.app` from `min-height` to `height: calc(100dvh - 100px)` (`index.html:517`), constraining the entire app to viewport height. Desktop `.log` keeps `max-height: none` to override the mobile `max-height: 110px`, fills remaining space with `flex: 1` within the viewport-constrained page.
+3. **Fixed layout elongation after conversion** — Root cause: grid items (`.main-left`, `.main-right`) with default `min-height: auto` grow the grid row to fit all content, pushing past viewport. Fixed by `min-height: 0` on both grid column flex containers in desktop media query. Also: `height: auto` on `.drop-zone` desktop override to avoid conflict with mobile `height: clamp(...)`. Changes in `index.html` lines 549-568.
 
 ## ✅ Recent Changes (2026-06-17)
 
