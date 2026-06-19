@@ -511,6 +511,23 @@
         .status.ok { color: var(--green); }
         .status.err { color: var(--red); }
 
+        #jsFallback {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+        #jsFallback p { color: var(--text-faint); margin: 0 0 16px; }
+        #jsFallback button {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 28px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        #jsFallback button:hover { opacity: .85; }
+
         /* ── Desktop ── */
         @media (min-width: 900px) {
             body { padding: 40px; padding-top: 60px; min-height: 100dvh; }
@@ -670,7 +687,8 @@
 
                 <div class="progress" id="progressContainer">
                     <div class="progress-top">
-                        <span class="progress-label" id="progressTitle">Ready</span>
+                        <span class="loading" id="loadingSpinner"></span>
+                        <span class="progress-label" id="progressTitle"></span>
                         <span class="progress-pct" id="progressPercent">0%</span>
                     </div>
                     <div class="bar">
@@ -686,9 +704,37 @@
             </div>
         </div>
 
+        <div id="jsFallback">
+            <p>Failed to load application. Check your connection.</p>
+            <button onclick="location.reload()">Retry</button>
+        </div>
         <div class="status" id="status"></div>
     </div>
 
-    <script type="module" src="main.js"></script>
+    <script>
+    window.addLog = function(type, msg) {
+        var cls = type === 'success' ? 'ok' : type === 'error' ? 'err' : type === 'warning' ? 'warn' : 'info';
+        var time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        var c = document.getElementById('logContainer');
+        if (!c) return;
+        var safe = ('' + msg).replace(/[&<>"']/g, function(m){
+            return m === '&' ? '&amp;' : m === '<' ? '&lt;' : m === '>' ? '&gt;' : m === '"' ? '&quot;' : '&#39;';
+        });
+        var e = document.createElement('div');
+        e.innerHTML = '<span class="t">' + time + '</span> <span class="' + cls + '">' + safe + '</span>';
+        c.appendChild(e);
+        c.scrollTop = c.scrollHeight;
+    };
+    (function(){
+        window.addLog('info', 'Loading...');
+        import('./main.js').catch(function(e){
+            window.addLog('error', (e && e.message || e));
+            window.addLog('error', 'Failed to load application');
+            document.getElementById('loadingSpinner').style.display = 'none';
+            document.getElementById('jsFallback').style.display = 'block';
+            document.getElementById('progressContainer').style.display = 'none';
+        });
+    })();
+    </script>
 </body>
 </html>

@@ -56,13 +56,15 @@ class SWDownloader {
 
 window.addEventListener('error', (e) => {
     console.error('Global error:', e.error);
+    if (window.addLog) window.addLog('error', 'Error: ' + (e.error && e.error.message || e.message || e));
 });
 
 window.addEventListener('unhandledrejection', (e) => {
     console.error('Unhandled rejection:', e.reason);
+    if (window.addLog) window.addLog('error', 'Unhandled: ' + (e.reason && e.reason.message || e.reason));
 });
 
-window.addEventListener('DOMContentLoaded', async () => {
+async function main() {
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const fileListScroll = document.getElementById('fileListScroll');
@@ -122,12 +124,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 
     function addLog(type, message) {
-        const cls = type === 'success' ? 'ok' : type === 'error' ? 'err' : type === 'warning' ? 'warn' : 'info';
-        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const entry = document.createElement('div');
-        entry.innerHTML = `<span class="t">${time}</span> <span class="${cls}">${escapeHtml(message)}</span>`;
-        logContainer.appendChild(entry);
-        logContainer.scrollTop = logContainer.scrollHeight;
+        window.addLog(type, message);
     }
 
     let lastPercent = -1;
@@ -185,6 +182,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         const hasFiles = files.length > 0;
         dropZone.classList.toggle('has-files', hasFiles);
         convertBtn.disabled = !hasFiles;
+        if (!hasFiles) {
+            progressTitle.textContent = 'Ready';
+            updateProgress(0);
+        }
     }
 
     function updateFileProgress(index, pct) {
@@ -220,7 +221,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     dropZone.addEventListener('drop', async (e) => {
         e.preventDefault();
         dropZone.classList.remove('dragover');
-        await converter.init();
         for (const file of e.dataTransfer.files) {
             if (isCompressedGame(file.name)) files.push(file);
         }
@@ -228,7 +228,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
 
     fileInput.addEventListener('change', async (e) => {
-        await converter.init();
         for (const file of e.target.files) {
             if (isCompressedGame(file.name)) files.push(file);
         }
@@ -452,9 +451,19 @@ window.addEventListener('DOMContentLoaded', async () => {
         updateProgress(1);
     });
 
-    await converter.init().catch(e => {
-        addLog('warn', 'Zstd init failed: ' + e.message);
-    });
+    var sp = document.getElementById('loadingSpinner');
+    try {
+        await converter.init();
+    } catch (e) {
+        if (sp) sp.style.display = 'none';
+        document.getElementById('progressContainer').style.display = 'none';
+        document.getElementById('jsFallback').style.display = 'block';
+        return;
+    }
+    if (sp) sp.style.display = 'none';
 
+    progressTitle.textContent = 'Ready';
     addLog('info', 'Ready');
-});
+}
+
+main();

@@ -1,6 +1,16 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-06-19)
+
+1. **esbuild bundle** — All JS modules bundled into single `out/app.mjs` (178KB) via esbuild. 1 HTTP request instead of 15+ separate module imports. Solves `ERR_HTTP2_PING_FAILED` on Netlify CDN caused by too many parallel HTTP/2 streams. Build: `npm run build`. Netlify needs build command set to `npm run build`.
+
 ## ✅ Recent Changes (2026-06-18)
+
+0. **Zstd init with fallback UI** — `main.js` calls `converter.init()` at startup. On failure (e.g. network down), shows `#jsFallback` with Retry button (`location.reload()`). Added `window.addLog` in `index.html` so errors log before main.js loads. Initially added retries for both `index.html` (import) and `main.js` (init), but removed them — retrying dynamic imports doesn't help when the page itself needs a full reload. Errors seen: `ERR_HTTP2_PING_FAILED` (Netlify CDN drops HTTP/2 connections). Removed unnecessary `DOMContentLoaded` wrapper (import() is already deferred).
+
+1. **Fixed "Ready" false state before JS loads** — Static HTML showed "Ready" in progressTitle (`index.html:672`) before any JS ran. If main.js (ES module with import chain) loaded slowly, user saw "Ready" but no log entries. Changed HTML default to empty, added spinner, JS sets "Ready" only after `converter.init()` completes (`main.js:462`). Also reset to "Ready" when file list becomes empty.
+
+## ✅ Recent Changes (2026-06-18) (Previous)
 
 1. **Simplified progress calculation — removed fixed offsets, byte-weighted overall** — Replaced `pct = (bytes) => 0.02 + 0.93 * (bytes / totalDataSize)` with `bytes / totalDataSize` in all 4 places in converter.js. Removed `onProgress(0.02, 'Reading container...')` call. Removed all `0.95` building-phase progress calls. Removed NSZ remapping `(p - 0.02) / 0.98` in main.js. Changed overall progress from file-count-weighted `(i + p) / totalFiles` to byte-weighted `(accumulatedBytes + file.size * p) / totalBytes`.
 
