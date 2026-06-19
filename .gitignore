@@ -22,3 +22,6 @@ npm-debug.log*
 *.nsz
 *.nsp
 .DS_Store
+
+# Build output
+out/

@@ -6,7 +6,8 @@
   "main": "nsz-cli.js",
   "scripts": {
     "start": "node nsz-cli.js",
-    "decompress": "node nsz-cli.js"
+    "decompress": "node nsz-cli.js",
+    "build": "node build.js"
   },
   "keywords": [
     "nintendo-switch",
@@ -18,5 +19,8 @@
   "license": "MIT",
   "dependencies": {
     "zstddec": "^0.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
   }
 }
