@@ -493,15 +493,7 @@
 
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        .status {
-            text-align: center;
-            font-size: 12px;
-            color: var(--text-faint);
-            min-height: 16px;
-        }
 
-        .status.ok { color: var(--green); }
-        .status.err { color: var(--red); }
 
         /* ── Desktop ── */
         @media (min-width: 900px) {
@@ -583,8 +575,6 @@
             .btn { font-size: 14px; padding: 14px 24px; border-radius: 0 0 12px 12px; }
             .btn-go { box-shadow: 0 4px 20px rgba(74, 108, 247, 0.3); }
             .btn-go:hover:not(:disabled) { box-shadow: 0 6px 30px rgba(74, 108, 247, 0.45); }
-
-            .status { font-size: 13px; }
         }
 
         /* ── Mobile small ── */
@@ -689,7 +679,6 @@
             </div>
         </div>
 
-        <div class="status" id="status"></div>
     </div>
 
     <script>
