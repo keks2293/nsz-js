@@ -103,6 +103,7 @@ async function main() {
     const converter = new NSZConverter();
     const files = [];
     const fileStatus = [];
+    let converting = false;
 
     function formatBytes(bytes) {
         if (bytes === 0) return '0 B';
@@ -181,7 +182,7 @@ async function main() {
 
         const hasFiles = files.length > 0;
         dropZone.classList.toggle('has-files', hasFiles);
-        convertBtn.disabled = !hasFiles;
+        if (!converting) convertBtn.disabled = !hasFiles;
         if (!hasFiles) {
             progressTitle.textContent = 'Ready';
             updateProgress(0);
@@ -267,6 +268,7 @@ async function main() {
         progressContainer.classList.add('visible');
         logContainer.classList.add('visible');
         convertBtn.disabled = true;
+        converting = true;
         progressSpeed.textContent = '';
         progressTime.textContent = '';
         status.textContent = '';
@@ -446,6 +448,7 @@ async function main() {
 
         status.textContent = 'Done!';
         status.className = 'status ok';
+        converting = false;
         convertBtn.disabled = false;
         progressTitle.textContent = 'Done';
         updateProgress(1);
