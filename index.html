@@ -712,7 +712,7 @@
             window.addLog('error', (e && e.message || e));
             window.addLog('error', 'Failed to load application');
             document.getElementById('loadingSpinner').style.display = 'none';
-            document.getElementById('jsFallback').style.display = 'block';
+            document.getElementById('dropZone').classList.add('has-error');
             document.getElementById('progressContainer').style.display = 'none';
         });
     })();
