@@ -457,7 +457,8 @@ async function main() {
     } catch (e) {
         if (sp) sp.style.display = 'none';
         document.getElementById('progressContainer').style.display = 'none';
-        document.getElementById('jsFallback').style.display = 'block';
+        document.querySelector('.section').style.display = 'none';
+        document.getElementById('dropZone').classList.add('has-error');
         return;
     }
     if (sp) sp.style.display = 'none';
