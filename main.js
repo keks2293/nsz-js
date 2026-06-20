@@ -77,7 +77,6 @@ async function main() {
     const overwriteBtn = document.getElementById('overwriteBtn');
     const progressTitle = document.getElementById('progressTitle');
     const verifyBtn = document.getElementById('verifyBtn');
-    const status = document.getElementById('status');
     const progressSpeed = document.getElementById('progressSpeed');
     const progressTime = document.getElementById('progressTime');
 
@@ -282,8 +281,7 @@ async function main() {
         converting = true;
         progressSpeed.textContent = '';
         progressTime.textContent = '';
-        status.textContent = '';
-        status.className = 'status';
+
 
         updateProgress(0);
         addLog('info', `Starting conversion (${downloadMode})...`);
@@ -457,8 +455,6 @@ async function main() {
             }
         }
 
-        status.textContent = 'Done!';
-        status.className = 'status ok';
         converting = false;
         convertBtn.disabled = false;
         progressTitle.textContent = 'Done';
