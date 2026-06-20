@@ -224,14 +224,18 @@ async function main() {
         e.preventDefault();
         dropZone.classList.remove('dragover');
         for (const file of e.dataTransfer.files) {
-            if (isCompressedGame(file.name)) files.push(file);
+            if (isCompressedGame(file.name) && !files.some(f => f.name === file.name)) {
+                files.push(file);
+            }
         }
         updateFileList();
     });
 
     fileInput.addEventListener('change', async (e) => {
         for (const file of e.target.files) {
-            if (isCompressedGame(file.name)) files.push(file);
+            if (isCompressedGame(file.name) && !files.some(f => f.name === file.name)) {
+                files.push(file);
+            }
         }
         fileInput.value = '';
         updateFileList();
