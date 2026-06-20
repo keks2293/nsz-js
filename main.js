@@ -173,6 +173,7 @@ async function main() {
 
         fileListScroll.querySelectorAll('.file-x').forEach(btn => {
             btn.addEventListener('click', (e) => {
+                e.stopPropagation();
                 const index = parseInt(e.currentTarget.dataset.index);
                 files.splice(index, 1);
                 fileStatus.splice(index, 1);
