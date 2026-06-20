@@ -154,13 +154,12 @@ async function main() {
             const statusIcon = st === 'ok' ? '✓' : st === 'err' ? '✗' : st === 'skip' ? '–' : '';
 
             item.innerHTML = `
-                <div class="file-badge ${badgeClass}">${ext.toUpperCase()}</div>
+                <div class="file-badge ${badgeClass}">${statusIcon || ext.toUpperCase()}</div>
                 <div class="file-meta">
                     <div class="file-name">${escapeHtml(file.name)}</div>
                     <div class="file-size">${formatBytes(file.size)}</div>
                     <div class="file-pprogress" id="fp${i}"><div class="file-pprogress-fill" id="fpf${i}"></div></div>
                 </div>
-                <div class="file-status-icon">${statusIcon}</div>
                 <button class="file-x" data-index="${i}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
