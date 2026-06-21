@@ -1,5 +1,9 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-06-21)
+
+1. **Removed "Add more" UI** — Removed the `.drop-zone-addmore` bar (CSS + HTML element) from the drop zone. The drop zone now only accepts files on initial interaction. Removed `index.html:152-171` (CSS) and `index.html:638-641` (HTML).
+
 ## ✅ Recent Changes (2026-06-19)
 
 1. **esbuild bundle** — All JS modules bundled into single `out/app.mjs` (178KB) via esbuild. 1 HTTP request instead of 15+ separate module imports. Solves `ERR_HTTP2_PING_FAILED` on Netlify CDN caused by too many parallel HTTP/2 streams. Build: `npm run build`. Netlify needs build command set to `npm run build`.
