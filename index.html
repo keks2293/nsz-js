@@ -14,6 +14,8 @@
             --bg-card: #111122;
             --bg-raised: #181830;
             --bg-hover: #20203c;
+            --bg-glass: rgba(10, 10, 20, 0.5);
+            --bg-glass-darker: rgba(17, 17, 34, 0.7);
             --border: #252545;
             --text: #e8e8f4;
             --text-dim: #9999bb;
@@ -109,12 +111,16 @@
             border-radius: 12px;
             cursor: pointer;
             transition: all 0.2s ease;
-            background: var(--bg-raised);
+            background: var(--bg-glass-darker);
             position: relative;
             overflow: hidden;
             height: clamp(120px, 22vw, 200px);
             display: flex;
             flex-direction: column;
+        }
+
+        .drop-zone.has-files {
+            background: var(--bg-glass);
         }
 
         .drop-zone:hover,
@@ -200,7 +206,7 @@
 
         /* ── Section Card ── */
         .section {
-            background: var(--bg-card);
+            background: var(--bg-glass);
             border: 1px solid var(--border);
             border-radius: 12px;
             overflow: hidden;
@@ -378,7 +384,7 @@
 
         /* ── Progress ── */
         .progress {
-            background: var(--bg-card);
+            background: var(--bg-glass);
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 14px;
@@ -425,7 +431,7 @@
 
         /* ── Log ── */
         .log {
-            background: var(--bg);
+            background: var(--bg-glass);
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 10px 12px;
