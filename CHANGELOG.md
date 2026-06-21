@@ -7,6 +7,7 @@
 3. **12px pills on desktop** — `@media (min-width: 900px)` now sets `.pill { font-size: 12px }`.
 4. **Label: "Download mode"** (not "Save mode").
 5. **Removed `min-width: 0`** from `@media (max-width: 380px)` `.pill` rule.
+6. **Removed `0%` default from progress percent** — stays empty until conversion starts.
 
 ## ✅ Recent Changes (2026-06-21) (Previous)
 
