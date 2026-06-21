@@ -308,6 +308,10 @@
             border-left: 1px solid var(--border);
         }
 
+        .setting {
+            text-align: center;
+        }
+
         .setting-label {
             font-size: 10px;
             font-weight: 600;
@@ -317,7 +321,7 @@
             margin-bottom: 8px;
         }
 
-        .pills { display: flex; gap: 4px; flex-wrap: wrap; }
+        .pills { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
 
         .pill {
             padding: 5px 10px;
@@ -334,13 +338,13 @@
             font-family: inherit;
         }
 
-.pill.on {
-    background: var(--accent-glow);
-    color: var(--accent);
-    border-color: var(--accent-glow-strong);
-}
+        .pill.on {
+            background: var(--accent-glow);
+            color: var(--accent);
+            border-color: var(--accent-glow-strong);
+        }
 
-.pill.hidden { display: none; }
+        .pill.hidden { display: none; }
 
         .pill input { display: none; }
 
