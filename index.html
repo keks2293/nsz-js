@@ -123,17 +123,6 @@
             background: var(--bg-glass);
         }
 
-        .drop-zone:hover,
-        .drop-zone.dragover {
-            border-color: var(--accent);
-            background: var(--accent-glow);
-        }
-
-        .drop-zone.dragover {
-            box-shadow: inset 0 0 30px var(--accent-glow);
-            transform: scale(1.005);
-        }
-
         .drop-zone-empty {
             padding: 16px;
             text-align: center;
@@ -234,8 +223,6 @@
             transition: background 0.15s;
         }
 
-        .file:hover { background: var(--bg-raised); }
-
         .file + .file { border-top: 1px solid var(--border); }
 
         .file-badge {
@@ -285,7 +272,6 @@
             transition: all 0.15s;
         }
 
-        .file-x:hover { background: rgba(248, 113, 113, 0.15); color: var(--red); border-color: var(--red); }
         .file-x svg { width: 13px; height: 13px; }
 
         .file-pprogress {
@@ -347,9 +333,6 @@
             -webkit-tap-highlight-color: transparent;
             font-family: inherit;
         }
-
-        .pill:hover { color: var(--text); background: var(--bg-hover); }
-        .pill:active { transform: scale(0.96); }
 
 .pill.on {
     background: var(--accent-glow);
@@ -457,12 +440,6 @@
             box-shadow: 0 2px 12px rgba(74, 108, 247, 0.25);
         }
 
-        .btn-go:hover:not(:disabled) {
-            box-shadow: 0 4px 24px rgba(74, 108, 247, 0.4);
-            transform: translateY(-1px);
-        }
-
-        .btn-go:active:not(:disabled) { transform: translateY(0); }
         .btn-go:disabled { opacity: 0.3; cursor: not-allowed; }
 
         .loading {
@@ -478,6 +455,33 @@
         }
 
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Hover / active (interactive devices only) ── */
+        @media (hover: hover) {
+            .drop-zone:hover,
+            .drop-zone.dragover {
+                border-color: var(--accent);
+                background: var(--accent-glow);
+            }
+
+            .drop-zone.dragover {
+                box-shadow: inset 0 0 30px var(--accent-glow);
+                transform: scale(1.005);
+            }
+
+            .file:hover { background: var(--bg-raised); }
+            .file-x:hover { background: rgba(248, 113, 113, 0.15); color: var(--red); border-color: var(--red); }
+
+            .pill:hover { color: var(--text); background: var(--bg-hover); }
+            .pill:active { transform: scale(0.96); }
+
+            .btn-go:hover:not(:disabled) {
+                box-shadow: 0 4px 24px rgba(74, 108, 247, 0.4);
+                transform: translateY(-1px);
+            }
+
+            .btn-go:active:not(:disabled) { transform: translateY(0); }
+        }
 
 
 
@@ -560,7 +564,9 @@
 
             .btn { font-size: 14px; padding: 14px 24px; border-radius: 0 0 12px 12px; }
             .btn-go { box-shadow: 0 4px 20px rgba(74, 108, 247, 0.3); }
-            .btn-go:hover:not(:disabled) { box-shadow: 0 6px 30px rgba(74, 108, 247, 0.45); }
+            @media (hover: hover) {
+                .btn-go:hover:not(:disabled) { box-shadow: 0 6px 30px rgba(74, 108, 247, 0.45); }
+            }
         }
 
         /* ── Mobile small ── */
