@@ -2,11 +2,13 @@
 
 ## ✅ Recent Changes (2026-06-21)
 
-1. **Removed "Add more" UI** — Removed the `.drop-zone-addmore` bar (CSS + HTML element) from the drop zone. The drop zone now only accepts files on initial interaction. Removed `index.html:152-171` (CSS) and `index.html:638-641` (HTML).
+1. **iOS 27 segmented control for download mode** — Mode pills now use `.pills.segmented`: connected with shared border (`gap: 0`, `border-left: none` on siblings), first/last rounded corners, active pill uses accent fill (`var(--accent-glow)`). Options pills remain separate with `gap: 4px`.
+2. **Compact mobile setting rows** — `.setting` padding reduced from `10px 14px` to `6px 14px`, eliminating scroll before drop. Desktop padding also reduced: `14px 16px` → `10px 16px`. Pills centered. Removed `flex-shrink: 0` (unused).
+3. **12px pills on desktop** — `@media (min-width: 900px)` now sets `.pill { font-size: 12px }`.
+4. **Label: "Download mode"** (not "Save mode").
+5. **Removed `min-width: 0`** from `@media (max-width: 380px)` `.pill` rule.
 
-2. **Fixed stuck hover/active on mobile** — Consolidated all `:hover`/`:active` rules into a single `@media (hover: hover)` block, so touch-only devices don't get stuck "pushed" states on pills, buttons, file items, or the drop zone.
-
-3. **Save mode and Options now inline** — iOS-style horizontal rows everywhere: label on left, pills on right (`flex` row with `margin-left: auto` on pills). Removed desktop 2-column grid override.
+## ✅ Recent Changes (2026-06-21) (Previous)
 
 ## ✅ Recent Changes (2026-06-19)
 
