@@ -6,7 +6,7 @@
 
 2. **Fixed stuck hover/active on mobile** — Consolidated all `:hover`/`:active` rules into a single `@media (hover: hover)` block, so touch-only devices don't get stuck "pushed" states on pills, buttons, file items, or the drop zone.
 
-3. **Centered Download mode and Options** — Added `text-align: center` to `.setting` and `justify-content: center` to `.pills` so pills are centered within each column.
+3. **Save mode and Options now inline** — iOS-style horizontal rows everywhere: label on left, pills on right (`flex` row with `margin-left: auto` on pills). Removed desktop 2-column grid override.
 
 ## ✅ Recent Changes (2026-06-19)
 
