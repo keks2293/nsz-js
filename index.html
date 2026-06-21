@@ -306,7 +306,7 @@
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 10px 14px;
+            padding: 6px 14px;
         }
 
         .setting + .setting {
@@ -325,15 +325,46 @@
 
         .pills {
             display: flex;
-            gap: 4px;
             flex-wrap: wrap;
             margin-left: auto;
+        }
+
+        .pills.segmented {
+            gap: 0;
+        }
+
+        .segmented .pill {
+            border: 1px solid var(--border);
+            border-radius: 0;
+        }
+
+        .segmented .pill + .pill {
+            border-left: none;
+        }
+
+        .segmented .pill:first-child {
+            border-radius: 6px 0 0 6px;
+        }
+
+        .segmented .pill:last-child {
+            border-radius: 0 6px 6px 0;
+        }
+
+        .segmented .pill.on {
+            background: var(--accent-glow);
+            color: var(--accent);
+            border-color: var(--accent-glow-strong);
+            z-index: 1;
+        }
+
+        .pills:not(.segmented) {
+            gap: 4px;
         }
 
         .pill {
             padding: 5px 10px;
             border-radius: 6px;
-            border: 1px solid transparent;
+            border: 1px solid var(--border);
             background: transparent;
             color: var(--text-dim);
             font-size: 11px;
@@ -344,6 +375,8 @@
             -webkit-tap-highlight-color: transparent;
             font-family: inherit;
         }
+
+
 
         .pill.on {
             background: var(--accent-glow);
@@ -573,6 +606,7 @@
             .progress, .log { border-radius: 14px; }
             .log { flex: 1; max-height: none; font-size: 12px; padding: 12px 14px; }
 
+            .pill { font-size: 12px; }
             .btn { font-size: 14px; padding: 14px 24px; border-radius: 0 0 12px 12px; }
             .btn-go { box-shadow: 0 4px 20px rgba(74, 108, 247, 0.3); }
             @media (hover: hover) {
@@ -582,7 +616,7 @@
 
         /* ── Mobile small ── */
         @media (max-width: 380px) {
-            .pill { flex: 1; text-align: center; min-width: 0; }
+            .pill { flex-grow: 1; text-align: center; }
         }
 
         /* ── Scrollbar ── */
@@ -639,8 +673,8 @@
                     <div class="section">
                         <div class="settings">
                             <div class="setting">
-                                <div class="setting-label">Save mode</div>
-                                <div class="pills" id="modeOptions">
+                                <div class="setting-label">Download mode</div>
+                                <div class="pills segmented" id="modeOptions">
                                     <button class="pill on" data-mode="fsa" title="Saves directly to a folder you pick. Perfect for PC, can be limited on mobile."><input type="radio" name="mode" value="fsa" checked>File System</button>
                                     <button class="pill" data-mode="sw" title="Stream download via Service Worker. Perfect for mobile."><input type="radio" name="mode" value="sw">Stream</button>
                                     <button class="pill" data-mode="blob" title="Builds file in memory then downloads. 2GB limit. Fallback for old devices."><input type="radio" name="mode" value="blob">Blob</button>
