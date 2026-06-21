@@ -149,27 +149,6 @@
         .drop-zone.has-error .drop-zone-list { display: none; }
         .drop-zone.has-error .drop-zone-error { display: flex; }
 
-        .drop-zone-addmore {
-            display: none;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            padding: 10px;
-            border-bottom: 1px solid var(--border);
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            color: var(--accent);
-            cursor: pointer;
-            transition: all 0.15s;
-            background: var(--accent-glow);
-        }
-
-        .drop-zone-addmore svg { width: 14px; height: 14px; }
-        .drop-zone-addmore:hover { color: var(--accent-hover); }
-        .drop-zone.has-files .drop-zone-addmore { display: flex; }
-
         .drop-icon {
             width: 44px;
             height: 44px;
@@ -634,10 +613,6 @@
                         <div class="drop-text" style="color:var(--red)">Failed to load application</div>
                         <div class="drop-hint">Check your connection</div>
                         <button class="btn btn-go" style="margin-top:12px;border-radius:8px;padding:8px 24px" onclick="location.reload()">Retry</button>
-                    </div>
-                    <div class="drop-zone-addmore" id="dropZoneAddMore">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                        <span>Add more</span>
                     </div>
                     <div class="drop-zone-list">
                         <div class="files-body" id="fileListScroll"></div>
