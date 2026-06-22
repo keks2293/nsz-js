@@ -2,6 +2,8 @@
 
 ## ✅ Recent Changes (2026-06-22)
 
+8. **Fix XCZ→XCI partition overlap** — Root HFS0 entry size was `pm.hfs0BufferSize` (header only), not `pm.hfs0BufferSize + pm.totalSize` (header + data). This caused partition N+1 header to overlap with partition N data when multiple non-empty partitions exist. Fixed in both `converter.js` streaming path and `nsz-cli.js` CLI path. Refactored to use `partSizes[]` array computed once, matching Python nsz pattern where `f['size']` stores full partition size. Added documentation to `HFS0-OFFSET-CONVENTION.md` explaining why JS uses pre-calculate (browser `FileSystemWritableFileStream` can't use Python's streaming `add()`+`resize()` approach).
+7. **Full codebase bug review** — Found 11 bugs. Critical: XCZ partition overlap (converter.js:355-365, nsz-cli.js:166-178). Significant: AES-ECB PKCS7 padding in key derivation (aes128.js:128-139 → keys.js:65,68,71). Moderate: accumulatedBytes not updated on error, blockIndex uninitialized, DataView fragility, dead padding code. Low: iframe DOM leak, Content-Disposition injection, unchecked readSync. Awaiting user decision on which to fix.
 1. **Fix `offsetInSection` → `offset` bug in CLI** — `nsz-cli.js:177` — `po.offset` was `undefined` (`offsetInSection: currentDataPos`), causing all `fs.writeSync` to write at cursor instead of absolute position. Fixed to `offset: ROOT_DATA_SECTION + currentDataPos`.
 2. **Remove dead `hfs0Data` reference** — `converter.js:343` — `hfs0Data,` in `partitionMetas.push()` referenced undefined variable, left over from refactor. Removed (field was never consumed).
 3. **Folded both fixes into original commits** — `hfs0Data` and `pHeaderSize` fixed in the refactor commit itself, no separate fix commits.

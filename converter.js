@@ -352,16 +352,19 @@ class NSZConverter {
             const ROOT_HFS0_OFFSET = 0xF000;
 
             const rootWriter = new HFS0Writer(ROOT_HFS0_PADDED_SIZE);
+            const partSizes = [];
             for (const pm of partitionMetas) {
-                rootWriter.addEntry(pm.name, pm.raw ? pm.size : pm.hfs0BufferSize);
+                const partSize = pm.raw ? pm.size : pm.hfs0BufferSize + pm.totalSize;
+                partSizes.push(partSize);
+                rootWriter.addEntry(pm.name, partSize);
             }
             const rootActualHeader = rootWriter.getActualHeaderSize();
 
             let currentDataOffset = ROOT_HFS0_OFFSET + rootActualHeader;
             const partOffsets = [];
-            for (const pm of partitionMetas) {
-                partOffsets.push({ name: pm.name, offset: currentDataOffset });
-                currentDataOffset += pm.raw ? pm.size : pm.hfs0BufferSize;
+            for (let i = 0; i < partitionMetas.length; i++) {
+                partOffsets.push({ name: partitionMetas[i].name, offset: currentDataOffset });
+                currentDataOffset += partSizes[i];
             }
             const totalSize = currentDataOffset;
 
