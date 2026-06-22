@@ -4,6 +4,7 @@
 
 1. **Fix error cleanup: close writable and removeEntry on conversion failure** — `outputName` moved outside `try` block. On conversion failure, closes the writable stream and removes the partial output file from the filesystem.
 2. **Fix `writable` ReferenceError in catch block** — `let writable = null;` was declared inside `try` with `let`, making it inaccessible in `catch` (block-scoped). Moved it alongside `outputName` before the `try` block. Without this, any error path would throw `ReferenceError: writable is not defined`, silently skipping error status and file list update.
+3. **Load keys once at startup, not on every convert** — Moved `loadDefaultKeys()` from the convert button handler to after `converter.init()`. Keys file is static, no reason to re-fetch it on each conversion.
 
 ## ✅ Recent Changes (2026-06-21)
 
