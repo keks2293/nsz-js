@@ -49,6 +49,10 @@ Prioritized areas for improvement identified 2026-05-30.
 
 - ❌ **accumulatedBytes not updated on error** — `main.js:449`. `accumulatedBytes += file.size` is only on success path. Not a bug: progress bar reaches 100% via `updateProgress(1)` at end. Error files are removed, shouldn't count toward progress. Best practice: only count successfully processed bytes.
 
+- ❌ **NCAHeader.parse offset parameter** — `fs/nca.js`. Wanted to add offset parameter like Python nsz `struct.unpack_from(data, offset)` to avoid `buffer.slice()` copies and read NCA headers from any position in a larger buffer. But NCA header uses fixed absolute offsets (0x200, 0x204, 0x208...), and DataView offset shifts all reads — so offset=0x200 would make `view.getUint8(0x204)` read from 0x404. Can't use relative offsets without subtracting offset from every read, which defeats the purpose.
+
+- ✅ **NCAHeader.parse: match Python nsz style** — `fs/nca.js`. Used `buffer.slice()` for byte arrays (like Python `data[start:end]`) and `buffer[i]` for magic bytes. Scalar reads use DataView (like Python `struct.unpack_from`). Consistent with Python nsz patterns.
+
 - ❌ **SW download behavior**: Wanted the same UX as FSA mode: first show a folder picker, then download to the chosen location. This is impossible with SW — SW always saves to browser Downloads folder. Save As dialog is controlled by browser settings, not by SW code — no API exists to show it programmatically. [Chrome setting: chrome://settings/downloads → "Ask where to save each file before downloading"](chrome://settings/downloads).
 
 - ✅ **Lazy SW registration on first use in convert handler (`main.js`)** — SW no longer registers at DOMContentLoaded. Registration happens only when convert is triggered in SW or FSA mode, guarded by `window._swRegistered` flag.
