@@ -298,7 +298,7 @@ class NSZConverter {
             try {
                 hfs0 = await xci.readPartitionFiles(partition);
             } catch (e) {
-                onLog('warning', `Cannot parse partition ${partition.name} as HFS0, copying raw: ${e.message}`);
+                onLog('warn', `Cannot parse partition ${partition.name} as HFS0, copying raw: ${e.message}`);
                 partitionMetas.push({ name: partition.name, raw: true, offset: partition.offset, size: partition.size, files: [], totalSize: partition.size, hfs0Size: 0, cnmtHashes: new Set() });
                 continue;
             }
