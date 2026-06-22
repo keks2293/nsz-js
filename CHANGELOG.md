@@ -1,5 +1,10 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-06-22)
+
+1. **Fix error cleanup: close writable and removeEntry on conversion failure** — `outputName` moved outside `try` block. On conversion failure, closes the writable stream and removes the partial output file from the filesystem.
+2. **Fix `writable` ReferenceError in catch block** — `let writable = null;` was declared inside `try` with `let`, making it inaccessible in `catch` (block-scoped). Moved it alongside `outputName` before the `try` block. Without this, any error path would throw `ReferenceError: writable is not defined`, silently skipping error status and file list update.
+
 ## ✅ Recent Changes (2026-06-21)
 
 1. **iOS 27 segmented control for download mode** — Mode pills now use `.pills.segmented`: connected with shared border (`gap: 0`, `border-left: none` on siblings), first/last rounded corners, active pill uses accent fill (`var(--accent-glow)`). Options pills remain separate with `gap: 4px`.
