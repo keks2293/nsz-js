@@ -285,7 +285,6 @@ async function main() {
 
         updateProgress(0);
         addLog('info', `Starting conversion (${downloadMode})...`);
-        await loadDefaultKeys();
 
         const totalBytes = files.reduce((s, f) => s + f.size, 0);
         const startTime = Date.now();
@@ -479,6 +478,8 @@ async function main() {
         return;
     }
     if (sp) sp.style.display = 'none';
+
+    await loadDefaultKeys();
 
     progressTitle.textContent = 'Ready';
     addLog('info', 'Ready');
