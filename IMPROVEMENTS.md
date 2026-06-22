@@ -12,6 +12,8 @@ Prioritized areas for improvement identified 2026-05-30.
 
 4. ❌ **`aes128.js` rcon_table oversized** — `crypto/aes128.js:6-26`. AES-128 only needs 10 rcon entries; table has ~100+ entries (repeating every 255). **Keeping as-is to match Python nsz.**
 
+5. ❌ **`AESCBC` class in `aes128.js` is unused** — `crypto/aes128.js:291-335`. Defined and exported, but no file imports it. Web Crypto API supports AES-CBC natively anyway. **Keeping as-is to match Python nsz (`nut/aes128.py` has the same dead code).**
+
 ## Medium Impact
 
 5. ❌ **No `npm test` script** — `package.json:8-10`. Tests exist but require manual discovery. Prevents automated CI. **Not needed for this project.**
