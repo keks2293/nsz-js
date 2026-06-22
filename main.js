@@ -205,7 +205,6 @@ async function main() {
             if (response.ok) {
                 const keyText = await response.text();
                 converter.setKeys(keyText);
-                addLog('success', 'Keys loaded');
                 return true;
             }
         } catch (error) {
