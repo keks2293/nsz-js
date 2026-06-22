@@ -164,16 +164,19 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
     }
 
     const rootWriter = new HFS0Writer(ROOT_HFS0_PADDED_SIZE);
+    const partSizes = [];
     for (const pm of partitionMetas) {
-        const partSize = pm.raw ? pm.rawData.length : Math.max(PARTITION_HEADER_SIZE, pm.totalSize);
+        const partSize = pm.raw ? pm.rawData.length : PARTITION_HEADER_SIZE + pm.totalSize;
+        partSizes.push(partSize);
         rootWriter.addEntry(pm.name, partSize);
     }
     const rootActualHeader = rootWriter.getActualHeaderSize();
 
     let currentDataPos = 0;
     const partOffsets = [];
-    for (const pm of partitionMetas) {
-        const partSize = pm.raw ? pm.rawData.length : Math.max(PARTITION_HEADER_SIZE, pm.totalSize);
+    for (let i = 0; i < partitionMetas.length; i++) {
+        const pm = partitionMetas[i];
+        const partSize = partSizes[i];
         partOffsets.push({ name: pm.name, offset: ROOT_DATA_SECTION + currentDataPos, size: partSize });
         currentDataPos += partSize;
     }

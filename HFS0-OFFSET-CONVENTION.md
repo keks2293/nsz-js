@@ -42,115 +42,67 @@ reader: abs = base + actualHeaderSize + stored
 
 ## What Changed
 
-### 1. HFS0Writer.build() — `fs/xci.js:103`
+All HFS0 writers now use `HFS0Writer` class (`fs/hfs0.js`) which handles the convention internally.
 
-**Before:**
+### 1. HFS0Writer._writeHeader() — `fs/hfs0.js:104`
+
 ```js
-view.setBigUint64(pos, BigInt(filePos), true);
+view.setBigUint64(pos, BigInt(filePos - actualHeader), true);
 ```
 
-**After:**
-```js
-view.setBigUint64(pos, BigInt(filePos - actualHeaderSize), true);
-```
+`actualHeader` is computed via `_getActualHeaderSize()`: `0x10 + entries.length * 0x40 + stringTable.length`.
 
-`actualHeaderSize` was already computed at the top of `build()`:
-```js
-const actualHeaderSize = 0x10 + this.files.length * 0x40 + stringTableBytes.length;
-```
+### 2. HFS0Reader.getFiles() — `fs/hfs0.js:42`
 
-### 2. HFS0Reader.parse() — `fs/xci.js:50`
-
-**Before:**
 ```js
-offset: baseOffset + storedOffset,
-```
-
-**After:**
-```js
-offset: baseOffset + this._headerSize + storedOffset,
+offset: this.baseOffset + this._headerSize + e.offset,
 ```
 
 `this._headerSize` is computed during `parse()` as `0x10 + fileCount * 0x40 + stringTableSize`.
 
-### 3. XCIWriter.build() — `fs/xci.js:278`
+### 3. XCIWriter.build() — `fs/xci.js:99`
 
-Root HFS0 partition entries:
-
-**Before:**
+Root HFS0 partition entries use `HFS0Writer`:
 ```js
-view.setBigUint64(pos, BigInt(entry.dataOffset - rootHfs0Base), true);
+const rootWriter = new HFS0Writer(0);
+for (const p of this.partitions) rootWriter.addEntry(p.name, p.data.length);
 ```
 
-**After:**
+`p.data.length` = full partition size (HFS0 header + file data).
+
+### 4. converter.js streaming path — `converter.js:356-370`
+
+Uses `HFS0Writer` for root and partition HFS0:
 ```js
-view.setBigUint64(pos, BigInt(entry.dataOffset - rootHfs0Base - rootActualHeader), true);
+const rootWriter = new HFS0Writer(ROOT_HFS0_PADDED_SIZE);
+const partSizes = [];
+for (const pm of partitionMetas) {
+    const partSize = pm.raw ? pm.size : pm.hfs0BufferSize + pm.totalSize;
+    partSizes.push(partSize);
+    rootWriter.addEntry(pm.name, partSize);
+}
 ```
 
-### 4. converter.js streaming path root entries — `converter.js:365`
+Root HFS0 entry size = `hfs0BufferSize + totalSize` (header + file data). This was previously `hfs0BufferSize` (header only), causing partition overlap.
 
-**Before:**
+### 5. nsz-cli.js — `nsz-cli.js:169-195`
+
+Uses `HFS0Writer` for root and partition HFS0:
 ```js
-rootView.setBigUint64(pos, BigInt(po.offset - ROOT_HFS0_OFFSET), true);
+const rootWriter = new HFS0Writer(ROOT_HFS0_PADDED_SIZE);
+const partSizes = [];
+for (const pm of partitionMetas) {
+    const partSize = pm.raw ? pm.rawData.length : PARTITION_HEADER_SIZE + pm.totalSize;
+    partSizes.push(partSize);
+    rootWriter.addEntry(pm.name, partSize);
+}
 ```
 
-**After:**
+Partition HFS0 headers also via `HFS0Writer`:
 ```js
-rootView.setBigUint64(pos, BigInt(po.offset - ROOT_HFS0_OFFSET - rootActualHeader), true);
-```
-
-This was a bug found during review — the streaming path was still using the old convention while every other writer had been updated.
-
-### 5. `_buildPartitionHfs0Header` — `converter.js:523`
-
-**Before:**
-```js
-view.setBigUint64(pos, BigInt(filePos), true);
-```
-
-**After:**
-```js
-view.setBigUint64(pos, BigInt(filePos - actualHeader), true);
-```
-
-### 6. `_buildPartitionHfs0Buffer` — `converter.js:559`
-
-**Before:**
-```js
-view.setBigUint64(pos, BigInt(filePos), true);
-```
-
-**After:**
-```js
-view.setBigUint64(pos, BigInt(filePos - actualHeader), true);
-```
-
-### 7. nsz-cli.js root partition entries — `nsz-cli.js:221`
-
-The root HFS0 is padded to `ROOT_HFS0_PADDED_SIZE = 0x8000`. Partitions start at `po.offsetInSection + ROOT_HFS0_PADDED_SIZE` within the XCI section.
-
-**Before:**
-```js
-rootHeader.writeBigUInt64LE(BigInt(po.offsetInSection + ROOT_HFS0_PADDED_SIZE), pos);
-```
-
-**After:**
-```js
-rootHeader.writeBigUInt64LE(BigInt(po.offsetInSection + ROOT_HFS0_PADDED_SIZE - rootActualHeader), pos);
-```
-
-### 8. nsz-cli.js partition file entries — `nsz-cli.js:263`
-
-The partition HFS0 header is padded to `pHeaderSize = Math.max(PARTITION_HEADER_SIZE, pActualHeader)`. File data starts at `writePos = po.offset + pHeaderSize`.
-
-**Before:**
-```js
-pHeader.writeBigUInt64LE(BigInt(pHeaderSize + pfOff), pos);
-```
-
-**After:**
-```js
-pHeader.writeBigUInt64LE(BigInt(pHeaderSize + pfOff - pActualHeader), pos);
+const pWriter = new HFS0Writer(PARTITION_HEADER_SIZE);
+for (const m of pm.files) pWriter.addEntry(m.name, m.size);
+const pHeader = Buffer.from(pWriter.buildHeader());
 ```
 
 ---
@@ -171,27 +123,12 @@ For the second partition:
 - hactool: `absolute = ROOT_HFS0_OFFSET + rootActualHeader + firstPartitionPaddedSize`
 - ✓ Correctly points to the second partition
 
-### Proof by example (nsz-cli.js partition file entries)
-
-For the first file in a partition:
-- `pfOff = 0`, `pHeaderSize = max(0x8000, pActualHeader) = 0x8000` (typical case)
-- `stored = 0x8000 - pActualHeader`
-- hactool: `partition_base + pActualHeader + (0x8000 - pActualHeader) = partition_base + 0x8000`
-- Data IS at `writePos = po.offset + 0x8000`
-- ✓ Correct
-
-For the second file:
-- `pfOff = firstFileSize`
-- `stored = 0x8000 + firstFileSize - pActualHeader`
-- hactool: `partition_base + pActualHeader + 0x8000 + firstFileSize - pActualHeader = partition_base + 0x8000 + firstFileSize`
-- ✓ Correct
-
 ### Self-consistency: HFS0Writer ↔ HFS0Reader
 
 HFS0Writer stores: `filePos - actualHeaderSize` (relative to end of actual header)
 HFS0Reader reads: `baseOffset + actualHeaderSize + storedOffset` (adds actual header back)
 
-Both embedded in the same file (`fs/xci.js`). Round-trip verified by construction.
+Both in `fs/hfs0.js`. Round-trip verified by construction.
 
 ---
 
@@ -210,6 +147,26 @@ view.setBigUint64(pos, BigInt(f.offset), true);
 Where `f.offset` is 0-based relative to the data start (not header-relative). The reader adds `headerSize` to get the absolute position. This is conceptually equivalent to hactool convention with `stored = absolute - headerSize`, since PFS0's `headerSize` is the padded/aligned header size, and PFS0 stores `fileOffset` directly (which is already 0 at data start).
 
 **Key insight:** PFS0 was already correct because it happened to use a convention where stored = absolute - paddedHeaderSize. HFS0 needed the fix because `actualHeaderSize ≠ paddedHeaderSize (0x8000)`.
+
+---
+
+## Streaming vs Pre-Calculate: Browser Limitation
+
+Python nsz uses streaming approach for root HFS0:
+1. `add()` with placeholder size (0x200)
+2. Write partition data via `Hfs0Stream`
+3. `resize()` updates `files[]` with actual size
+4. Next `add()` — `self.written` flag sets `addpos = self.actualSize`
+5. `getHeader()` writes sizes/offsets from `files[]`
+
+JS **cannot** use this approach in browser because `FileSystemWritableFileStream`:
+- No `seek()` for reading (only `write({ position: ... })`)
+- Root HFS0 header at 0xF000 must be written **before** partition data
+- Root header needs all partition sizes → must pre-calculate
+
+JS solution: pre-calculate in two passes:
+1. First pass: read metadata, compute `hfs0BufferSize + totalSize` per partition
+2. Second pass: build root header, stream partition data
 
 ---
 
