@@ -466,7 +466,7 @@ async function main() {
         updateProgress(1);
     });
 
-    var sp = document.getElementById('loadingSpinner');
+    const sp = document.getElementById('loadingSpinner');
     try {
         await converter.init();
     } catch (e) {
