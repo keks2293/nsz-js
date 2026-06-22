@@ -2,7 +2,7 @@ export class NCAHeader {
     static parse(buffer) {
         const view = new DataView(buffer);
 
-        const magic = String.fromCharCode(...new Uint8Array(buffer.slice(0x200, 0x204)));
+        const magic = String.fromCharCode(buffer[0x200], buffer[0x201], buffer[0x202], buffer[0x203]);
 
         if (magic !== 'NCA3' && magic !== 'NCA2') {
             return null;
@@ -76,7 +76,7 @@ export class BKTR {
 
         const bktrOffset = Number(view.getBigUint64(0, true));
         const bktrSize = Number(view.getBigUint64(8, true));
-        const magic = String.fromCharCode(...new Uint8Array(buffer.slice(16, 20)));
+        const magic = String.fromCharCode(buffer[16], buffer[17], buffer[18], buffer[19]);
 
         if (magic !== 'BKTR' || bktrSize === 0) return null;
 

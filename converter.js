@@ -522,7 +522,7 @@ class NSZConverter {
     async extractCnmtHashes(cnmtData) {
         const hashes = new Set();
         try {
-            const header = NCAHeader.parse(cnmtData.slice(0, 0xC00));
+            const header = NCAHeader.parse(cnmtData);
             if (header && header.sectionTables && header.sectionTables[0]) {
                 const fsOffset = header.sectionTables[0].offset;
                 const fsSize = header.sectionTables[0].endOffset - header.sectionTables[0].offset;
