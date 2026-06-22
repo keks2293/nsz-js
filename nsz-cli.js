@@ -174,7 +174,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
     const partOffsets = [];
     for (const pm of partitionMetas) {
         const partSize = pm.raw ? pm.rawData.length : Math.max(PARTITION_HEADER_SIZE, pm.totalSize);
-        partOffsets.push({ name: pm.name, offsetInSection: currentDataPos, size: partSize });
+        partOffsets.push({ name: pm.name, offset: ROOT_DATA_SECTION + currentDataPos, size: partSize });
         currentDataPos += partSize;
     }
     const totalFileSize = ROOT_DATA_SECTION + currentDataPos;
