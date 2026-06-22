@@ -356,9 +356,10 @@ async function main() {
             addLog('info', `Processing ${i + 1}/${files.length}: ${file.name}`);
             progressTitle.textContent = file.name;
 
+            let outputName;
             try {
                 const fileType = detectFileType(file.name);
-                const outputName = fileType === 'xcz'
+                outputName = fileType === 'xcz'
                     ? file.name.replace(/\.xcz$/i, '.xci')
                     : file.name.replace(/\.nsz$/i, '.nsp');
 
@@ -450,6 +451,12 @@ async function main() {
                 accumulatedBytes += file.size;
             } catch (error) {
                 addLog('err', `Failed: ${error.message}`);
+                if (writable) {
+                    try { await writable.close(); } catch (_) {}
+                    if (directoryHandle && outputName) {
+                        try { await directoryHandle.removeEntry(outputName); } catch (_) {}
+                    }
+                }
                 fileStatus[i] = 'err';
                 updateFileList();
             }
