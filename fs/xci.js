@@ -56,10 +56,6 @@ export class XCIReader {
         return this.partitions;
     }
 
-    getSecurePartition() {
-        return this.partitions;
-    }
-
     async readPartitionFiles(partitionEntry) {
         const data = await this.reader.read(partitionEntry.offset, partitionEntry.size);
         return new HFS0Reader(data, partitionEntry.offset);
