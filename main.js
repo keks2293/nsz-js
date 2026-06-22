@@ -332,7 +332,7 @@ async function main() {
                 addLog('info', 'Saving to selected directory');
             } catch (e) {
                 if (e.name === 'AbortError') {
-                    addLog('err', 'Save location rejected');
+                    addLog('error', 'Save location rejected');
                     convertBtn.disabled = false;
                     return;
                 } else {
@@ -432,7 +432,7 @@ async function main() {
 
                 if (writable) {
                     await writable.close();
-                    addLog('ok', `${result.name} (${result.size ? formatBytes(result.size) : '?'})`);
+                    addLog('success', `${result.name} (${result.size ? formatBytes(result.size) : '?'})`);
                 } else {
                     const url = URL.createObjectURL(result.blob);
                     const a = document.createElement('a');
@@ -442,14 +442,14 @@ async function main() {
                     a.click();
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
-                    addLog('ok', `${result.name}`);
+                    addLog('success', `${result.name}`);
                 }
 
                 fileStatus[i] = 'ok';
                 updateFileList();
                 accumulatedBytes += file.size;
             } catch (error) {
-                addLog('err', `Failed: ${error.message}`);
+                addLog('error', `Failed: ${error.message}`);
                 if (writable) {
                     try { await writable.close(); } catch (_) {}
                     if (directoryHandle && outputName) {

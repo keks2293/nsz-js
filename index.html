@@ -717,7 +717,7 @@
 
     <script>
     window.addLog = function(type, msg) {
-        var cls = type === 'success' ? 'ok' : type === 'error' ? 'err' : type === 'warning' ? 'warn' : 'info';
+        var cls = type === 'success' ? 'ok' : type === 'error' ? 'err' : type === 'warn' ? 'warn' : 'info';
         var time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         var c = document.getElementById('logContainer');
         if (!c) return;
