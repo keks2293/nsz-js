@@ -357,13 +357,13 @@ async function main() {
             progressTitle.textContent = file.name;
 
             let outputName;
+            let writable = null;
             try {
                 const fileType = detectFileType(file.name);
                 outputName = fileType === 'xcz'
                     ? file.name.replace(/\.xcz$/i, '.xci')
                     : file.name.replace(/\.nsz$/i, '.nsp');
 
-                let writable = null;
                 if (downloadMode === 'blob') {
                 } else if (directoryHandle && downloadMode === 'fsa') {
                     try {
