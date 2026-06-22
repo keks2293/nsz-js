@@ -3,7 +3,7 @@
 import fs from 'fs';
 import crypto from 'crypto';
 import { PFS0, PFS0Writer } from './fs/pfs0.js';
-import { NCZDecompressor, FileDescriptorReader, BufferReader } from './fs/ncz.js';
+import { NCZDecompressor, FileDescriptorReader } from './fs/ncz.js';
 import { KeysParser } from './keys.js';
 import { HFS0Writer } from './fs/hfs0.js';
 
