@@ -1,8 +1,22 @@
+const BLOCK_SIZE = 0x10;
+
+function _checkAes128Key(key) {
+    if (key.length !== BLOCK_SIZE) throw new Error(`Key must be ${BLOCK_SIZE} bytes`);
+}
+
+function _padPartialBlock(block) {
+    const padLen = BLOCK_SIZE - block.length;
+    const padded = new Uint8Array(BLOCK_SIZE);
+    padded.set(block);
+    for (let i = block.length; i < BLOCK_SIZE; i++) padded[i] = padLen;
+    return padded;
+}
+
 class AESECB {
     constructor(key) {
-        this.key = key.slice(0, 16);
-        this.block_size = 16;
-        
+        _checkAes128Key(key);
+        this.key = key;
+
         this.rcon_table = [
             0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36,
             0x6c, 0xd8, 0xab, 0x4d, 0x9a, 0x2f, 0x5e, 0xbc, 0x63, 0xc6, 0x97,
@@ -63,7 +77,7 @@ class AESECB {
             0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d
         ];
 
-        this.keys = this.keySchedule(this.key);
+        this.keys = this.keySchedule(key);
     }
 
     keySchedule(key) {
@@ -100,33 +114,32 @@ class AESECB {
     encrypt(data) {
         if (data.length === 0) return new Uint8Array(0);
         const out = [];
-        const fullLen = data.length & ~15;
-        for (let i = 0; i < fullLen; i += 16) {
-            const block = new Uint8Array(16);
-            for (let j = 0; j < 16; j++) block[j] = data[i + j];
-            out.push(...this.encryptBlock(block));
+        const fullLen = data.length & ~(BLOCK_SIZE - 1);
+        for (let i = 0; i < fullLen; i += BLOCK_SIZE) {
+            const block = new Uint8Array(BLOCK_SIZE);
+            for (let j = 0; j < BLOCK_SIZE; j++) block[j] = data[i + j];
+            const encrypted = this.encryptBlock(block);
+            for (let j = 0; j < BLOCK_SIZE; j++) out.push(encrypted[j]);
         }
         if (fullLen !== data.length) {
-            const partial = new Uint8Array(16);
-            for (let j = 0; j < data.length - fullLen; j++) partial[j] = data[fullLen + j];
-            const padLen = 16 - (data.length - fullLen);
-            for (let j = data.length - fullLen; j < 16; j++) partial[j] = padLen;
-            out.push(...this.encryptBlock(partial));
+            const partial = data.slice(fullLen);
+            const encrypted = this.encryptBlock(_padPartialBlock(partial));
+            for (let j = 0; j < BLOCK_SIZE; j++) out.push(encrypted[j]);
         }
         return new Uint8Array(out);
     }
 
     decrypt(data) {
         if (data.length === 0) return new Uint8Array(0);
-        if (data.length % 16 !== 0) throw new Error('Data must be block-aligned');
-        const result = [];
-        for (let i = 0; i < data.length; i += 16) {
-            const block = new Uint8Array(16);
-            for (let j = 0; j < 16; j++) block[j] = data[i + j];
+        if (data.length % BLOCK_SIZE !== 0) throw new Error('Data must be block-aligned');
+        const out = [];
+        for (let i = 0; i < data.length; i += BLOCK_SIZE) {
+            const block = new Uint8Array(BLOCK_SIZE);
+            for (let j = 0; j < BLOCK_SIZE; j++) block[j] = data[i + j];
             const decrypted = this.decryptBlock(block);
-            for (let j = 0; j < 16; j++) result.push(decrypted[j]);
+            for (let j = 0; j < BLOCK_SIZE; j++) out.push(decrypted[j]);
         }
-        return new Uint8Array(result);
+        return new Uint8Array(out);
     }
 
     encryptBlock(block) {
@@ -168,19 +181,19 @@ class AESECB {
     }
 
     subBytes(state) {
-        for (let i = 0; i < 16; i++) {
+        for (let i = 0; i < BLOCK_SIZE; i++) {
             state[i] = this.sbox[state[i] & 0xff];
         }
     }
 
     invSubBytes(state) {
-        for (let i = 0; i < 16; i++) {
+        for (let i = 0; i < BLOCK_SIZE; i++) {
             state[i] = this.invSbox[state[i] & 0xff];
         }
     }
 
     shiftRows(state) {
-        const tmp = new Array(16);
+        const tmp = new Array(BLOCK_SIZE);
         for (let i = 0; i < 4; i++) {
             for (let j = 0; j < 4; j++) {
                 tmp[i * 4 + j] = state[j * 4 + i];
@@ -196,7 +209,7 @@ class AESECB {
     }
 
     invShiftRows(state) {
-        const tmp = new Array(16);
+        const tmp = new Array(BLOCK_SIZE);
         for (let i = 0; i < 4; i++) {
             for (let j = 0; j < 4; j++) {
                 tmp[i * 4 + j] = state[j * 4 + i];
@@ -251,68 +264,52 @@ class AESECB {
     }
 
     addRoundKey(state, expandedKey, offset) {
-        for (let i = 0; i < 16; i++) {
+        for (let i = 0; i < BLOCK_SIZE; i++) {
             const row = i % 4;
             const col = i >> 2;
             const keyByte = (expandedKey[offset + col] >> ((3 - row) * 8)) & 0xff;
             state[i] ^= keyByte;
         }
     }
-
-    padBlock(block) {
-        const padLen = 16 - block.length;
-        const padded = new Uint8Array(16);
-        padded.set(block);
-        for (let i = block.length; i < 16; i++) {
-            padded[i] = padLen;
-        }
-        return padded;
-    }
 }
 
 class AESCBC {
     constructor(key, iv) {
-        this.key = key.slice(0, 16);
-        this.iv = iv.slice(0, 16);
-        this.aes = new AESECB(this.key);
+        _checkAes128Key(key);
+        this.key = key;
+        this.iv = iv.slice(0, BLOCK_SIZE);
+        this.aes = new AESECB(key);
     }
 
     encrypt(data, iv = null) {
         if (!iv) iv = this.iv;
-        const result = [];
+        const out = [];
         const ivArr = Array.from(iv);
-        
-        for (let i = 0; i < data.length; i += 16) {
-            const block = new Uint8Array(16);
-            const blockLen = Math.min(16, data.length - i);
-            block.set(data.slice(i, i + blockLen));
-            
-            const xored = block.map((b, j) => b ^ ivArr[j]);
-            const encrypted = this.aes.encryptBlock(xored);
-            
-            result.push(...encrypted);
+        for (let i = 0; i < data.length; i += BLOCK_SIZE) {
+            const block = new Uint8Array(BLOCK_SIZE);
+            const blockLen = Math.min(BLOCK_SIZE, data.length - i);
+            for (let j = 0; j < blockLen; j++) block[j] = data[i + j];
+            for (let j = 0; j < BLOCK_SIZE; j++) block[j] ^= ivArr[j];
+            const encrypted = this.aes.encryptBlock(block);
+            out.push(...encrypted);
             ivArr.length = 0;
             ivArr.push(...encrypted);
         }
-        return new Uint8Array(result);
+        return new Uint8Array(out);
     }
 
     decrypt(data, iv = null) {
         if (!iv) iv = this.iv;
-        const result = [];
+        const out = [];
         const ivArr = Array.from(iv);
-        
-        for (let i = 0; i < data.length; i += 16) {
-            const block = data.slice(i, i + 16);
+        for (let i = 0; i < data.length; i += BLOCK_SIZE) {
+            const block = data.slice(i, i + BLOCK_SIZE);
             const decrypted = this.aes.decryptBlock(block);
-            
-            const xored = decrypted.map((b, j) => b ^ ivArr[j]);
-            result.push(...xored);
-            
+            for (let j = 0; j < BLOCK_SIZE; j++) out.push(decrypted[j] ^ ivArr[j]);
             ivArr.length = 0;
             ivArr.push(...block);
         }
-        return new Uint8Array(result);
+        return new Uint8Array(out);
     }
 }
 
