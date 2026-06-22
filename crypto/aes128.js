@@ -98,52 +98,34 @@ class AESECB {
     }
 
     encrypt(data) {
+        if (data.length === 0) return new Uint8Array(0);
         const out = [];
-        for (let i = 0; i < data.length; i += 16) {
+        const fullLen = data.length & ~15;
+        for (let i = 0; i < fullLen; i += 16) {
             const block = new Uint8Array(16);
-            for (let j = 0; j < 16 && i + j < data.length; j++) {
-                block[j] = data[i + j];
-            }
+            for (let j = 0; j < 16; j++) block[j] = data[i + j];
             out.push(...this.encryptBlock(block));
+        }
+        if (fullLen !== data.length) {
+            const partial = new Uint8Array(16);
+            for (let j = 0; j < data.length - fullLen; j++) partial[j] = data[fullLen + j];
+            const padLen = 16 - (data.length - fullLen);
+            for (let j = data.length - fullLen; j < 16; j++) partial[j] = padLen;
+            out.push(...this.encryptBlock(partial));
         }
         return new Uint8Array(out);
     }
 
     decrypt(data) {
         if (data.length === 0) return new Uint8Array(0);
-        
-        const blockCount = Math.ceil(data.length / 16);
+        if (data.length % 16 !== 0) throw new Error('Data must be block-aligned');
         const result = [];
-        
-        for (let i = 0; i < blockCount; i++) {
+        for (let i = 0; i < data.length; i += 16) {
             const block = new Uint8Array(16);
-            const offset = i * 16;
-            
-            for (let j = 0; j < 16 && offset + j < data.length; j++) {
-                block[j] = data[offset + j];
-            }
-            
+            for (let j = 0; j < 16; j++) block[j] = data[i + j];
             const decrypted = this.decryptBlock(block);
-            
-            const isLastBlock = i === blockCount - 1;
-            if (isLastBlock) {
-                const padLen = decrypted[15];
-                if (padLen > 0 && padLen <= 16) {
-                    for (let j = 0; j < 16 - padLen; j++) {
-                        result.push(decrypted[j]);
-                    }
-                } else {
-                    for (let j = 0; j < 16; j++) {
-                        result.push(decrypted[j]);
-                    }
-                }
-            } else {
-                for (let j = 0; j < 16; j++) {
-                    result.push(decrypted[j]);
-                }
-            }
+            for (let j = 0; j < 16; j++) result.push(decrypted[j]);
         }
-        
         return new Uint8Array(result);
     }
 
