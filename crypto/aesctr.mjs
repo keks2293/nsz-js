@@ -6,13 +6,16 @@
 const isNode = typeof process !== 'undefined' && process.versions?.node;
 
 let useNodeCrypto = false;
+let useWebCrypto = false;
 let nodeCrypto = null;
 
 if (isNode) {
     const cryptoModule = await import('crypto');
     nodeCrypto = cryptoModule.default || cryptoModule;
     useNodeCrypto = true;
-} else if (typeof crypto === 'undefined' || !crypto.subtle || typeof crypto.subtle.encrypt !== 'function') {
+} else if (typeof crypto !== 'undefined' && crypto.subtle && typeof crypto.subtle.encrypt === 'function') {
+    useWebCrypto = true;
+} else {
     throw new Error('Web Crypto API not available. Use a modern browser with HTTPS or localhost.');
 }
 
@@ -29,7 +32,6 @@ class AESCTR {
         this.nonce = nonce;
         if (useNodeCrypto) {
             this._cipher = null;
-            this._nextBlockIdx = -1;
         } else {
             this._cryptoKey = null;
         }
@@ -38,46 +40,39 @@ class AESCTR {
 
     seek(offset) {
         this.blockIndex = Math.floor(offset / BLOCK_SIZE);
-    }
-
-    async encrypt(data, offset = null) {
-        return await this._transform(data, offset);
-    }
-
-    async decrypt(data, offset = null) {
-        return await this._transform(data, offset);
-    }
-
-    async _transform(data, offset) {
         if (useNodeCrypto) {
-            return this._nodeTransform(data, offset);
-        }
-        return await this._webTransform(data, offset);
-    }
-
-    _nodeTransform(data, offset) {
-        let blockIdx;
-        if (offset !== null) {
-            blockIdx = Math.floor(offset / BLOCK_SIZE);
-        } else {
-            blockIdx = this.blockIndex;
-        }
-        if (!this._cipher || blockIdx !== this._nextBlockIdx) {
             const iv = new Uint8Array(BLOCK_SIZE);
             for (let j = 0; j < 8; j++) iv[j] = this.nonce[j];
-            let tmp = blockIdx;
+            let tmp = this.blockIndex;
             for (let j = BLOCK_SIZE - 1; j >= 8; j--) {
                 iv[j] = tmp & 0xff;
                 tmp >>>= 8;
             }
             this._cipher = nodeCrypto.createCipheriv('aes-128-ctr', this.key, iv);
         }
-        this._nextBlockIdx = blockIdx + Math.ceil(data.length / BLOCK_SIZE);
-        this.blockIndex = this._nextBlockIdx;
+    }
+
+    async encrypt(data) {
+        return await this._transform(data);
+    }
+
+    async decrypt(data) {
+        return await this._transform(data);
+    }
+
+    async _transform(data) {
+        if (useNodeCrypto) {
+            return this._nodeTransform(data);
+        }
+        return await this._webTransform(data);
+    }
+
+    _nodeTransform(data) {
+        this.blockIndex += Math.ceil(data.length / BLOCK_SIZE);
         return new Uint8Array(this._cipher.update(data));
     }
 
-    async _webTransform(data, offset) {
+    async _webTransform(data) {
         if (!this._cryptoKey) {
             this._cryptoKey = await crypto.subtle.importKey(
                 'raw', this.key,
@@ -85,16 +80,10 @@ class AESCTR {
                 false, ['encrypt']
             );
         }
-        let blockIdx;
-        if (offset !== null) {
-            blockIdx = Math.floor(offset / BLOCK_SIZE);
-        } else {
-            blockIdx = this.blockIndex;
-        }
         const counter = new Uint8Array(BLOCK_SIZE);
-            for (let j = 0; j < 8; j++) counter[j] = this.nonce[j];
-            let tmp = blockIdx;
-            for (let j = BLOCK_SIZE - 1; j >= 8; j--) {
+        for (let j = 0; j < 8; j++) counter[j] = this.nonce[j];
+        let tmp = this.blockIndex;
+        for (let j = BLOCK_SIZE - 1; j >= 8; j--) {
             counter[j] = tmp & 0xff;
             tmp >>>= 8;
         }
@@ -103,7 +92,7 @@ class AESCTR {
             this._cryptoKey,
             data
         );
-        this.blockIndex = blockIdx + Math.ceil(data.length / BLOCK_SIZE);
+        this.blockIndex += Math.ceil(data.length / BLOCK_SIZE);
         return new Uint8Array(result);
     }
 }
