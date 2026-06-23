@@ -17,7 +17,7 @@ if (isNode) {
 }
 
 class AESCTR {
-    constructor(key, nonce) {
+    constructor(key, nonce, offset = 0) {
         this.key = key.slice(0, 16);
         this.nonce = nonce.slice(0, 8);
         if (useNodeCrypto) {
@@ -26,6 +26,7 @@ class AESCTR {
         } else {
             this._cryptoKey = null;
         }
+        this.seek(offset);
     }
 
     seek(offset) {
