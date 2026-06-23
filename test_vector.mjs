@@ -15,7 +15,8 @@ console.log();
 
 (async () => {
 const aesctr = new AESCTR(key, nonce);
-const keystream = await aesctr.decrypt(new Uint8Array(48), offset);
+aesctr.seek(offset);
+const keystream = await aesctr.decrypt(new Uint8Array(48));
 
 console.log('Counter block (BE64):', '00000002000000000000000000002000');
 console.log('Keystream:');
