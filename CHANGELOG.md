@@ -1,5 +1,13 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-06-23)
+
+10. **Fix pure JS AESECB in `aes128.js`** — Three bugs fixed:
+    - `keySchedule()`: rcon lookup was off-by-one (`rcon_table[1]` used for round 1, should be `rcon_table[0]`). Fix: `rcon_table[Math.floor(i / constNk) - 1]`
+    - `rotateOp()`: used arithmetic `>> 24` which sign-extends when MSB ≥ 0x80, corrupting key schedule for keys with bit 31 set in any word. Fix: `>>> 24`
+    - `shiftRows()`/`invShiftRows()`: swapped rows 1&3 instead of rotating within each row. Fix: transpose then rotate via `state[j*4 + i] = tmp[i*4 + (j+i)%4]` (aes-js style)
+    Verified against NIST vectors and 100 random roundtrips match Node.js native AES.
+
 ## ✅ Recent Changes (2026-06-22)
 
 9. **Fix AESECB decrypt() PKCS7 unpadding bug** — `crypto/aes128.js:128-144` — `decrypt()` stripped PKCS7 padding from last block, but key derivation (`keys.js:65,68,71`) passes raw 16-byte blocks with no padding. If `decrypted[15]` fell in [1,16], the key was truncated. ~18% chance of wrong key per derivation. Fixed: removed PKCS7 unpadding (matches Python nsz `AESECB.decrypt()` which does raw AES-ECB). Added block alignment check (`data.length % 16 !== 0` throws). Also fixed `encrypt()` to use PKCS7 padding for partial blocks (matches Python nsz `_pad_partial_block()`).
