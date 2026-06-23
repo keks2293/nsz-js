@@ -16,10 +16,17 @@ if (isNode) {
     throw new Error('Web Crypto API not available. Use a modern browser with HTTPS or localhost.');
 }
 
+const BLOCK_SIZE = 0x10;
+
+function _checkAes128Key(key) {
+    if (key.length !== BLOCK_SIZE) throw new Error(`Key must be ${BLOCK_SIZE} bytes`);
+}
+
 class AESCTR {
     constructor(key, nonce, offset = 0) {
-        this.key = key.slice(0, 16);
-        this.nonce = nonce.slice(0, 8);
+        _checkAes128Key(key);
+        this.key = key;
+        this.nonce = nonce;
         if (useNodeCrypto) {
             this._cipher = null;
             this._nextBlockIdx = -1;
@@ -30,7 +37,7 @@ class AESCTR {
     }
 
     seek(offset) {
-        this.blockIndex = Math.floor(offset / 16);
+        this.blockIndex = Math.floor(offset / BLOCK_SIZE);
     }
 
     async encrypt(data, offset = null) {
@@ -51,21 +58,21 @@ class AESCTR {
     _nodeTransform(data, offset) {
         let blockIdx;
         if (offset !== null) {
-            blockIdx = Math.floor(offset / 16);
+            blockIdx = Math.floor(offset / BLOCK_SIZE);
         } else {
             blockIdx = this.blockIndex;
         }
         if (!this._cipher || blockIdx !== this._nextBlockIdx) {
-            const iv = new Uint8Array(16);
+            const iv = new Uint8Array(BLOCK_SIZE);
             for (let j = 0; j < 8; j++) iv[j] = this.nonce[j];
             let tmp = blockIdx;
-            for (let j = 15; j >= 8; j--) {
+            for (let j = BLOCK_SIZE - 1; j >= 8; j--) {
                 iv[j] = tmp & 0xff;
                 tmp >>>= 8;
             }
             this._cipher = nodeCrypto.createCipheriv('aes-128-ctr', this.key, iv);
         }
-        this._nextBlockIdx = blockIdx + Math.ceil(data.length / 16);
+        this._nextBlockIdx = blockIdx + Math.ceil(data.length / BLOCK_SIZE);
         this.blockIndex = this._nextBlockIdx;
         return new Uint8Array(this._cipher.update(data));
     }
@@ -80,14 +87,14 @@ class AESCTR {
         }
         let blockIdx;
         if (offset !== null) {
-            blockIdx = Math.floor(offset / 16);
+            blockIdx = Math.floor(offset / BLOCK_SIZE);
         } else {
             blockIdx = this.blockIndex;
         }
-        const counter = new Uint8Array(16);
-        for (let j = 0; j < 8; j++) counter[j] = this.nonce[j];
-        let tmp = blockIdx;
-        for (let j = 15; j >= 8; j--) {
+        const counter = new Uint8Array(BLOCK_SIZE);
+            for (let j = 0; j < 8; j++) counter[j] = this.nonce[j];
+            let tmp = blockIdx;
+            for (let j = BLOCK_SIZE - 1; j >= 8; j--) {
             counter[j] = tmp & 0xff;
             tmp >>>= 8;
         }
@@ -96,7 +103,7 @@ class AESCTR {
             this._cryptoKey,
             data
         );
-        this.blockIndex = blockIdx + Math.ceil(data.length / 16);
+        this.blockIndex = blockIdx + Math.ceil(data.length / BLOCK_SIZE);
         return new Uint8Array(result);
     }
 }
