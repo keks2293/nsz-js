@@ -92,7 +92,7 @@ class AESECB {
         for (let i = constNk; i < 4 * (constNr + 1); i++) {
             let temp = expanded[i - 1];
             if (i % constNk === 0) {
-                temp = this.subWord(this.rotateOp(temp)) ^ (this.rcon_table[Math.floor(i / constNk)] << 24);
+                temp = this.subWord(this.rotateOp(temp)) ^ (this.rcon_table[Math.floor(i / constNk) - 1] << 24);
             }
             expanded[i] = expanded[i - constNk] ^ temp;
         }
@@ -101,7 +101,7 @@ class AESECB {
     }
 
     rotateOp(word) {
-        return ((word & 0xffffff) << 8) | ((word & 0xff000000) >> 24);
+        return ((word & 0xffffff) << 8) | ((word & 0xff000000) >>> 24);
     }
 
     subWord(word) {
@@ -199,12 +199,10 @@ class AESECB {
                 tmp[i * 4 + j] = state[j * 4 + i];
             }
         }
-        for (let i = 1; i < 4; i++) {
-            const offset = (4 - i) * 4;
-            state[i * 4] = tmp[offset];
-            state[i * 4 + 1] = tmp[offset + 1];
-            state[i * 4 + 2] = tmp[offset + 2];
-            state[i * 4 + 3] = tmp[offset + 3];
+        for (let i = 0; i < 4; i++) {
+            for (let j = 0; j < 4; j++) {
+                state[j * 4 + i] = tmp[i * 4 + (j + i) % 4];
+            }
         }
     }
 
@@ -215,12 +213,10 @@ class AESECB {
                 tmp[i * 4 + j] = state[j * 4 + i];
             }
         }
-        for (let i = 1; i < 4; i++) {
-            const offset = i * 4;
-            state[i * 4] = tmp[offset];
-            state[i * 4 + 1] = tmp[offset + 1];
-            state[i * 4 + 2] = tmp[offset + 2];
-            state[i * 4 + 3] = tmp[offset + 3];
+        for (let i = 0; i < 4; i++) {
+            for (let j = 0; j < 4; j++) {
+                state[j * 4 + i] = tmp[i * 4 + (j - i + 4) % 4];
+            }
         }
     }
 
