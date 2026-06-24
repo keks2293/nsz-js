@@ -14,7 +14,7 @@ Prioritized areas for improvement identified 2026-05-30.
 
 5. ❌ **`AESCBC` class in `aes128.js` is unused** — `crypto/aes128.js:291-335`. Defined and exported, but no file imports it. Web Crypto API supports AES-CBC natively anyway. **Keeping as-is to match Python nsz (`nut/aes128.py` has the same dead code).**
 
-6. ⏳ **titlekek_source без fallback** — `converter.js` / `fs/ticket.js`. Python nsz searches both `titlekek_source` and `titlekek` keys when crypto type is `Titlekek`; JS code only checks `titlekek`. Can cause decryption failures with keys files that use `titlekek_source` naming.
+6. ✅ **titlekek_source без fallback** — `keys.js:35`. Python nsz searches both `titlekek_source` and `titlekek` keys; JS code only checked `titlekek_source`. Fixed: falls back to `keys.titlekek` if `keys.titlekek_source` is absent, with explicit error if neither is found.
 
 7. ⏳ **NCZ hash сравнение только 8 байт** — `converter.js:verifyHash`. SHA-256 хеш сравнивается только по первым 8 байтам вместо полных 32. Увеличивает риск коллизии — нужно сравнивать все 32 байта.
 
