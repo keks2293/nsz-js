@@ -31,7 +31,7 @@ Prioritized areas for improvement identified 2026-05-30.
 
 7. ❌ **Missing NACP parser** — `fs/ticket.js` has NCA/CNMT/Ticket but no NACP. Python nsz has one; needed for game metadata extraction. **Not needed for NSZ→NSP conversion** — NACP stays inside NCA and is preserved in output NSP. Only useful for `--info` style features.
 
-9. ⏳ **Ненадёжная проверка magic bytes** — `fs/nca.js`. Используется `view.getUint8(4)` вместо полноценной проверки всех 4 байт magic. Может давать ложные срабатывания.
+9. ❌ **Ненадёжная проверка magic bytes** — `fs/nca.js`. Bug report claimed `view.getUint8(4)` is used. **Not a bug**: code reads 4 bytes at `0x200-0x203` via `String.fromCharCode(buffer[0x200], buffer[0x201], buffer[0x202], buffer[0x203])` and compares against `'NCA3'`/`'NCA2'`. No single-byte check exists in this file.
 
 
 ## Polish
