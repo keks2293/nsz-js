@@ -192,7 +192,8 @@ All decompression paths (streaming, memory, block) use a unified `writeChunk` ca
 
 ### Hash verification
 
-`verifyHash(hash, name, fileHashes)` is the single verification entry point:
+`verifyHash(hash, name, fileHashes, onLog)` is the single verification entry point:
+- Standalone function (not a class method — follows `class-methods-use-this`)
+- `onLog` passed explicitly for logging success/error
 - `.nca` check is at call sites (matching Python nsz structure)
-- Explicit `fileHashes` parameter (no closure fallback)
 - Throws on mismatch (matching Python nsz `VerificationException`)
