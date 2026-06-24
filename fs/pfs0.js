@@ -44,8 +44,7 @@ class PFS0 {
             this.files.push({
                 name,
                 offset: absOffset,
-                size,
-                data: this._data.slice(absOffset, absOffset + size)
+                size
             });
         }
 
