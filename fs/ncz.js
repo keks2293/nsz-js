@@ -1,5 +1,5 @@
 import { ZstdDecompressor } from '../crypto/zstd.js';
-import { AESCTR } from '../crypto/aesctr.mjs';
+import { AesCtr } from '../crypto/aesctr.mjs';
 
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
 const SECTION_CHUNK_SIZE = 0x1000000; // 16MB
@@ -314,7 +314,7 @@ class NCZDecompressor {
 
             let aesCtr = null;
             if (section.cryptoType === 3 || section.cryptoType === 4) {
-                aesCtr = new AESCTR(section.cryptoKey, section.cryptoCounter);
+                aesCtr = new AesCtr(section.cryptoKey, section.cryptoCounter);
                 aesCtr.seek(i);
             }
 
@@ -347,7 +347,7 @@ class NCZDecompressor {
         const sectionAesCtrs = new Map();
         for (const s of sortedSections) {
             if (s.cryptoType === 3 || s.cryptoType === 4) {
-                sectionAesCtrs.set(s, new AESCTR(s.cryptoKey, s.cryptoCounter));
+                sectionAesCtrs.set(s, new AesCtr(s.cryptoKey, s.cryptoCounter));
             }
         }
         if (typeof process !== 'undefined' && process.versions && process.versions.node) {
