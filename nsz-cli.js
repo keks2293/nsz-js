@@ -271,10 +271,7 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
     const outPath = outputPath || inputPath.replace(/\.nsz$/i, '.nsp');
     console.log(`Output: ${outPath}`);
 
-    // Read PFS0 header (first 4MB)
-    const headerBuf = Buffer.alloc(1024 * 1024);
-    fs.readSync(inputFd, headerBuf, 0, headerBuf.length, 0);
-    const pfs0Reader = new PFS0(headerBuf);
+    const pfs0Reader = await PFS0.open(inReader);
     const files = pfs0Reader.getFiles();
     console.log(`PFS0 files: ${files.length}`);
 
