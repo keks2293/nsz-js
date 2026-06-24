@@ -6,7 +6,7 @@ Prioritized areas for improvement identified 2026-05-30.
 
 1. ✅ **HFS0 header building duplicated 6x** — `converter.js:339-375,504-570`, `nsz-cli.js:184-274`, `fs/xci.js:76-141`. `HFS0Writer` class exists but is unused by converter/CLI. Any HFS0 bug needs fixing in 6 places. Refactor to use `HFS0Writer` consistently.
 
-2. ✅ **Verification logic duplicated** — `converter.js:132-162` vs `192-221`. Extracted to shared `verifyHash` method. Aligned with Python nsz verification behavior.
+2. ✅ **Verification logic duplicated + undefined in XCZ** — `converter.js` had duplicate `verifyHash` (defined inside `decompressNSZtoNSP` but not `decompressXCZtoXCI`), plus dead top-level function referencing undefined `onLog`. Fixed: single standalone `verifyHash(hash, name, fileHashes, onLog)` at module level. Follows ESLint `class-methods-use-this`.
 
 3. ❌ **Ad script in HTML blocks page load** — `index.html:4`. External ad `<script>` injected before `<title>`. Slows rendering if CDN is slow/down. **Not a problem.**
 
