@@ -1,16 +1,20 @@
 class PFS0 {
     constructor(data) {
-        if (data instanceof Uint8Array) {
-            this._data = data;
-        } else if (data instanceof ArrayBuffer) {
-            this._data = new Uint8Array(data);
-        } else {
-            this._data = new Uint8Array(data);
-        }
+        this._data = new Uint8Array(data);
         this._view = new DataView(this._data.buffer, this._data.byteOffset, this._data.byteLength);
         this.files = [];
         this.headerSize = 0;
         this._parse();
+    }
+
+    static async open(reader) {
+        const head = new Uint8Array(await reader.read(0, 16));
+        const view = new DataView(head.buffer, head.byteOffset, head.byteLength);
+        const fileCount = view.getUint32(4, true);
+        const stringTableSize = view.getUint32(8, true);
+        const headerSize = 0x10 + fileCount * 0x18 + stringTableSize;
+        const buf = new Uint8Array(await reader.read(0, headerSize));
+        return new PFS0(buf);
     }
 
     _parse() {
