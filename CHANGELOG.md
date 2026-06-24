@@ -12,6 +12,8 @@
 
 1. **Extract `verifyHash` to standalone function** — `verifyHash` was defined inside `decompressNSZtoNSP` (line 92-101) but not in `decompressXCZtoXCI` (line 277). When `verify=true` was passed to XCZ conversion, all 4 call sites threw `ReferenceError: verifyHash is not defined`, crashing the conversion. Also: dead top-level `verifyHash` referenced undefined `onLog`. Fixed: single standalone `verifyHash(hash, name, fileHashes, onLog)` at module level. Follows ESLint `class-methods-use-this`.
 
+2. **titlekek_source fallback in keys.js** — `keys.js:35` required `titlekek_source` key to be present; missing key caused silent failure (empty Uint8Array → wrong derived keys). Added fallback to `keys.titlekek` if `titlekek_source` is absent, with explicit error if neither is found.
+
 ## ✅ Recent Changes (2026-06-22)
 
 9. **Fix AESECB decrypt() PKCS7 unpadding bug** — `crypto/aes128.js:128-144` — `decrypt()` stripped PKCS7 padding from last block, but key derivation (`keys.js:65,68,71`) passes raw 16-byte blocks with no padding. If `decrypted[15]` fell in [1,16], the key was truncated. ~18% chance of wrong key per derivation. Fixed: removed PKCS7 unpadding (matches Python nsz `AESECB.decrypt()` which does raw AES-ECB). Added block alignment check (`data.length % 16 !== 0` throws). Also fixed `encrypt()` to use PKCS7 padding for partial blocks (matches Python nsz `_pad_partial_block()`).

@@ -32,7 +32,9 @@ class KeysParser {
             if (keys[keyName]) {
                 try {
                     const masterKey = this.hexToBytes(keys[keyName]);
-                    const titlekekSource = this.hexToBytes(keys.titlekek_source);
+                    const titlekekSourceHex = keys.titlekek_source || keys.titlekek;
+                    if (!titlekekSourceHex) throw new Error('Missing titlekek_source in keys file');
+                    const titlekekSource = this.hexToBytes(titlekekSourceHex);
 
                     const dec = new Uint8Array(16);
                     for (let j = 0; j < 16; j++) {
