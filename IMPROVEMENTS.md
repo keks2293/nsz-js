@@ -14,6 +14,12 @@ Prioritized areas for improvement identified 2026-05-30.
 
 5. ❌ **`AESCBC` class in `aes128.js` is unused** — `crypto/aes128.js:291-335`. Defined and exported, but no file imports it. Web Crypto API supports AES-CBC natively anyway. **Keeping as-is to match Python nsz (`nut/aes128.py` has the same dead code).**
 
+6. ⏳ **titlekek_source без fallback** — `converter.js` / `fs/ticket.js`. Python nsz searches both `titlekek_source` and `titlekek` keys when crypto type is `Titlekek`; JS code only checks `titlekek`. Can cause decryption failures with keys files that use `titlekek_source` naming.
+
+7. ⏳ **NCZ hash сравнение только 8 байт** — `converter.js:verifyHash`. SHA-256 хеш сравнивается только по первым 8 байтам вместо полных 32. Увеличивает риск коллизии — нужно сравнивать все 32 байта.
+
+8. ⏳ **Нет финального flush zstd** — `fs/ncz.js:_decompressStream`. После всех блоков zstd декодеру не делается flush, что может оставить остаточные данные в буфере декомпрессора. Python nsz вызывает `ZSTD_endStream` / flush после чтения всех блоков.
+
 ## Medium Impact
 
 15. ⏳ **Duplicated XCZ→XCI logic between converter.js and nsz-cli.js** — ~124 lines of identical algorithm (partition iteration, HFS0 building, NCZ decompression, hash verification) reimplemented with different I/O APIs. Core logic should be extracted into a shared module with Reader/Writer/Hasher abstractions (Ports & Adapters). Browser and CLI each provide platform-specific adapters (`WritableStream`/`fs.writeSync`, `SHA256`/`crypto.createHash`). CLI could also switch to sequential writes (`wb+`, seek-back for headers) for cleaner code matching Python nsz, but this doesn't enable sharing with browser (FSA requires absolute positions).
@@ -25,6 +31,9 @@ Prioritized areas for improvement identified 2026-05-30.
 
 7. ❌ **Missing NACP parser** — `fs/ticket.js` has NCA/CNMT/Ticket but no NACP. Python nsz has one; needed for game metadata extraction. **Not needed for NSZ→NSP conversion** — NACP stays inside NCA and is preserved in output NSP. Only useful for `--info` style features.
 
+9. ⏳ **Ненадёжная проверка magic bytes** — `fs/nca.js`. Используется `view.getUint8(4)` вместо полноценной проверки всех 4 байт magic. Может давать ложные срабатывания.
+
+
 ## Polish
 
 8. ❌ **No CI setup** — Not needed for this project.
@@ -32,6 +41,8 @@ Prioritized areas for improvement identified 2026-05-30.
 9. ❌ **SW `writable.close()` error handling** — Not needed. Browser handles failed downloads gracefully. No way to determine appropriate timeout value without profiling.
 
 10. ✅ **UI redesign** — `site-v2.md` suggests a redesign may be planned.
+
+11. ⏳ **Мёртвое поле hfs0Data** — `converter.js`. Поле `hfs0Data` объявлено, но никогда не читается. Мёртвый код, можно удалить.
 
 ## Speed Optimization
 
@@ -56,3 +67,5 @@ Prioritized areas for improvement identified 2026-05-30.
 - ❌ **SW download behavior**: Wanted the same UX as FSA mode: first show a folder picker, then download to the chosen location. This is impossible with SW — SW always saves to browser Downloads folder. Save As dialog is controlled by browser settings, not by SW code — no API exists to show it programmatically. [Chrome setting: chrome://settings/downloads → "Ask where to save each file before downloading"](chrome://settings/downloads).
 
 - ✅ **Lazy SW registration on first use in convert handler (`main.js`)** — SW no longer registers at DOMContentLoaded. Registration happens only when convert is triggered in SW or FSA mode, guarded by `window._swRegistered` flag.
+
+- ❌ **_decompressStream gap for first section** — Bug report claimed `_decompressStream` doesn't account for gap between `UNCOMPRESSABLE_HEADER_SIZE` (0x4000) and first real section. **Not a bug**: `getSections()` already inserts a `FakeSection` when `sections[0].offset > UNCOMPRESSABLE_HEADER_SIZE`, and `_processStreamDecompressedChunk` uses section-aware positioning for every decompressed byte with correct `ncaPos` tracking. Python nsz's approach (raw offset arithmetic) is equivalent.
