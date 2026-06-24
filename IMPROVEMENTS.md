@@ -16,7 +16,7 @@ Prioritized areas for improvement identified 2026-05-30.
 
 6. ✅ **titlekek_source без fallback** — `keys.js:35`. Python nsz searches both `titlekek_source` and `titlekek` keys; JS code only checked `titlekek_source`. Fixed: falls back to `keys.titlekek` if `keys.titlekek_source` is absent, with explicit error if neither is found.
 
-7. ⏳ **NCZ hash сравнение только 8 байт** — `converter.js:verifyHash`. SHA-256 хеш сравнивается только по первым 8 байтам вместо полных 32. Увеличивает риск коллизии — нужно сравнивать все 32 байта.
+7. ❌ **NCZ hash сравнение** — `converter.js:249,265`. Bug report claimed 8-byte comparison. **Not a bug**: code uses `hash.substring(0, 32)` = 32 hex chars (16 bytes). NCZ filename convention (`NSZ-FORMAT-ANALYSIS.md:286`) stores `hexHash[:32]` = first 32 hex chars of SHA-256. Full 64-char comparison is impossible with filename-based verification — limited by format spec, not implementation.
 
 8. ⏳ **Нет финального flush zstd** — `fs/ncz.js:_decompressStream`. После всех блоков zstd декодеру не делается flush, что может оставить остаточные данные в буфере декомпрессора. Python nsz вызывает `ZSTD_endStream` / flush после чтения всех блоков.
 
