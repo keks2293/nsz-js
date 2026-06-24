@@ -7,6 +7,17 @@ import { NCZDecompressor, FileDescriptorReader } from './fs/ncz.js';
 import { KeysParser } from './keys.js';
 import { HFS0Writer } from './fs/hfs0.js';
 
+function verifyHash(hash, name, fileHashes) {
+    if (fileHashes.size > 0) {
+        if (fileHashes.has(hash)) {
+            console.log(`  [VERIFIED]   ${name} ${hash}`);
+        } else {
+            console.log(`  [CORRUPTED]  ${name} ${hash}`);
+            throw new Error(`Verification detected hash mismatch: ${name}`);
+        }
+    }
+}
+
 function formatBytes(bytes) {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -226,13 +237,8 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
                     });
                     const hash = hasher.digest('hex');
                     console.log(`  SHA256: ${hash}`);
-                    if (m.name.endsWith('.nca') && !m.name.endsWith('.cnmt.nca') && pm.cnmtHashes.size > 0) {
-                        if (pm.cnmtHashes.has(hash)) {
-                            console.log(`  [VERIFIED]   ${m.name} ${hash}`);
-                        } else {
-                            console.log(`  [CORRUPTED]  ${m.name} ${hash}`);
-                            throw new Error(`Verification detected hash mismatch: ${m.name}`);
-                        }
+                    if (m.name.endsWith('.nca') && !m.name.endsWith('.cnmt.nca')) {
+                        verifyHash(hash, m.name, pm.cnmtHashes);
                     }
                 } else {
                     console.log(`Copying: ${pm.name}/${m.inputName} -> ${m.name}`);
@@ -241,13 +247,8 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
                     const hash = crypto.createHash('sha256').update(buf).digest('hex');
                     console.log(`  SHA256: ${hash}`);
                     fs.writeSync(outputFd, buf, 0, m.size, writePos);
-                    if (m.name.endsWith('.nca') && !m.name.endsWith('.cnmt.nca') && pm.cnmtHashes.size > 0) {
-                        if (pm.cnmtHashes.has(hash)) {
-                            console.log(`  [VERIFIED]   ${m.name} ${hash}`);
-                        } else {
-                            console.log(`  [CORRUPTED]  ${m.name} ${hash}`);
-                            throw new Error(`Verification detected hash mismatch: ${m.name}`);
-                        }
+                    if (m.name.endsWith('.nca') && !m.name.endsWith('.cnmt.nca')) {
+                        verifyHash(hash, m.name, pm.cnmtHashes);
                     }
                 }
                 writePos += m.size;
