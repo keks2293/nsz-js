@@ -42,7 +42,7 @@ Prioritized areas for improvement identified 2026-05-30.
 
 10. ✅ **UI redesign** — `site-v2.md` suggests a redesign may be planned.
 
-11. ⏳ **Мёртвое поле hfs0Data** — `converter.js`. Поле `hfs0Data` объявлено, но никогда не читается. Мёртвый код, можно удалить.
+11. ✅ **Мёртвое поле hfs0Data** — `nsz-cli.js:129,139`. Поле `hfs0Data: null` в partitionMetas никогда не читалось — осталось от рефакторинга на HFS0Writer. Удалено.
 
 ## Speed Optimization
 
