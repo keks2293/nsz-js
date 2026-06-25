@@ -16,6 +16,15 @@
 
 3. **PFS0.open(reader) static factory** — `fs/pfs0.js`. Added `PFS0.open(reader)` static method that probes 16 bytes, reads exact header size, and creates PFS0 instance. Updated `converter.js` and `nsz-cli.js` to use `PFS0.open(reader)` instead of 1MB buffer reads. Matches Python nsz `Pfs0.open()` — reader-based, no fixed buffer size.
 
+4. **AESCTR async→sync in Node.js** — `crypto/aesctr.mjs`. `encrypt()`/`decrypt()` were `async` even though `_nodeTransform()` is sync. Hot loop (`ncz.js:333,436`) created 2 microtask ticks per call. Fixed: sync in Node.js + pure JS fallback, async only for WebCrypto. ~2ms saved on 212MB file (within noise, not bottleneck).
+
+### Performance Benchmarks (Trackline Express, 212MB NCA, 10 runs)
+| Test | Result |
+|---|---|
+| AESCTR async→sync (b5701fe vs HEAD) | 447.6ms vs 445.5ms — ~2ms, within noise |
+| PFS0: old 1MB readSync vs new PFS0.open | 0.20ms vs 0.26ms — negligible |
+| ZSTD: CLI vs WASM in Node.js | 417.8ms vs 590.6ms — CLI 41% faster (native C++) |
+
 ## ✅ Recent Changes (2026-06-22)
 
 9. **Fix AESECB decrypt() PKCS7 unpadding bug** — `crypto/aes128.js:128-144` — `decrypt()` stripped PKCS7 padding from last block, but key derivation (`keys.js:65,68,71`) passes raw 16-byte blocks with no padding. If `decrypted[15]` fell in [1,16], the key was truncated. ~18% chance of wrong key per derivation. Fixed: removed PKCS7 unpadding (matches Python nsz `AESECB.decrypt()` which does raw AES-ECB). Added block alignment check (`data.length % 16 !== 0` throws). Also fixed `encrypt()` to use PKCS7 padding for partial blocks (matches Python nsz `_pad_partial_block()`).
