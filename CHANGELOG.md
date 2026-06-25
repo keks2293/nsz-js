@@ -8,6 +8,12 @@
     - `shiftRows()`/`invShiftRows()`: swapped rows 1&3 instead of rotating within each row. Fix: transpose then rotate via `state[j*4 + i] = tmp[i*4 + (j+i)%4]` (aes-js style)
     Verified against NIST vectors and 100 random roundtrips match Node.js native AES.
 
+## ✅ Recent Changes (2026-06-25)
+
+5. **Remove dead ArrayBuffer branch from PFS0 constructor** — `fs/pfs0.js:2-9`. Constructor had 3 branches: `Uint8Array` (no copy), `ArrayBuffer` (wrap), else (`new Uint8Array`). `ArrayBuffer` branch never called — all callers pass `Uint8Array` or `Buffer`. Simplified to `this._data = new Uint8Array(data)`.
+
+6. **Remove dead `hfs0Data` field from nsz-cli partitionMetas** — `nsz-cli.js:129,139`. `hfs0Data: null` was set in partition metadata objects but never read. Left over from pre-HFS0Writer refactoring when CLI built HFS0 in memory. Still alive in `converter.js` (local variable, used for XCI build).
+
 ## ✅ Recent Changes (2026-06-24)
 
 1. **Extract `verifyHash` to standalone function** — `verifyHash` was defined inside `decompressNSZtoNSP` (line 92-101) but not in `decompressXCZtoXCI` (line 277). When `verify=true` was passed to XCZ conversion, all 4 call sites threw `ReferenceError: verifyHash is not defined`, crashing the conversion. Also: dead top-level `verifyHash` referenced undefined `onLog`. Fixed: single standalone `verifyHash(hash, name, fileHashes, onLog)` at module level. Follows ESLint `class-methods-use-this`.
