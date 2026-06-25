@@ -18,6 +18,16 @@ function verifyHash(hash, name, fileHashes) {
     }
 }
 
+function verifyFileNameHash(hash, nczName, ncaName) {
+    const fileNameHash = nczName.replace(/\.[^.]+$/, '').toLowerCase().slice(0, 32);
+    if (hash.slice(0, 32) === fileNameHash) {
+        console.log(`  [VERIFIED]   ${ncaName} ${hash}`);
+    } else {
+        console.log(`  [MISMATCH]   Filename starts with ${fileNameHash} but ${hash.slice(0, 32)} was expected`);
+        throw new Error(`Verification detected hash mismatch: ${ncaName}`);
+    }
+}
+
 function formatBytes(bytes) {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -238,7 +248,11 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
                     const hash = hasher.digest('hex');
                     console.log(`  SHA256: ${hash}`);
                     if (m.name.endsWith('.nca') && !m.name.endsWith('.cnmt.nca')) {
-                        verifyHash(hash, m.name, pm.cnmtHashes);
+                        if (pm.cnmtHashes.size > 0) {
+                            verifyHash(hash, m.name, pm.cnmtHashes);
+                        } else {
+                            verifyFileNameHash(hash, m.inputName, m.name);
+                        }
                     }
                 } else {
                     console.log(`Copying: ${pm.name}/${m.inputName} -> ${m.name}`);
@@ -248,7 +262,11 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
                     console.log(`  SHA256: ${hash}`);
                     fs.writeSync(outputFd, buf, 0, m.size, writePos);
                     if (m.name.endsWith('.nca') && !m.name.endsWith('.cnmt.nca')) {
-                        verifyHash(hash, m.name, pm.cnmtHashes);
+                        if (pm.cnmtHashes.size > 0) {
+                            verifyHash(hash, m.name, pm.cnmtHashes);
+                        } else {
+                            verifyFileNameHash(hash, m.inputName, m.name);
+                        }
                     }
                 }
                 writePos += m.size;
@@ -274,6 +292,21 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
     const pfs0Reader = await PFS0.open(inReader);
     const files = pfs0Reader.getFiles();
     console.log(`PFS0 files: ${files.length}`);
+
+    // Collect CNMT hashes for verification
+    const cnmtHashes = new Set();
+    const cnmtFiles = files.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
+    if (cnmtFiles.length > 0) {
+        const { NSZConverter } = await import('./converter.js');
+        const converter = new NSZConverter();
+        for (const cnmtFile of cnmtFiles) {
+            const cnmtData = Buffer.alloc(cnmtFile.size);
+            fs.readSync(inputFd, cnmtData, 0, cnmtFile.size, cnmtFile.offset);
+            const hashes = await converter.extractCnmtHashes(cnmtData);
+            hashes.forEach(h => cnmtHashes.add(h));
+        }
+        console.log(`  Found ${cnmtHashes.size} expected NCA hashes from CNMT`);
+    }
 
     // First pass: determine output sizes
     const outputMeta = [];
@@ -317,6 +350,13 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
                 });
                 const hash = hasher.digest('hex');
                 console.log(`  SHA256: ${hash}`);
+                if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                    if (cnmtHashes.size > 0) {
+                        verifyHash(hash, meta.name, cnmtHashes);
+                    } else {
+                        verifyFileNameHash(hash, f.name, meta.name);
+                    }
+                }
                 console.log(`  Size: ${meta.size} bytes`);
             } else {
                 console.log(`Copying: ${f.name} -> ${meta.name}`);
@@ -324,6 +364,13 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
                 fs.readSync(inputFd, buf, 0, f.size, f.offset);
                 const hash = crypto.createHash('sha256').update(buf).digest('hex');
                 console.log(`  SHA256: ${hash}`);
+                if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                    if (cnmtHashes.size > 0) {
+                        verifyHash(hash, meta.name, cnmtHashes);
+                    } else {
+                        verifyFileNameHash(hash, f.name, meta.name);
+                    }
+                }
                 fs.writeSync(outputFd, buf, 0, f.size, absWritePos);
             }
         }
