@@ -126,7 +126,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
     const partitionMetas = [];
     for (const partition of partitions) {
         if (partition.size === 0) {
-            partitionMetas.push({ name: partition.name, files: [], totalSize: 0, hfs0Data: null, cnmtHashes: new Set() });
+            partitionMetas.push({ name: partition.name, files: [], totalSize: 0, cnmtHashes: new Set() });
             continue;
         }
         let hfs0;
@@ -136,7 +136,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
             console.log(`  ${partition.name}: cannot parse as HFS0, copying raw (${e.message})`);
             const buf = Buffer.alloc(partition.size);
             fs.readSync(inputFd, buf, 0, partition.size, partition.offset);
-            partitionMetas.push({ name: partition.name, raw: true, rawData: buf, files: [], totalSize: partition.size, hfs0Data: null, cnmtHashes: new Set() });
+            partitionMetas.push({ name: partition.name, raw: true, rawData: buf, files: [], totalSize: partition.size, cnmtHashes: new Set() });
             continue;
         }
         const pFiles = hfs0.getFiles();
