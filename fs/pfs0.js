@@ -28,7 +28,6 @@ class PFS0 {
         this.headerSize = 0x10 + fileCount * 0x18 + stringTableSize;
 
         const stringTableOffset = 0x10 + fileCount * 0x18;
-        const stringTable = this._data.slice(stringTableOffset, stringTableOffset + stringTableSize);
 
         let stringEndOffset = stringTableSize;
 
@@ -39,8 +38,8 @@ class PFS0 {
             const nameOffset = this._view.getUint32(entryOffset + 16, true);
 
             let name = '';
-            for (let j = nameOffset; j < stringEndOffset && j < stringTable.length && stringTable[j] !== 0; j++) {
-                name += String.fromCharCode(stringTable[j]);
+            for (let j = nameOffset; j < stringEndOffset && j < stringTableSize && this._data[stringTableOffset + j] !== 0; j++) {
+                name += String.fromCharCode(this._data[stringTableOffset + j]);
             }
             stringEndOffset = nameOffset;
 
