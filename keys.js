@@ -1,4 +1,4 @@
-import { AESECB } from './crypto/aes128.js';
+import { AesEcb } from './crypto/aes128.js';
 
 class KeysParser {
     static parse(keyText) {
@@ -63,13 +63,13 @@ class KeysParser {
         const kekSeed = this.hexToBytes(this.getKeyOrDefault(keys, 'aes_kek_generation_source', '4d870986c45d20722fba1053da92e8a9'));
         const keySeed = this.hexToBytes(this.getKeyOrDefault(keys, 'aes_key_generation_source', '89615ee05c31b6805fe58f3da24f7aa8'));
         
-        const aes = new AESECB(masterKey);
+        const aes = new AesEcb(masterKey);
         const kek = aes.decrypt(kekSeed);
         
-        const aes2 = new AESECB(kek);
+        const aes2 = new AesEcb(kek);
         const srcKek = aes2.decrypt(sourceKey);
         
-        const aes3 = new AESECB(srcKek);
+        const aes3 = new AesEcb(srcKek);
         const result = aes3.decrypt(keySeed);
         
         return this.bytesToHex(result);
