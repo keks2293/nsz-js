@@ -6,7 +6,7 @@
 
 import fs from 'fs';
 import { NCZDecompressor } from './fs/ncz.js';
-import { AESCTR } from './crypto/aesctr.mjs';
+import { AesCtr } from './crypto/aesctr.mjs';
 import { ZstdDecompressor } from './crypto/zstd.js';
 import { PFS0 } from './fs/pfs0.js';
 import { KeysParser } from './keys.js';
@@ -53,12 +53,12 @@ function assertBuffersEqual(a, b, message) {
     passed++;
 }
 
-async function testAESCTR() {
+async function testAesCtr() {
     console.log('\n=== AES-CTR Tests ===');
     
     const key = new Uint8Array(Buffer.from('c0f2ce05ba73bcf5777f58f94e919b01', 'hex'));
     const nonce = new Uint8Array(Buffer.from('00000002000000020000000000000000', 'hex'));
-    const aesCtr = new AESCTR(key, nonce);
+    const aesCtr = new AesCtr(key, nonce);
     aesCtr.seek(0x4000);
     
     const testData = new Uint8Array([0x28, 0xB5, 0x2F, 0xFD]); // zstd magic
@@ -184,7 +184,7 @@ async function testZstdDecompression() {
 async function runAllTests() {
     console.log('=== Running NCZ Decompressor Tests ===');
     
-    await testAESCTR();
+    await testAesCtr();
     await testNCZParsing();
     await testNCZDecompression();
     await testZstdDecompression();

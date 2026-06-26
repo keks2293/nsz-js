@@ -14,8 +14,8 @@
     <h1>AES-CTR Tests</h1>
     <div id="output"></div>
     <script type="module">
-        // Import production AESCTR
-        const { AESCTR } = await import('./crypto/aesctr.mjs');
+        // Import production AesCtr
+        const { AesCtr } = await import('./crypto/aesctr.mjs');
 
         const output = document.getElementById('output');
         let total = 0, passed = 0;
@@ -43,7 +43,7 @@
             return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
         }
 
-        // Test 1: AES-CTR keystream (first block) using production AESCTR
+        // Test 1: AES-CTR keystream (first block) using production AesCtr
         output.innerHTML += '<div class="section"><h2>Test 1: AES-CTR keystream (first block)</h2>';
         const ctrKey = new Uint8Array([0x3c,0x83,0x58,0xe3,0x7c,0x54,0xac,0xa5,0xbb,0x20,0xfc,0x36,0x74,0x1c,0x17,0x27]);
         const nonce = new Uint8Array([0x00,0x00,0x00,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00]);
@@ -53,13 +53,13 @@
         log(`Nonce: ${hex(nonce)}`);
         log(`Offset: ${offset} (0x${offset.toString(16)}), BlockIdx: ${blockIndex}`);
 
-        const aesCtr = new AESCTR(ctrKey, nonce);
+        const aesCtr = new AesCtr(ctrKey, nonce);
         aesCtr.seek(offset);
         const firstBlock = aesCtr.decrypt(new Uint8Array(16));
         log(`Keystream block: ${hex(firstBlock)}`);
         check('First block', hex(firstBlock), 'e95fed2b7d0afca982d145a0ddea1c84');
 
-        // Test 2: Full CTR mode (48 bytes) using production AESCTR
+        // Test 2: Full CTR mode (48 bytes) using production AesCtr
         output.innerHTML += '<div class="section"><h2>Test 2: Full CTR mode (48 bytes)</h2>';
         aesCtr.seek(offset);
         const fullKeystream = aesCtr.decrypt(new Uint8Array(48));
