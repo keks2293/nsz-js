@@ -22,7 +22,7 @@ function rotr(x, n) {
 }
 
 function transform(h, block) {
-    const w = new Array(64);
+    const w = new Uint32Array(64);
     for (let i = 0; i < 16; i++) {
         const off = i * 4;
         w[i] = (block[off] << 24) | (block[off + 1] << 16) |
@@ -50,18 +50,18 @@ function transform(h, block) {
         a = (temp1 + temp2) >>> 0;
     }
 
-    h[0] = (h[0] + a) >>> 0; h[1] = (h[1] + b) >>> 0;
-    h[2] = (h[2] + c) >>> 0; h[3] = (h[3] + d) >>> 0;
-    h[4] = (h[4] + e) >>> 0; h[5] = (h[5] + f) >>> 0;
-    h[6] = (h[6] + g) >>> 0; h[7] = (h[7] + hh) >>> 0;
+    h[0] = (h[0] + a); h[1] = (h[1] + b);
+    h[2] = (h[2] + c); h[3] = (h[3] + d);
+    h[4] = (h[4] + e); h[5] = (h[5] + f);
+    h[6] = (h[6] + g); h[7] = (h[7] + hh);
 }
 
 export class SHA256 {
     constructor() {
-        this.h = [
+        this.h = new Uint32Array([
             0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
             0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-        ];
+        ]);
         this.buf = [];
         this.len = 0;
     }

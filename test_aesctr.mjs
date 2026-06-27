@@ -1,4 +1,4 @@
-import { AESCTR } from './crypto/aesctr.mjs';
+import { AesCtr } from './crypto/aesctr.mjs';
 import { readFileSync } from 'fs';
 
 (async () => {
@@ -8,7 +8,7 @@ const nonce = new Uint8Array(Buffer.from('00000002000000020000000000000000', 'he
 console.log('Key:', Buffer.from(key).toString('hex'));
 console.log('Nonce:', Buffer.from(nonce).toString('hex'));
 
-const aesCtr = new AESCTR(key, nonce);
+const aesCtr = new AesCtr(key, nonce);
 aesCtr.seek(0x4000);
 
 const test = new Uint8Array(Buffer.from('28b52ffd', 'hex'));
