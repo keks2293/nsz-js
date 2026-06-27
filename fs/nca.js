@@ -1,8 +1,9 @@
 export class NCAHeader {
     static parse(buffer) {
-        const view = new DataView(buffer);
+        const arr = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+        const view = new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
 
-        const magic = String.fromCharCode(buffer[0x200], buffer[0x201], buffer[0x202], buffer[0x203]);
+        const magic = String.fromCharCode(arr[0x200], arr[0x201], arr[0x202], arr[0x203]);
 
         if (magic !== 'NCA3' && magic !== 'NCA2') {
             return null;
@@ -15,14 +16,14 @@ export class NCAHeader {
 
         const size = Number(view.getBigUint64(0x208, true));
 
-        const titleIdBytes = new Uint8Array(buffer.slice(0x210, 0x218));
+        const titleIdBytes = arr.slice(0x210, 0x218);
         const titleId = Array.from(titleIdBytes).reverse().map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
 
         const contentIndex = view.getUint32(0x218, true);
         const sdkVersion = view.getUint32(0x21C, true);
         const cryptoType2 = view.getUint8(0x220);
 
-        const rightsId = Array.from(new Uint8Array(buffer.slice(0x230, 0x240))).map(b => b.toString(16).padStart(2, '0')).join('');
+        const rightsId = Array.from(arr.slice(0x230, 0x240)).map(b => b.toString(16).padStart(2, '0')).join('');
 
         const sectionTables = [];
         for (let i = 0; i < 4; i++) {
@@ -40,7 +41,7 @@ export class NCAHeader {
             });
         }
 
-        const keyBlock = buffer.slice(0x300, 0x340);
+        const keyBlock = arr.slice(0x300, 0x340);
         const masterKey = Math.max(cryptoType, cryptoType2) - 1;
 
         return {
@@ -70,13 +71,14 @@ export class NCAHeader {
 
 export class BKTR {
     static parseSection(buffer, ncaOffset) {
-        const view = new DataView(buffer);
+        const arr = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+        const view = new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
 
-        if (buffer.length < 0x30) return null;
+        if (arr.length < 0x30) return null;
 
         const bktrOffset = Number(view.getBigUint64(0, true));
         const bktrSize = Number(view.getBigUint64(8, true));
-        const magic = String.fromCharCode(buffer[16], buffer[17], buffer[18], buffer[19]);
+        const magic = String.fromCharCode(arr[16], arr[17], arr[18], arr[19]);
 
         if (magic !== 'BKTR' || bktrSize === 0) return null;
 
