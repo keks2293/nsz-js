@@ -86,7 +86,9 @@ class KeysParser {
 
     static bytesToHex(bytes) {
         if (bytes instanceof Uint8Array) {
-            return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+            const r = [];
+            for (let i = 0; i < bytes.length; i++) r.push(bytes[i].toString(16).padStart(2, '0'));
+            return r.join('');
         }
         return '';
     }
