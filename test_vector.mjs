@@ -1,4 +1,4 @@
-import { AESCTR } from './crypto/aesctr.mjs';
+import { AesCtr } from './crypto/aesctr.mjs';
 
 // Section 5: AES-CTR Test Vector from Python nsz
 // Run: node test_vector.mjs
@@ -14,7 +14,7 @@ console.log('BlockIdx:', offset >> 4);
 console.log();
 
 (async () => {
-const aesctr = new AESCTR(key, nonce);
+const aesctr = new AesCtr(key, nonce);
 aesctr.seek(offset);
 const keystream = await aesctr.decrypt(new Uint8Array(48));
 
