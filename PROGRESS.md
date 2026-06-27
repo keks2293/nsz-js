@@ -1,5 +1,11 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-06-27)
+
+1. **Decision: keep `%`/`Math.floor` in aes128.js for readability** — V8 TurboFan strength-reduces power-of-2 `%` to `&` automatically (< 1 ns difference per op). Manual `%`→`&` gave < 6% on full AES block encrypt/decrypt — not worth the readability loss. Refactor commit `c071523` already uses `%`/`Math.floor` directly.
+
+2. **Cleanup: remove redundant `Number(remainder)` in ncz.js**, fixup'd revert into Refactor AES commit.
+
 ## ✅ Recent Changes (2026-06-26)
 
 10. **Perf: slice→subarray, remove redundant await/Buffer.from** — `fs/ncz.js`: `slice`→`subarray`, removed `await` from sync calls, dropped `Buffer.from` wrapper. Benchmarked: −7.7% user CPU on 109MB NSZ.
