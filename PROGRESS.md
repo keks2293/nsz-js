@@ -1,5 +1,11 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-06-26)
+
+10. **Perf: slice→subarray, remove redundant await/Buffer.from** — `fs/ncz.js`: `slice`→`subarray`, removed `await` from sync calls, dropped `Buffer.from` wrapper. Benchmarked: −7.7% user CPU on 109MB NSZ.
+
+11. **Fix NCAHeader/BKTR to handle both ArrayBuffer and Uint8Array** — `fs/nca.js`. Use `arr = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)` — zero excess allocations for Uint8Array input, one for ArrayBuffer.
+
 ## ✅ Recent Changes (2026-06-23)
 
 10. **Fix pure JS AESECB in `aes128.js`** — Three bugs fixed:
