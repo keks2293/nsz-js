@@ -41,7 +41,7 @@ function readUInt32LE(bytes, offset) {
 }
 
 function sliceBytes(bytes, start, end) {
-    return bytes.slice(start, end);
+    return bytes.subarray(start, end);
 }
 
 const READ_CHUNK_SIZE = 0x1000000; // 16 MB per chunk, streaming decompressor handles any size
@@ -67,7 +67,7 @@ class BufferReader extends DataReader {
     }
 
     async read(offset, size) {
-        return this.buffer.slice(offset, offset + size);
+        return this.buffer.subarray(offset, offset + size);
     }
 }
 
@@ -103,10 +103,10 @@ class ChunkedBufferReader extends DataReader {
         const relOffset = offset - chunkStart;
         const available = chunk.length - relOffset;
         if (available >= size) {
-            return chunk.slice(relOffset, relOffset + size);
+            return chunk.subarray(relOffset, relOffset + size);
         }
         // Crosses chunk boundary: read both parts
-        const first = chunk.slice(relOffset);
+        const first = chunk.subarray(relOffset);
         const remaining = size - first.length;
         const second = await this.read(offset + first.length, remaining);
         const result = new Uint8Array(size);
@@ -325,10 +325,10 @@ class NCZDecompressor {
 
                 let data = chunk;
                 if (aesCtr) {
-                    data = await aesCtr.decrypt(chunk);
+                    data = aesCtr.decrypt(chunk);
                 }
 
-                await writeChunk(data, i);
+                writeChunk(data, i);
 
                 i += chunk.length;
                 decompressedOffset += chunk.length;
@@ -375,7 +375,7 @@ class NCZDecompressor {
             while (toRead > 0) {
                 const size = Math.min(toRead, READ_CHUNK_SIZE);
                 const chunk = await this.reader.read(pos, size);
-                if (!proc.stdin.write(Buffer.from(chunk))) {
+                if (!proc.stdin.write(chunk)) {
                     await new Promise(r => proc.stdin.once('drain', r));
                 }
                 pos += size;
@@ -423,16 +423,16 @@ class NCZDecompressor {
                 }
             }
             const subSize = boundary - offset;
-            let data = decompChunk.slice(offset, offset + subSize);
+            let data = decompChunk.subarray(offset, offset + subSize);
             if (aesCtr) {
                 if (aesCtr !== lastAesCtr || ncaPos !== lastDecryptEnd) {
                     aesCtr.seek(ncaPos);
                 }
-                data = await aesCtr.decrypt(data);
+                data = aesCtr.decrypt(data);
                 lastDecryptEnd = ncaPos + data.length;
                 lastAesCtr = aesCtr;
             }
-            await writeChunk(data, ncaPos);
+            writeChunk(data, ncaPos);
             offset += subSize;
             if (progressCallback) progressCallback((decompOffset + offset) / ncaSize);
         }
