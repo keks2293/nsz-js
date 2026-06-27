@@ -474,7 +474,7 @@ class AsyncBlockDecompressorReader {
         if (blockId >= this.numberOfBlocks - 1) {
             const remainder = this.decompressedSize % this.blockSize;
             if (remainder > 0) {
-                decompressedSize = Number(remainder);
+                decompressedSize = remainder;
             }
         }
 
