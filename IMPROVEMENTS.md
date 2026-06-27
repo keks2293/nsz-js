@@ -20,6 +20,8 @@ Prioritized areas for improvement identified 2026-05-30.
 
 8. ❌ **Нет финального flush zstd** — `fs/ncz.js:_decompressStream`, `crypto/zstddec-stream-wrapper.js`. Bug report claimed flush needed after all blocks. **Not a bug**: `ZSTD_decompressStream` returns `0` only when frame fully decoded with no residual output. Calling with empty input (`srcSize = 0`) is a no-op — API already drains all output internally.
 
+9. ❌ **Manual `%`→`&` for power-of-2 in aes128.js** — `crypto/aes128.js`. V8 TurboFan strength-reduces `% 4`, `% 16` to `& 3`, `& 15` automatically. Manual replacement gave < 6% on full AES block — not worth readability loss. **Keeping `%`/`Math.floor` for readability.**
+
 ## Medium Impact
 
 15. ⏳ **Duplicated XCZ→XCI logic between converter.js and nsz-cli.js** — ~124 lines of identical algorithm (partition iteration, HFS0 building, NCZ decompression, hash verification) reimplemented with different I/O APIs. Core logic should be extracted into a shared module with Reader/Writer/Hasher abstractions (Ports & Adapters). Browser and CLI each provide platform-specific adapters (`WritableStream`/`fs.writeSync`, `SHA256`/`crypto.createHash`). CLI could also switch to sequential writes (`wb+`, seek-back for headers) for cleaner code matching Python nsz, but this doesn't enable sharing with browser (FSA requires absolute positions).
