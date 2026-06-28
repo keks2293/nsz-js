@@ -52,6 +52,11 @@ Prioritized areas for improvement identified 2026-05-30.
 
 12. ✅ **Remove CLI Buffer.from(chunk) copies** — `nsz-cli.js` used `Buffer.from(chunk)` before `fs.writeSync`. Removed — `fs.writeSync` accepts Uint8Array directly, no copy needed.
 
+13. ❌ **Remove await от writeChunk и aesCtr.decrypt** — `fs/ncz.js`. Пробовали убрать `await` с `writeChunk` и `aesCtr.decrypt` в `_decompressBlocks` и `_processStreamDecompressedChunk` (коммит 9cf9ec47). В Node.js оба синхронные (`fs.writeSync`, `cipher.update`), так что `await` не нужен. Но:
+    - **Сломали кодер**: `aesCtr.decrypt()` стал async (WebCrypto в браузере). Без `await` — `data` получал Promise вместо Uint8Array. `writeChunk` писал Promise-объект в выходной файл → битый NSP.
+    - **Сломали плавность**: `writeChunk` асинхронный (FSA `writable.write`). Без `await` — fire-and-forget, конкурентные записи. `progressCallback` вызывался до завершения записи → прогресс скачками.
+    - **Вывод**: `await` восстановлен на обоих вызовах. Добавляет ~650μs на 13,000 чанков (212MB). Плавность и корректность важнее.
+
 ## Memory Optimization
 
 13. ❌ **Reduce READ_CHUNK_SIZE** — `fs/ncz.js:52` uses 16MB. **Keeping as-is** — matches Python nsz `SolidCompressor.CHUNK_SZ = 0x1000000`.
