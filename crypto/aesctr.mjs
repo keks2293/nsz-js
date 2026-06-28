@@ -55,16 +55,6 @@ class AesCtr {
         }
     }
 
-    encrypt(data) {
-        if (this._fallbackAes) {
-            return this._pureJSTransform(data);
-        }
-        if (useNodeCrypto) {
-            return this._nodeTransform(data);
-        }
-        return this._webTransform(data);
-    }
-
     _nodeTransform(data) {
         return new Uint8Array(this._cipher.update(data));
     }
@@ -73,30 +63,37 @@ class AesCtr {
         return aesCtr(this._fallbackAes, this._counter, data);
     }
 
-    async _webTransform(data) {
-        if (!this._cryptoKey) {
-            this._cryptoKey = await crypto.subtle.importKey(
-                'raw', this.key,
-                { name: 'AES-CTR' },
-                false, ['encrypt']
-            );
+    async encrypt(data) {
+        if (useNodeCrypto) {
+            return this._nodeTransform(data);
         }
-        const blocks = (data.length + 15) >> 4;
-        const result = await crypto.subtle.encrypt(
-            { name: 'AES-CTR', counter: this._counter, length: 64 },
-            this._cryptoKey,
-            data
-        );
-        for (let b = 0; b < blocks; b++) {
-            for (let j = BLOCK_SIZE - 1; j >= 8; j--) {
-                if (++this._counter[j]) break;
+        if (useWebCrypto) {
+            if (!this._cryptoKey) {
+                this._cryptoKey = await crypto.subtle.importKey(
+                    'raw', this.key,
+                    { name: 'AES-CTR' },
+                    false, ['encrypt']
+                );
             }
+            const blocks = (data.length + 15) >> 4;
+            const result = await crypto.subtle.encrypt(
+                { name: 'AES-CTR', counter: this._counter, length: 64 },
+                this._cryptoKey,
+                data
+            );
+            for (let b = 0; b < blocks; b++) {
+                for (let j = BLOCK_SIZE - 1; j >= 8; j--) {
+                    this._counter[j]++;
+                    if (this._counter[j]) break;
+                }
+            }
+            return new Uint8Array(result);
         }
-        return new Uint8Array(result);
+        return this._pureJSTransform(data);
     }
 
-    decrypt(data) {
-        return this.encrypt(data);
+    async decrypt(data) {
+        return await this.encrypt(data);
     }
 }
 
