@@ -328,7 +328,7 @@ class NCZDecompressor {
                     data = await aesCtr.decrypt(chunk);
                 }
 
-                writeChunk(data, i);
+                await writeChunk(data, i);
 
                 i += chunk.length;
                 decompressedOffset += chunk.length;
@@ -432,7 +432,7 @@ class NCZDecompressor {
                 lastDecryptEnd = ncaPos + data.length;
                 lastAesCtr = aesCtr;
             }
-            writeChunk(data, ncaPos);
+            await writeChunk(data, ncaPos);
             offset += subSize;
             if (progressCallback) progressCallback((decompOffset + offset) / ncaSize);
         }

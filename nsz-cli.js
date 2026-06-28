@@ -49,6 +49,8 @@ async function main() {
         } else if (args[i] === '--help' || args[i] === '-h') {
             printUsage();
             process.exit(0);
+        } else if (args[i] === '--keys' && i + 1 < args.length) {
+            keysPath = args[++i];
         } else if (!inputPath) {
             inputPath = args[i];
         } else if (!outputPath && !args[i].startsWith('-')) {
@@ -157,7 +159,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
         const cnmtFiles = pFiles.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
         if (cnmtFiles.length > 0) {
             const { NSZConverter } = await import('./converter.js');
-            const converter = new NSZConverter();
+            const converter = new NSZConverter(keys);
             for (const cnmtFile of cnmtFiles) {
                 const cnmtData = Buffer.alloc(cnmtFile.size);
                 fs.readSync(inputFd, cnmtData, 0, cnmtFile.size, cnmtFile.offset);
@@ -298,7 +300,7 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
     const cnmtFiles = files.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
     if (cnmtFiles.length > 0) {
         const { NSZConverter } = await import('./converter.js');
-        const converter = new NSZConverter();
+        const converter = new NSZConverter(keys);
         for (const cnmtFile of cnmtFiles) {
             const cnmtData = Buffer.alloc(cnmtFile.size);
             fs.readSync(inputFd, cnmtData, 0, cnmtFile.size, cnmtFile.offset);
