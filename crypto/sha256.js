@@ -64,7 +64,8 @@ export class SHA256 {
             0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
             0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
         ]);
-        this.buf = [];
+        this.buf = new Uint8Array(256);
+        this.bufLen = 0;
         this.len = 0;
     }
 
@@ -72,14 +73,15 @@ export class SHA256 {
         if (data instanceof ArrayBuffer) data = new Uint8Array(data);
         if (typeof data === 'string') data = new TextEncoder().encode(data);
 
-        if (this.buf.length > 0) {
-            const need = 64 - this.buf.length;
+        if (this.bufLen > 0) {
+            const need = 64 - this.bufLen;
             const take = Math.min(need, data.length);
-            for (let i = 0; i < take; i++) this.buf.push(data[i]);
+            this.buf.set(data.subarray(0, take), this.bufLen);
+            this.bufLen += take;
             this.len += take;
-            if (this.buf.length === 64) {
+            if (this.bufLen === 64) {
                 transform(this.h, this.buf);
-                this.buf = [];
+                this.bufLen = 0;
             }
             data = data.subarray(take);
         }
@@ -92,8 +94,10 @@ export class SHA256 {
         }
 
         if (off < data.length) {
-            for (let i = off; i < data.length; i++) this.buf.push(data[i]);
-            this.len += data.length - off;
+            const remaining = data.length - off;
+            this.buf.set(data.subarray(off), 0);
+            this.bufLen = remaining;
+            this.len += remaining;
         }
 
         return this;
@@ -101,27 +105,29 @@ export class SHA256 {
 
     hexdigest() {
         const savedLen = this.len;
-
         const zerosNeeded = (56 - (this.len + 1) % 64 + 64) % 64;
 
-        this.buf.push(0x80);
-        for (let i = 0; i < zerosNeeded; i++) this.buf.push(0);
+        this.buf[this.bufLen++] = 0x80;
+        const padEnd = this.bufLen + zerosNeeded;
+        this.buf.fill(0, this.bufLen, padEnd);
+        this.bufLen = padEnd;
 
         const bitLen = savedLen * 8;
         const bitLenHi = Math.floor(bitLen / 0x100000000) >>> 0;
         const bitLenLo = bitLen >>> 0;
-        this.buf.push((bitLenHi >>> 24) & 0xff);
-        this.buf.push((bitLenHi >>> 16) & 0xff);
-        this.buf.push((bitLenHi >>> 8) & 0xff);
-        this.buf.push(bitLenHi & 0xff);
-        this.buf.push((bitLenLo >>> 24) & 0xff);
-        this.buf.push((bitLenLo >>> 16) & 0xff);
-        this.buf.push((bitLenLo >>> 8) & 0xff);
-        this.buf.push(bitLenLo & 0xff);
+        this.buf[this.bufLen++] = (bitLenHi >>> 24) & 0xff;
+        this.buf[this.bufLen++] = (bitLenHi >>> 16) & 0xff;
+        this.buf[this.bufLen++] = (bitLenHi >>> 8) & 0xff;
+        this.buf[this.bufLen++] = bitLenHi & 0xff;
+        this.buf[this.bufLen++] = (bitLenLo >>> 24) & 0xff;
+        this.buf[this.bufLen++] = (bitLenLo >>> 16) & 0xff;
+        this.buf[this.bufLen++] = (bitLenLo >>> 8) & 0xff;
+        this.buf[this.bufLen++] = bitLenLo & 0xff;
 
-        while (this.buf.length >= 64) {
+        while (this.bufLen >= 64) {
             transform(this.h, this.buf);
-            this.buf = this.buf.slice(64);
+            this.buf.copyWithin(0, 64, this.bufLen);
+            this.bufLen -= 64;
         }
 
         let hex = '';
