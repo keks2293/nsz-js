@@ -320,7 +320,7 @@ class NCZDecompressor {
 
                 let data = chunk;
                 if (aesCtr) {
-                    data = aesCtr.decrypt(chunk);
+                    data = await aesCtr.decrypt(chunk);
                 }
 
                 writeChunk(data, i);
@@ -423,7 +423,7 @@ class NCZDecompressor {
                 if (aesCtr !== lastAesCtr || ncaPos !== lastDecryptEnd) {
                     aesCtr.seek(ncaPos);
                 }
-                data = aesCtr.decrypt(data);
+                data = await aesCtr.decrypt(data);
                 lastDecryptEnd = ncaPos + data.length;
                 lastAesCtr = aesCtr;
             }

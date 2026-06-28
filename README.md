@@ -74,6 +74,7 @@ nsz-js/
 ├── crypto/                 # Cryptographic utilities
 │   ├── aes128.js           # AES-128 ECB/CBC implementation
 │   ├── aesctr.mjs          # AES-CTR mode (Node.js native crypto / Web Crypto API)
+│   ├── aesxts.mjs          # AES-XTS mode (NCA header key area decryption)
 │   ├── sha256.js           # SHA-256 hash function
 │   ├── zstd.js             # Zstandard decompression (uses zstddec WASM)
 │   └── zstddec-stream-wrapper.js  # WASM streaming decompression wrapper
@@ -106,6 +107,7 @@ nsz-js/
 
 - **crypto/aes128.js** - Lightweight AES-128 implementation with ECB and CBC modes
 - **crypto/aesctr.mjs** - AES-CTR encryption/decryption (Node.js native `crypto.createCipheriv` or browser Web Crypto API)
+- **crypto/aesxts.mjs** - AES-XTS encryption/decryption (NCA header key area unwrap)
 - **crypto/sha256.js** - Pure JavaScript SHA-256 implementation
 - **crypto/zstd.js** - Zstandard decompression using zstddec WASM library
 
@@ -132,6 +134,7 @@ To update dependencies: `npm install zstddec@x.x.x` then copy files to `static/`
 - **test_vector.mjs** - AES-CTR keystream test vector verification (self-contained)
 - **test_aesctr.mjs** - AES-CTR seek + encrypt test (self-contained)
 - **test_aes_manual.cjs** - Standalone AES-CTR test using Node.js crypto (self-contained)
+- **bench_aes.mjs** - AES-CTR throughput benchmark (encrypt/decrypt/seek MB/s)
 - **test-ncz.mjs** - NCZ decompressor component tests (file-dependent tests skip gracefully)
 - **test_convert.mjs** - Full NSZ→NSP conversion pipeline (requires NSZ file)
 - **test_decompress.mjs** - Byte-level decompression comparison against reference NSP

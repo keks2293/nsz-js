@@ -75,6 +75,28 @@ node test_aes_manual.cjs
 
 ---
 
+### bench_aes.mjs (Node.js - Benchmark)
+**Location:** `/bench_aes.mjs`
+**Purpose:** AES-CTR throughput benchmark
+**What it measures:**
+- Encrypt throughput (MB/s) for large contiguous data
+- Decrypt throughput (MB/s) for large contiguous data
+- Seek+decrypt throughput (simulates per-section NCZ decrypt pattern)
+
+**How to run:**
+```bash
+node bench_aes.mjs
+```
+
+**Output:**
+```
+AES-CTR encrypt 500MB: 456ms (1096 MB/s)
+AES-CTR decrypt 500MB: 462ms (1082 MB/s)
+AES-CTR seek+decrypt 500MB (500 seeks): 481ms (1039 MB/s)
+```
+
+---
+
 ## 2. Browser-based AES-CTR Tests
 
 ### test_browser.html
