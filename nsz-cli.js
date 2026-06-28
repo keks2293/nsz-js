@@ -42,10 +42,13 @@ async function main() {
     let outputPath = null;
     let keysPath = null;
     let fixPadding = false;
+    let verify = true;
 
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--fix-padding' || args[i] === '-p') {
             fixPadding = true;
+        } else if (args[i] === '--no-verify' || args[i] === '-nv') {
+            verify = false;
         } else if (args[i] === '--help' || args[i] === '-h') {
             printUsage();
             process.exit(0);
@@ -70,6 +73,7 @@ async function main() {
         console.log('  .xcz                -> .xci');
         console.log('');
         console.log('Options:');
+        console.log('  --no-verify, -nv     Skip SHA256 verification (faster, no CNMT parsing)');
         console.log('  --fix-padding, -p    Use 0x20-byte alignment (default: 16-byte, matching Python nsz)');
         console.log('');
     }
@@ -109,16 +113,16 @@ async function main() {
 
     try {
         if (isXcz) {
-            await convertXCZ(inReader, inputFd, inputPath, outputPath, keys);
+            await convertXCZ(inReader, inputFd, inputPath, outputPath, keys, verify);
         } else {
-            await convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPadding);
+            await convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPadding, verify);
         }
     } finally {
         fs.closeSync(inputFd);
     }
 }
 
-async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
+async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys, verify) {
     console.log('Detected XCZ file');
     const { XCIReader } = await import('./fs/xci.js');
     const outPath = outputPath || inputPath.replace(/\.xcz$/i, '.xci');
@@ -156,17 +160,19 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
 
         // Extract CNMT hashes from this partition
         const cnmtHashes = new Set();
-        const cnmtFiles = pFiles.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
-        if (cnmtFiles.length > 0) {
-            const { NSZConverter } = await import('./converter.js');
-            const converter = new NSZConverter(keys);
-            for (const cnmtFile of cnmtFiles) {
-                const cnmtData = Buffer.alloc(cnmtFile.size);
-                fs.readSync(inputFd, cnmtData, 0, cnmtFile.size, cnmtFile.offset);
-                const hashes = await converter.extractCnmtHashes(cnmtData);
-                hashes.forEach(h => cnmtHashes.add(h));
+        if (verify) {
+            const cnmtFiles = pFiles.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
+            if (cnmtFiles.length > 0) {
+                const { NSZConverter } = await import('./converter.js');
+                const converter = new NSZConverter(keys);
+                for (const cnmtFile of cnmtFiles) {
+                    const cnmtData = Buffer.alloc(cnmtFile.size);
+                    fs.readSync(inputFd, cnmtData, 0, cnmtFile.size, cnmtFile.offset);
+                    const hashes = await converter.extractCnmtHashes(cnmtData);
+                    hashes.forEach(h => cnmtHashes.add(h));
+                }
+                console.log(`  Found ${cnmtHashes.size} expected NCA hashes from CNMT in ${partition.name}`);
             }
-            console.log(`  Found ${cnmtHashes.size} expected NCA hashes from CNMT in ${partition.name}`);
         }
 
         const fileMetas = [];
@@ -242,34 +248,38 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
                     console.log(`Decompressing: ${pm.name}/${m.inputName} -> ${m.name}`);
                     const nczReader = new FileDescriptorReader(inputFd, m.offset, m.nczLen);
                     const decomp = new NCZDecompressor(nczReader, keys);
-                    const hasher = crypto.createHash('sha256');
+                    const hasher = verify && crypto.createHash('sha256');
                     await decomp.decompress(null, async (chunk, offset) => {
-                        hasher.update(chunk);
+                        if (hasher) hasher.update(chunk);
                         fs.writeSync(outputFd, chunk, 0, chunk.byteLength, writePos + offset);
                     });
-                    const hash = hasher.digest('hex');
-                    console.log(`  SHA256: ${hash}`);
-                    if (m.name.endsWith('.nca') && !m.name.endsWith('.cnmt.nca')) {
-                        if (pm.cnmtHashes.size > 0) {
-                            verifyHash(hash, m.name, pm.cnmtHashes);
-                        } else {
-                            verifyFileNameHash(hash, m.inputName, m.name);
+                    if (hasher) {
+                        const hash = hasher.digest('hex');
+                        console.log(`  SHA256: ${hash}`);
+                        if (m.name.endsWith('.nca') && !m.name.endsWith('.cnmt.nca')) {
+                            if (pm.cnmtHashes.size > 0) {
+                                verifyHash(hash, m.name, pm.cnmtHashes);
+                            } else {
+                                verifyFileNameHash(hash, m.inputName, m.name);
+                            }
                         }
                     }
                 } else {
                     console.log(`Copying: ${pm.name}/${m.inputName} -> ${m.name}`);
                     const buf = Buffer.alloc(m.size);
                     fs.readSync(inputFd, buf, 0, m.size, m.offset);
-                    const hash = crypto.createHash('sha256').update(buf).digest('hex');
-                    console.log(`  SHA256: ${hash}`);
-                    fs.writeSync(outputFd, buf, 0, m.size, writePos);
-                    if (m.name.endsWith('.nca') && !m.name.endsWith('.cnmt.nca')) {
-                        if (pm.cnmtHashes.size > 0) {
-                            verifyHash(hash, m.name, pm.cnmtHashes);
-                        } else {
-                            verifyFileNameHash(hash, m.inputName, m.name);
+                    if (verify) {
+                        const hash = crypto.createHash('sha256').update(buf).digest('hex');
+                        console.log(`  SHA256: ${hash}`);
+                        if (m.name.endsWith('.nca') && !m.name.endsWith('.cnmt.nca')) {
+                            if (pm.cnmtHashes.size > 0) {
+                                verifyHash(hash, m.name, pm.cnmtHashes);
+                            } else {
+                                verifyFileNameHash(hash, m.inputName, m.name);
+                            }
                         }
                     }
+                    fs.writeSync(outputFd, buf, 0, m.size, writePos);
                 }
                 writePos += m.size;
             }
@@ -287,7 +297,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys) {
     console.log(`Output: ${outPath} (${formatBytes(outStat.size)})`);
 }
 
-async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPadding) {
+async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPadding, verify) {
     const outPath = outputPath || inputPath.replace(/\.(nsz|nspz|nsx)$/i, '.nsp');
     console.log(`Output: ${outPath}`);
 
@@ -297,17 +307,19 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
 
     // Collect CNMT hashes for verification
     const cnmtHashes = new Set();
-    const cnmtFiles = files.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
-    if (cnmtFiles.length > 0) {
-        const { NSZConverter } = await import('./converter.js');
-        const converter = new NSZConverter(keys);
-        for (const cnmtFile of cnmtFiles) {
-            const cnmtData = Buffer.alloc(cnmtFile.size);
-            fs.readSync(inputFd, cnmtData, 0, cnmtFile.size, cnmtFile.offset);
-            const hashes = await converter.extractCnmtHashes(cnmtData);
-            hashes.forEach(h => cnmtHashes.add(h));
+    if (verify) {
+        const cnmtFiles = files.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
+        if (cnmtFiles.length > 0) {
+            const { NSZConverter } = await import('./converter.js');
+            const converter = new NSZConverter(keys);
+            for (const cnmtFile of cnmtFiles) {
+                const cnmtData = Buffer.alloc(cnmtFile.size);
+                fs.readSync(inputFd, cnmtData, 0, cnmtFile.size, cnmtFile.offset);
+                const hashes = await converter.extractCnmtHashes(cnmtData);
+                hashes.forEach(h => cnmtHashes.add(h));
+            }
+            console.log(`  Found ${cnmtHashes.size} expected NCA hashes from CNMT`);
         }
-        console.log(`  Found ${cnmtHashes.size} expected NCA hashes from CNMT`);
     }
 
     // First pass: determine output sizes
@@ -345,18 +357,20 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
                 console.log(`Decompressing: ${f.name} -> ${meta.name}`);
                 const nczReader = new FileDescriptorReader(inputFd, f.offset, f.size);
                 const decomp = new NCZDecompressor(nczReader, keys);
-                const hasher = crypto.createHash('sha256');
+                const hasher = verify && crypto.createHash('sha256');
                 await decomp.decompress(null, async (chunk, offset) => {
-                    hasher.update(chunk);
+                    if (hasher) hasher.update(chunk);
                     fs.writeSync(outputFd, chunk, 0, chunk.byteLength, absWritePos + offset);
                 });
-                const hash = hasher.digest('hex');
-                console.log(`  SHA256: ${hash}`);
-                if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                    if (cnmtHashes.size > 0) {
-                        verifyHash(hash, meta.name, cnmtHashes);
-                    } else {
-                        verifyFileNameHash(hash, f.name, meta.name);
+                if (hasher) {
+                    const hash = hasher.digest('hex');
+                    console.log(`  SHA256: ${hash}`);
+                    if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                        if (cnmtHashes.size > 0) {
+                            verifyHash(hash, meta.name, cnmtHashes);
+                        } else {
+                            verifyFileNameHash(hash, f.name, meta.name);
+                        }
                     }
                 }
                 console.log(`  Size: ${meta.size} bytes`);
@@ -364,13 +378,15 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
                 console.log(`Copying: ${f.name} -> ${meta.name}`);
                 const buf = Buffer.alloc(f.size);
                 fs.readSync(inputFd, buf, 0, f.size, f.offset);
-                const hash = crypto.createHash('sha256').update(buf).digest('hex');
-                console.log(`  SHA256: ${hash}`);
-                if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                    if (cnmtHashes.size > 0) {
-                        verifyHash(hash, meta.name, cnmtHashes);
-                    } else {
-                        verifyFileNameHash(hash, f.name, meta.name);
+                if (verify) {
+                    const hash = crypto.createHash('sha256').update(buf).digest('hex');
+                    console.log(`  SHA256: ${hash}`);
+                    if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                        if (cnmtHashes.size > 0) {
+                            verifyHash(hash, meta.name, cnmtHashes);
+                        } else {
+                            verifyFileNameHash(hash, f.name, meta.name);
+                        }
                     }
                 }
                 fs.writeSync(outputFd, buf, 0, f.size, absWritePos);
