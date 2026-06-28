@@ -100,15 +100,17 @@ class NSZConverter {
         onLog('info', `Found ${files.length} files in container`);
 
 
-        const cnmtFiles = files.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
         const cnmtHashes = new Set();
-        if (cnmtFiles.length > 0) {
-            for (const cnmtFile of cnmtFiles) {
-                const cnmtData = await file.slice(cnmtFile.offset, cnmtFile.offset + cnmtFile.size).arrayBuffer();
-                const hashes = await this.extractCnmtHashes(cnmtData);
-                hashes.forEach(h => cnmtHashes.add(h));
+        if (verify) {
+            const cnmtFiles = files.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
+            if (cnmtFiles.length > 0) {
+                for (const cnmtFile of cnmtFiles) {
+                    const cnmtData = await file.slice(cnmtFile.offset, cnmtFile.offset + cnmtFile.size).arrayBuffer();
+                    const hashes = await this.extractCnmtHashes(cnmtData);
+                    hashes.forEach(h => cnmtHashes.add(h));
+                }
+                onLog('info', `Found ${cnmtHashes.size} expected NCA hashes from CNMT`);
             }
-            onLog('info', `Found ${cnmtHashes.size} expected NCA hashes from CNMT`);
         }
 
         // First pass: determine output file names, sizes, and cache NCZ compressed data
@@ -166,17 +168,6 @@ class NSZConverter {
                 } else {
                     onProgress(pct(dataWritten), `Copying ${f.name}...`);
                     const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
-                    if (verify) {
-                        const hash = await sha256(data);
-                        onLog('info', `SHA256: ${hash}`);
-                        if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                            if (cnmtHashes.size > 0) {
-                                verifyHash(hash, meta.name, cnmtHashes, onLog);
-                            } else {
-                                verifyFileNameHash(hash, f.name, meta.name, onLog);
-                            }
-                        }
-                    }
                     await writable.write({ type: 'write', position: writePos, data });
                 }
 
@@ -220,17 +211,6 @@ class NSZConverter {
                 } else {
                     onProgress(pct(dataWritten), `Copying ${f.name}...`);
                     const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
-                    if (verify) {
-                        const hash = await sha256(data);
-                        onLog('info', `SHA256: ${hash}`);
-                        if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                            if (cnmtHashes.size > 0) {
-                                verifyHash(hash, meta.name, cnmtHashes, onLog);
-                            } else {
-                                verifyFileNameHash(hash, f.name, meta.name, onLog);
-                            }
-                        }
-                    }
 
                     outputFiles.push({ name: meta.name, data });
                 }
@@ -288,14 +268,16 @@ class NSZConverter {
 
             // Extract CNMT hashes from this partition
             const cnmtHashes = new Set();
-            const cnmtFiles = partitionFiles.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
-            if (cnmtFiles.length > 0) {
-                for (const cnmtFile of cnmtFiles) {
-                    const cnmtData = await file.slice(cnmtFile.offset, cnmtFile.offset + cnmtFile.size).arrayBuffer();
-                    const hashes = await this.extractCnmtHashes(cnmtData);
-                    hashes.forEach(h => cnmtHashes.add(h));
+            if (verify) {
+                const cnmtFiles = partitionFiles.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
+                if (cnmtFiles.length > 0) {
+                    for (const cnmtFile of cnmtFiles) {
+                        const cnmtData = await file.slice(cnmtFile.offset, cnmtFile.offset + cnmtFile.size).arrayBuffer();
+                        const hashes = await this.extractCnmtHashes(cnmtData);
+                        hashes.forEach(h => cnmtHashes.add(h));
+                    }
+                    onLog('info', `  Found ${cnmtHashes.size} expected NCA hashes from CNMT in ${partition.name}`);
                 }
-                onLog('info', `  Found ${cnmtHashes.size} expected NCA hashes from CNMT in ${partition.name}`);
             }
 
             const fileMetas = [];
@@ -409,17 +391,6 @@ class NSZConverter {
                     } else {
                         onProgress(pct(dataOverall), `Copying ${meta.inputName}...`);
                         const data = await file.slice(meta.offset, meta.offset + meta.size).arrayBuffer();
-                        if (verify) {
-                            const hash = await sha256(data);
-                            onLog('info', `  SHA256: ${hash}`);
-                            if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                                if (pm.cnmtHashes.size > 0) {
-                                    verifyHash(hash, meta.name, pm.cnmtHashes, onLog);
-                                } else {
-                                    verifyFileNameHash(hash, meta.inputName, meta.name, onLog);
-                                }
-                            }
-                        }
                         await writable.write({ type: 'write', position: writePos, data });
                     }
                     writePos += meta.size;
@@ -482,17 +453,6 @@ class NSZConverter {
                     } else {
                         onProgress(pct(dataOverall), `Copying ${meta.inputName}...`);
                         fileData = new Uint8Array(await file.slice(meta.offset, meta.offset + meta.size).arrayBuffer());
-                        if (verify) {
-                            const hash = await sha256(fileData);
-                            onLog('info', `  SHA256: ${hash}`);
-                            if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                                if (pm.cnmtHashes.size > 0) {
-                                    verifyHash(hash, meta.name, pm.cnmtHashes, onLog);
-                                } else {
-                                    verifyFileNameHash(hash, meta.inputName, meta.name, onLog);
-                                }
-                            }
-                        }
                     }
 
                     hfs0Writer.addFile(meta.name, fileData);
