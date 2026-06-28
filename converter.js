@@ -7,6 +7,9 @@ import { Cnmt } from './fs/cnmt.js';
 import { NCAHeader } from './fs/nca.js';
 import { XCIReader, XCIWriter } from './fs/xci.js';
 import { HFS0Writer } from './fs/hfs0.js';
+import { AesXts } from './crypto/aesxts.mjs';
+import { AesCtr } from './crypto/aesctr.mjs';
+import { AesEcb } from './crypto/aes128.js';
 
 function verifyHash(hash, name, fileHashes, onLog) {
     if (fileHashes.size > 0) {
@@ -49,8 +52,8 @@ class FileSliceReader extends DataReader {
 }
 
 class NSZConverter {
-    constructor() {
-        this.keys = null;
+    constructor(keys = null) {
+        this.keys = keys;
         this.initialized = false;
     }
 
@@ -516,29 +519,105 @@ class NSZConverter {
     async extractCnmtHashes(cnmtData) {
         const hashes = new Set();
         try {
-            const header = NCAHeader.parse(cnmtData);
+            const arr = cnmtData instanceof Uint8Array ? cnmtData : new Uint8Array(cnmtData);
+
+            if (!this.keys || !this.keys.header_key) {
+                console.error('Cannot decrypt CNMT: missing keys (header_key)');
+                return hashes;
+            }
+
+            const headerKey = this.keys.header_key;
+            const headerKeyBytes = typeof headerKey === 'string'
+                ? new Uint8Array(headerKey.match(/.{2}/g).map(b => parseInt(b, 16)))
+                : headerKey;
+
+            if (headerKeyBytes.length !== 32) {
+                console.error('Invalid header_key length:', headerKeyBytes.length);
+                return hashes;
+            }
+
+            const xts = new AesXts(headerKeyBytes);
+
+            const hdrLen = Math.min(0xC00, arr.length);
+            const hdrEncrypted = arr.subarray(0, hdrLen);
+            const hdrDecrypted = xts.decrypt(hdrEncrypted, 0);
+
+            const header = NCAHeader.parse(hdrDecrypted);
+
             if (header && header.sectionTables && header.sectionTables[0]) {
                 const fsOffset = header.sectionTables[0].offset;
-                const fsSize = header.sectionTables[0].endOffset - header.sectionTables[0].offset;
-                
-                if (fsSize > 0 && fsOffset + fsSize <= cnmtData.byteLength) {
-                    let fsData = new Uint8Array(cnmtData.slice(fsOffset, fsOffset + fsSize));
+                const fsEndOffset = header.sectionTables[0].endOffset;
+                const fsSize = fsEndOffset - fsOffset;
 
-                    const pfs0Magic = String.fromCharCode(fsData[0], fsData[1], fsData[2], fsData[3], fsData[4]);
-                    if (pfs0Magic === 'PFS0\0') {
-                        const pfs0 = new PFS0(fsData);
+                if (fsSize > 0 && fsOffset + fsSize <= arr.length) {
+                    const sectionData = arr.subarray(fsOffset, fsOffset + fsSize);
+
+                    const keysArr = this.keys.keyAreaKeys;
+                    const mk = header.masterKey;
+                    const kakHex = keysArr[mk] && keysArr[mk][0];
+
+                    if (!kakHex) {
+                        console.error('No key_area_key_application for masterKey:', mk);
+                        return hashes;
+                    }
+
+                    const kak = new Uint8Array(kakHex.match(/.{2}/g).map(b => parseInt(b, 16)));
+                    const keyBlock = hdrDecrypted.subarray(0x300, 0x340);
+
+                    let unwrapped;
+                    try {
+                        const nodeCrypto = await import('crypto');
+                        const ecb = nodeCrypto.createDecipheriv('aes-128-ecb', kak, null);
+                        ecb.setAutoPadding(false);
+                        unwrapped = new Uint8Array(ecb.update(keyBlock));
+                    } catch {
+                        const ecb = new AesEcb(kak);
+                        unwrapped = ecb.decrypt(keyBlock);
+                    }
+                    const sectionKey = unwrapped.subarray(32, 48);
+
+                    const sectionHdr = hdrDecrypted.subarray(0x400, 0x600);
+                    const ivBytes = sectionHdr.subarray(0x140, 0x148);
+
+                    const raw = new Uint8Array(16);
+                    for (let j = 0; j < 8; j++) raw[j] = 0;
+                    raw.set(ivBytes, 8);
+                    const cryptoCounter = new Uint8Array(raw).reverse();
+
+                    const aesCtr = new AesCtr(sectionKey, cryptoCounter);
+                    aesCtr.seek(fsOffset);
+
+                    const fsData = await aesCtr.decrypt(sectionData);
+
+                    const pfs0Start = 0x20;
+                    const pfs0Magic = fsData.length > pfs0Start + 4
+                        ? String.fromCharCode(fsData[pfs0Start], fsData[pfs0Start + 1], fsData[pfs0Start + 2], fsData[pfs0Start + 3])
+                        : '';
+
+                    let cnmtRaw = null;
+
+                    if (pfs0Magic === 'PFS0') {
+                        const pfs0 = new PFS0(fsData.subarray(pfs0Start));
                         const pfs0Files = pfs0.getFiles();
                         if (pfs0Files.length > 0) {
                             const f = pfs0Files[0];
-                            fsData = pfs0._data.slice(f.offset, f.offset + f.size);
+                            cnmtRaw = pfs0._data.slice(f.offset, f.offset + f.size);
+                        } else {
+                            cnmtRaw = fsData.subarray(pfs0Start);
+                        }
+                    } else {
+                        const magic = String.fromCharCode(fsData[0], fsData[1], fsData[2], fsData[3]);
+                        if (magic === 'PFS0') {
+                            cnmtRaw = fsData;
                         }
                     }
 
-                    const cnmt = Cnmt.parse(fsData);
-
-                    if (cnmt && cnmt.contentEntries) {
-                        for (const entry of cnmt.contentEntries) {
-                            hashes.add(entry.hash);
+                    if (cnmtRaw) {
+                        const cnmt = Cnmt.parse(cnmtRaw);
+                        if (cnmt && cnmt.contentEntries) {
+                            for (const entry of cnmt.contentEntries) {
+                                hashes.add(entry.hash);
+                            }
                         }
                     }
                 }
