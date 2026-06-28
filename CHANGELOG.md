@@ -2,6 +2,8 @@
 
 ## ✅ Recent Changes (2026-06-28)
 
+10. **Optimize SHA256 internal buffer: plain Array → Uint8Array** — `crypto/sha256.js:67`. Replaced `this.buf = []` (plain JS Array with byte-by-byte `.push()` → boxed Number heap allocations) with `this.buf = new Uint8Array(256)` + offset pointer `this.bufLen`. Hot path `.update()` now uses `buf.set(subarray, offset)` — zero boxing, zero GC. Padding/finalization in `hexdigest()` uses direct index assignment + `fill()` + `copyWithin()`. Single allocation at construction, no resizing. Microbenchmark: −4.5% on SHA256 alone.
+
 9. **Remove sha256 verification for non-NCZ files, skip CNMT when verify=off, add `--no-verify` CLI flag** — `converter.js`, `nsz-cli.js`. Python nsz doesn't hash non-NCZ files (.tik, .cert, etc.); they're just copied. Removed 4 redundant `sha256(data)` calls. Also skip CNMT extraction entirely when verify=off (both NSZ and XCZ paths). CLI gains `--no-verify`/`-nv` flag — skips CNMT, SHA256 hashing, and hash verification. Benchmark: 0.535s vs 0.65s = 17% faster on 109MB NSZ.
 
 8. **Fix Uint8Array counter increment overflow bug** — `crypto/aes128.js:264`, `crypto/aesctr.mjs:84-87`. `++counter[j]` on a `Uint8Array` returns the **full integer** (e.g. `256`) before truncation to `0x00`. The check `if (++counter[j]) break` was **always truthy on overflow**, breaking carry propagation past byte 0xFF → counter wrapped at 256 blocks (4096 bytes). Pure JS AES-CTR produced garbage for any data >64KB after block 256. Fix: separate `counter[j]++; if (counter[j]) break;` — the stored value is the correct truncated Uint8, and `0x00` is falsy so carry propagates correctly.
