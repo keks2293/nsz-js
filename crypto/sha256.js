@@ -1,3 +1,5 @@
+const HEXES = new Array(256).fill().map((_, i) => i.toString(16).padStart(2, '0'));
+
 const K = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
     0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -124,10 +126,8 @@ export class SHA256 {
 
         let hex = '';
         for (let i = 0; i < 8; i++) {
-            hex += ((this.h[i] >>> 24) & 0xff).toString(16).padStart(2, '0');
-            hex += ((this.h[i] >>> 16) & 0xff).toString(16).padStart(2, '0');
-            hex += ((this.h[i] >>> 8) & 0xff).toString(16).padStart(2, '0');
-            hex += (this.h[i] & 0xff).toString(16).padStart(2, '0');
+            const w = this.h[i];
+            hex += HEXES[(w >>> 24) & 0xff] + HEXES[(w >>> 16) & 0xff] + HEXES[(w >>> 8) & 0xff] + HEXES[w & 0xff];
         }
 
         return hex;
