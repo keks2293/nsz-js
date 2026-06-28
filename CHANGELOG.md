@@ -1,10 +1,21 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-06-28)
+
+8. **Fix Uint8Array counter increment overflow bug** — `crypto/aes128.js:264`, `crypto/aesctr.mjs:84-87`. `++counter[j]` on a `Uint8Array` returns the **full integer** (e.g. `256`) before truncation to `0x00`. The check `if (++counter[j]) break` was **always truthy on overflow**, breaking carry propagation past byte 0xFF → counter wrapped at 256 blocks (4096 bytes). Pure JS AES-CTR produced garbage for any data >64KB after block 256. Fix: separate `counter[j]++; if (counter[j]) break;` — the stored value is the correct truncated Uint8, and `0x00` is falsy so carry propagates correctly.
+
+9. **Re-instate async WebCrypto path** — `crypto/aesctr.mjs`: `encrypt()`/`decrypt()` are `async`. Browser uses WebCrypto `crypto.subtle.encrypt('AES-CTR')` (hardware-accelerated), Node.js uses sync `crypto.createCipheriv()` (wrapped in async Promise — ~2ms overhead for 500MB, negligible). Pure JS `AesEcb` fallback only when WebCrypto unavailable. All callers in `fs/ncz.js`, `converter.js` use `await`.
+
 ## ✅ Recent Changes (2026-06-27)
 
 1. **Decision: keep `%`/`Math.floor` in aes128.js for readability** — V8 TurboFan strength-reduces power-of-2 `%` to `&` automatically (< 1 ns difference per op). Manual `%`→`&` gave < 6% on full AES block encrypt/decrypt — not worth the readability loss. Refactor commit `c071523` already uses `%`/`Math.floor` directly.
 
 2. **Cleanup: remove redundant `Number(remainder)` in ncz.js**, fixup'd revert into Refactor AES commit.
+
+4. **Fix CNMT field offsets matching Python nsz** — `fs/cnmt.js`: `headerOffset`, `contentEntryCount`, `metaEntryCount` were at wrong offsets (18/20/22 instead of Python's 14/16/18). Caused `contentEntryCount=0` on all valid CNMT files → `Found 0 expected NCA hashes from CNMT`. Also: `converter.js`: `NSZConverter` constructor now accepts `keys` parameter (`constructor(keys = null)`). `nsz-cli.js`: passes `keys` when constructing `NSZConverter` for CNMT extraction.
+5. **AES-XTS + AES-CTR NCA header decryption in `extractCnmtHashes`** — `converter.js`: XTS-decrypts NCA header (0xC00 bytes) with `header_key`, unwraps key block with `key_area_key_application`, AES-CTR decrypts section data, skips hash tree, extracts CNMT XML from PFS0. Verified: Trackline Express NSZ extraction matches Python nsz — all 3 NCA hashes `[VERIFIED]`.
+6. **Browser-compatible AES-ECB in `extractCnmtHashes`** — `converter.js`: `import('crypto')` fails in browser (esbuild external). Wrapped in try/catch with pure-JS `AesEcb` fallback. Fixes `Found 0 expected NCA hashes from CNMT` in browser path.
+7. **Fix sync/async mismatch in `AesCtr` for browser WebCrypto path** — `crypto/aesctr.mjs`: `_webTransform()` was async but `encrypt()`/`decrypt()` didn't `await` it, returning a Promise instead of Uint8Array when WebCrypto was active. Made `encrypt()`/`decrypt()` async. Updated all callers in `fs/ncz.js`, `converter.js` to `await` the result.
 
 ## ✅ Recent Changes (2026-06-26)
 
