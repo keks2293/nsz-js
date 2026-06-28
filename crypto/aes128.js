@@ -262,7 +262,8 @@ function aesCtr(aes, counter, data) {
             out[off + j] = data[off + j] ^ ks[j];
         }
         for (let j = BLOCK_SIZE - 1; j >= 8; j--) {
-            if (++counter[j]) break;
+            counter[j]++;
+            if (counter[j]) break;
         }
     }
     return out;
