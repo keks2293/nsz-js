@@ -56,6 +56,19 @@ class DataReader {
     }
 }
 
+class AdapterNCZReader extends DataReader {
+    constructor(adapter, fileOffset, fileSize) {
+        super();
+        this._adapter = adapter;
+        this._fileOffset = fileOffset;
+        this._length = fileSize;
+    }
+    get length() { return this._length; }
+    async read(offset, size) {
+        return this._adapter.read(this._fileOffset + offset, size);
+    }
+}
+
 class BufferReader extends DataReader {
     constructor(buffer) {
         super();
@@ -519,4 +532,4 @@ class AsyncBlockDecompressorReader {
     }
 }
 
-export { NCZDecompressor, DataReader, BufferReader, ChunkedBufferReader, FileDescriptorReader, READ_CHUNK_SIZE };
+export { NCZDecompressor, DataReader, AdapterNCZReader, BufferReader, ChunkedBufferReader, FileDescriptorReader, READ_CHUNK_SIZE };
