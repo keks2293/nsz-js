@@ -57,6 +57,8 @@ Prioritized areas for improvement identified 2026-05-30.
     - **Сломали плавность**: `writeChunk` асинхронный (FSA `writable.write`). Без `await` — fire-and-forget, конкурентные записи. `progressCallback` вызывался до завершения записи → прогресс скачками.
     - **Вывод**: `await` восстановлен на обоих вызовах. Добавляет ~650μs на 13,000 чанков (212MB). Плавность и корректность важнее.
 
+14. ❌ **Cache AesCtr by key+nonce in `_decompressBlocks`** — `fs/ncz.js`. Кешировали `AesCtr` по `key+nonce` через `Map`, чтобы переиспользовать cipher при одинаковых крипто-параметрах секций. **Не работает**: в реальных NSZ файлах counter всегда разный для каждой секции (Trackline Express: key один, counter `00000002...` vs `00000001...`). Кеш даёт 100% промахов, добавляя накладные расходы на `toString()` + `Map.get()` без выигрыша.
+
 ## Memory Optimization
 
 13. ❌ **Reduce READ_CHUNK_SIZE** — `fs/ncz.js:52` uses 16MB. **Keeping as-is** — matches Python nsz `SolidCompressor.CHUNK_SZ = 0x1000000`.
