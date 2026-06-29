@@ -1,5 +1,17 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-06-29)
+
+1. **Refactor: extract converters into shared modules** — `fs/xcz-convert.js`, `fs/nsz-convert.js` (new).
+   - `fs/xcz-convert.js`: `convertXCZStreaming` + `convertXCZMemory` with adapter interface `{ read, write, createHash, log, progress }`. XCI layout computed via `buildPartitionMetas`+`computeLayout`, written by `writeXciHeaders`+`writePartitions`. Shared with `converter.js` (browser) and `nsz-cli.js` (Node).
+   - `fs/nsz-convert.js`: `convertNSZStreaming` + `convertNSZMemory` with same adapter pattern. `collectOutputMeta`/`collectCnmtHashes` helpers reused in both paths. `buildPfs0Blob` shared.
+   - `converter.js`: 496→280 lines, delegates to shared modules. `nsz-cli.js`: ~170→~30 lines per function.
+   - `fs/ncz.js`: `AdapterNCZReader` (colocated with `DataReader` base class), reused by both converter modules.
+   - `verifyHash`/`verifyFileNameHash`: local functions in `fs/nsz-convert.js` + `fs/xcz-convert.js` (not a shared module — inline per consumer matches pre-refactoring pattern). Non-NCZ files are not hashed (matches Python nsz behavior).
+   - **Regression benchmark** (commit `64fed88` vs `4e6330d`, 7 runs each, 109MB NSZ, `--no-verify`):
+     - OLD: 0.320–0.424s (avg 0.386s). NEW: 0.315–0.339s (avg 0.325s).
+     - **−15.6% faster**.
+
 ## ✅ Recent Changes (2026-06-28)
 
 10. **Optimize SHA256 internal buffer: plain Array → Uint8Array** — `crypto/sha256.js:67`. Replaced `this.buf = []` (plain JS Array with byte-by-byte `.push()` → boxed Number heap allocations) with `this.buf = new Uint8Array(256)` + offset pointer `this.bufLen`. Hot path `.update()` now uses `buf.set(subarray, offset)` — zero boxing, zero GC. Padding/finalization in `hexdigest()` uses direct index assignment + `fill()` + `copyWithin()`. Single allocation at construction, no resizing. Microbenchmark: −4.5% on SHA256 alone.

@@ -24,7 +24,9 @@ Prioritized areas for improvement identified 2026-05-30.
 
 ## Medium Impact
 
-15. ⏳ **Duplicated XCZ→XCI logic between converter.js and nsz-cli.js** — ~124 lines of identical algorithm (partition iteration, HFS0 building, NCZ decompression, hash verification) reimplemented with different I/O APIs. Core logic should be extracted into a shared module with Reader/Writer/Hasher abstractions (Ports & Adapters). Browser and CLI each provide platform-specific adapters (`WritableStream`/`fs.writeSync`, `SHA256`/`crypto.createHash`). CLI could also switch to sequential writes (`wb+`, seek-back for headers) for cleaner code matching Python nsz, but this doesn't enable sharing with browser (FSA requires absolute positions).
+15. ✅ **Duplicated XCZ→XCI logic between converter.js and nsz-cli.js** — ~124 lines of identical algorithm (partition iteration, HFS0 building, NCZ decompression, hash verification) reimplemented with different I/O APIs. Core logic extracted into `fs/xcz-convert.js` with adapter pattern: `{ read, write, createHash, log, progress }`. Browser and CLI each provide platform-specific adapters. CLI `convertXCZ` reduced from ~170 to ~30 lines. Browser streaming path reduced from ~100 to ~15 lines.
+
+16. ✅ **Duplicated NSZ→NSP streaming logic between converter.js and nsz-cli.js** — ~113 lines of identical streaming algorithm reimplemented with different I/O APIs. Core logic extracted into `fs/nsz-convert.js` with same adapter interface. CLI `convertNSZ` reduced from ~113 to ~30 lines.
 
 
 5. ❌ **No `npm test` script** — `package.json:8-10`. Tests exist but require manual discovery. Prevents automated CI. **Not needed for this project.**

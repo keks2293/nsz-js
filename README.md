@@ -66,6 +66,8 @@ nsz-js/
 ├── fs/                     # File format modules (mirrors Python nsz Fs/)
 │   ├── pfs0.js             # PFS0 container parsing and writing
 │   ├── ncz.js              # NCZ decompression, DataReader hierarchy, AsyncBlockDecompressorReader
+│   ├── nsz-convert.js      # NSZ→NSP streaming/memory conversion (adapter pattern)
+│   ├── xcz-convert.js      # XCZ→XCI streaming/memory conversion (adapter pattern)
 │   ├── xci.js              # XCI/HFS0 container support (XCIReader, XCIWriter)
 │   ├── hfs0.js             # HFS0 container parsing and writing
 │   ├── ticket.js           # Ticket parsing
@@ -102,6 +104,8 @@ nsz-js/
 - **fs/cnmt.js** - `Cnmt` and `ContentEntry` classes for parsing Content Metadata
 - **fs/nca.js** - `NCAHeader` class for parsing NCA headers
 - **keys.js** - `KeysParser` class for parsing prod.keys files and deriving title KEKs and key area keys
+- **fs/nsz-convert.js** - NSZ→NSP streaming/memory conversion (adapter pattern, shared with CLI)
+- **fs/xcz-convert.js** - XCZ→XCI streaming/memory conversion (adapter pattern, shared with CLI)
 
 ### Crypto Files
 
