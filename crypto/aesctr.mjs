@@ -56,7 +56,7 @@ class AesCtr {
     }
 
     _nodeTransform(data) {
-        return new Uint8Array(this._cipher.update(data));
+        return this._cipher.update(data);
     }
 
     _pureJSTransform(data) {
