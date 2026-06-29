@@ -1,36 +1,16 @@
 import { ZstdDecompressor } from './crypto/zstd.js';
-import { PFS0, PFS0Writer } from './fs/pfs0.js';
-import { NCZDecompressor, DataReader } from './fs/ncz.js';
+import { PFS0 } from './fs/pfs0.js';
+import { DataReader } from './fs/ncz.js';
 import { KeysParser } from './keys.js';
-import { SHA256, sha256 } from './crypto/sha256.js';
+import { SHA256 } from './crypto/sha256.js';
 import { Cnmt } from './fs/cnmt.js';
 import { NCAHeader } from './fs/nca.js';
-import { XCIReader, XCIWriter } from './fs/xci.js';
-import { HFS0Writer } from './fs/hfs0.js';
+import { XCIReader } from './fs/xci.js';
 import { AesXts } from './crypto/aesxts.mjs';
 import { AesCtr } from './crypto/aesctr.mjs';
 import { AesEcb } from './crypto/aes128.js';
-
-function verifyHash(hash, name, fileHashes, onLog) {
-    if (fileHashes.size > 0) {
-        if (fileHashes.has(hash)) {
-            onLog('success', `[VERIFIED]   ${name} ${hash}`);
-        } else {
-            onLog('error', `[CORRUPTED]  ${name} ${hash}`);
-            throw new Error(`Verification detected hash mismatch: ${name}`);
-        }
-    }
-}
-
-function verifyFileNameHash(hash, nczName, ncaName, onLog) {
-    const fileNameHash = nczName.replace(/\.[^.]+$/, '').toLowerCase().slice(0, 32);
-    if (hash.slice(0, 32) === fileNameHash) {
-        onLog('success', `[VERIFIED]   ${ncaName} ${hash}`);
-    } else {
-        onLog('error', `[MISMATCH]   Filename starts with ${fileNameHash} but ${hash.slice(0, 32)} was expected`);
-        throw new Error(`Verification detected hash mismatch: ${ncaName}`);
-    }
-}
+import { convertXCZStreaming, convertXCZMemory } from './fs/xcz-convert.js';
+import { convertNSZStreaming, convertNSZMemory } from './fs/nsz-convert.js';
 
 class FileSliceReader extends DataReader {
     constructor(file, baseOffset = 0, totalLength = null) {
@@ -81,14 +61,6 @@ class NSZConverter {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
-    async writePFS0Header(writable, metas, fixPadding) {
-        const writer = new PFS0Writer(fixPadding);
-        for (const m of metas) writer.add(m.name, m.size);
-        const header = writer.buildHeader();
-        await writable.write({ type: 'write', position: 0, data: header.buffer });
-        return writer;
-    }
-
     async decompressNSZtoNSP(file, options = {}) {
         const { onProgress = () => {}, onLog = () => {}, writable = null, fixPadding = false, verify = false } = options;
         onLog('info', `Processing: ${file.name} (${this.formatBytes(file.size)})`);
@@ -113,125 +85,49 @@ class NSZConverter {
             }
         }
 
-        // First pass: determine output file names, sizes, and cache NCZ compressed data
-        const outputMeta = [];
-        for (const f of files) {
-            const isNcz = f.name.toLowerCase().endsWith('.ncz');
-            const outputName = isNcz ? f.name.slice(0, -4) + '.nca' : f.name;
-            if (isNcz) {
-                onLog('info', `Reading NCZ header: ${f.name}`);
-                const headerReader = new FileSliceReader(file, f.offset, Math.min(f.size, 0x10000));
-                const tmpDecomp = new NCZDecompressor(headerReader, this.keys);
-                const { ncaSize } = await tmpDecomp.getSections();
-                outputMeta.push({ name: outputName, size: ncaSize, isNcz: true, file: file, fileOffset: f.offset, nczLen: f.size });
-            } else {
-                outputMeta.push({ name: outputName, size: f.size, isNcz: false, nczChunks: null, nczLen: 0 });
-            }
-        }
-
+        const fileReader = new FileSliceReader(file, 0, file.size);
         if (writable) {
-            // Streaming path: write header first, then stream decompressed data
             onLog('info', 'Using streaming output (File System Access)');
-            const writer = await this.writePFS0Header(writable, outputMeta, fixPadding);
-
-            let dataWritten = 0;
-            const totalDataSize = outputMeta.reduce((s, m) => s + m.size, 0);
-            const pct = (bytes) => bytes / totalDataSize;
-
-            for (let idx = 0; idx < files.length; idx++) {
-                const meta = outputMeta[idx];
-                const f = files[idx];
-                onLog('info', `[EXISTS]     ${f.name}`);
-                const writePos = writer.headerSize + writer.files[idx].offset;
-
-                if (meta.isNcz) {
-                    const hasher = verify && new SHA256();
-                    const reader = new FileSliceReader(meta.file, meta.fileOffset, meta.nczLen);
-                    const decompressor = new NCZDecompressor(reader, this.keys);
-                    await decompressor.decompress(
-                        (p) => onProgress(pct(dataWritten + meta.size * p), `Decompressing ${f.name}...`),
-                        async (chunk, offset) => {
-                            if (hasher) hasher.update(chunk);
-                            await writable.write({ type: 'write', position: writePos + offset, data: chunk });
-                        });
-                    if (hasher) {
-                        const hash = hasher.hexdigest();
-                        onLog('info', `NCA SHA256: ${hash}`);
-                        if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                            if (cnmtHashes.size > 0) {
-                                verifyHash(hash, meta.name, cnmtHashes, onLog);
-                            } else {
-                                verifyFileNameHash(hash, f.name, meta.name, onLog);
-                            }
-                        }
-                    }
-                } else {
-                    onProgress(pct(dataWritten), `Copying ${f.name}...`);
-                    const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
-                    await writable.write({ type: 'write', position: writePos, data });
-                }
-
-                dataWritten += meta.size;
-                onProgress(pct(dataWritten), `File ${idx + 1}/${files.length} done`);
-            }
-
+            const adapter = {
+                read: (offset, size) => fileReader.read(offset, size),
+                write: (offset, data) => writable.write({ type: 'write', position: offset, data }),
+                log: onLog,
+                progress: onProgress,
+            };
+            const result = await convertNSZStreaming(pfs0Reader, this.keys, adapter, {
+                verify, fixPadding,
+                log: onLog,
+                progress: onProgress,
+                createHash: () => {
+                    const h = new SHA256();
+                    return { update: (d) => h.update(d), digest: () => h.hexdigest() };
+                },
+            }, (d) => this.extractCnmtHashes(d));
             onProgress(1.0, 'Done!');
             const outputName = file.name.replace(/\.(nsz|nspz|nsx)$/i, '.nsp');
-            const totalSize = writer.headerSize + totalDataSize;
+            const totalSize = result.headerSize + result.totalDataSize;
             onLog('success', `Output: ${outputName} (${this.formatBytes(totalSize)})`);
             return { blob: null, name: outputName, size: totalSize, writable: true };
         } else {
-            // Memory path (no File System Access): collect all data, build PFS0
             onLog('info', 'Using memory download (no File System Access)');
-            const outputFiles = [];
-            const totalDataSize = outputMeta.reduce((s, m) => s + m.size, 0);
-            let dataWritten = 0;
-            const pct = (bytes) => bytes / totalDataSize;
-
-            for (let idx = 0; idx < files.length; idx++) {
-                const meta = outputMeta[idx];
-                const f = files[idx];
-                onLog('info', `[EXISTS]     ${f.name}`);
-
-                if (meta.isNcz) {
-                    const nczData = await this.decompressNCZ(file, f, (p) => onProgress(pct(dataWritten + meta.size * p), `Decompressing ${f.name}...`));
-                    if (verify) {
-                        const hash = await sha256(nczData);
-                        onLog('info', `NCA SHA256: ${hash}`);
-                        if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                            if (cnmtHashes.size > 0) {
-                                verifyHash(hash, meta.name, cnmtHashes, onLog);
-                            } else {
-                                verifyFileNameHash(hash, f.name, meta.name, onLog);
-                            }
-                        }
-                    }
-
-                    outputFiles.push({ name: meta.name, data: nczData });
-                } else {
-                    onProgress(pct(dataWritten), `Copying ${f.name}...`);
-                    const data = await file.slice(f.offset, f.offset + f.size).arrayBuffer();
-
-                    outputFiles.push({ name: meta.name, data });
-                }
-
-                dataWritten += meta.size;
-                onProgress(pct(dataWritten), `File ${idx + 1}/${files.length} done`);
-            }
-
-            onLog('info', 'Building PFS0 container...');
-            return this.buildPFS0(outputFiles, { file, onLog, fixPadding, onProgress });
-        }
-    }
-
-    async decompressNCZ(file, nczFile, onProgress = () => {}) {
-        const reader = new FileSliceReader(file, nczFile.offset, nczFile.size);
-        try {
-            const decompressor = new NCZDecompressor(reader, this.keys);
-            return await decompressor.decompress(onProgress);
-        } catch(e) {
-            console.error('NCZ decompression error:', e);
-            throw e;
+            const adapter = {
+                read: (offset, size) => fileReader.read(offset, size),
+                log: onLog,
+                progress: onProgress,
+            };
+            const result = await convertNSZMemory(pfs0Reader, this.keys, adapter, {
+                verify, fixPadding,
+                log: onLog,
+                progress: onProgress,
+                createHash: () => {
+                    const h = new SHA256();
+                    return { update: (d) => h.update(d), digest: () => h.hexdigest() };
+                },
+            }, (d) => this.extractCnmtHashes(d));
+            onProgress(1.0, 'Done!');
+            const outputName = file.name.replace(/\.(nsz|nspz|nsx)$/i, '.nsp');
+            onLog('success', `Output: ${outputName} (${this.formatBytes(result.size)})`);
+            return { blob: result.blob, name: outputName, size: result.size };
         }
     }
 
@@ -244,235 +140,41 @@ class NSZConverter {
         const partitions = xci.getPartitions();
         onLog('info', `Found ${partitions.length} partitions: ${partitions.map(p => p.name).join(', ')}`);
 
-        const PARTITION_HEADER_SIZE = 0x8000;
-        const ROOT_HFS0_PADDED_SIZE = 0x8000;
-
-        // First pass: read each partition's files and determine output sizes
-        const partitionMetas = [];
-        for (const partition of partitions) {
-            if (partition.size === 0) {
-                partitionMetas.push({ name: partition.name, files: [], totalSize: 0, hfs0Size: 0, cnmtHashes: new Set() });
-                continue;
-            }
-            onLog('info', `Reading partition: ${partition.name}`);
-            let hfs0;
-            try {
-                hfs0 = await xci.readPartitionFiles(partition);
-            } catch (e) {
-                onLog('warn', `Cannot parse partition ${partition.name} as HFS0, copying raw: ${e.message}`);
-                partitionMetas.push({ name: partition.name, raw: true, offset: partition.offset, size: partition.size, files: [], totalSize: partition.size, hfs0Size: 0, cnmtHashes: new Set() });
-                continue;
-            }
-            const partitionFiles = hfs0.getFiles();
-            onLog('info', `  ${partitionFiles.length} files`);
-
-            // Extract CNMT hashes from this partition
-            const cnmtHashes = new Set();
-            if (verify) {
-                const cnmtFiles = partitionFiles.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
-                if (cnmtFiles.length > 0) {
-                    for (const cnmtFile of cnmtFiles) {
-                        const cnmtData = await file.slice(cnmtFile.offset, cnmtFile.offset + cnmtFile.size).arrayBuffer();
-                        const hashes = await this.extractCnmtHashes(cnmtData);
-                        hashes.forEach(h => cnmtHashes.add(h));
-                    }
-                    onLog('info', `  Found ${cnmtHashes.size} expected NCA hashes from CNMT in ${partition.name}`);
-                }
-            }
-
-            const fileMetas = [];
-            for (const f of partitionFiles) {
-                const isNcz = f.name.toLowerCase().endsWith('.ncz');
-                const outputName = isNcz ? f.name.replace(/\.ncz$/i, '.nca') : f.name;
-                if (isNcz) {
-                    const headerReader = new FileSliceReader(file, f.offset, Math.min(f.size, 0x10000));
-                    const tmpDecomp = new NCZDecompressor(headerReader, this.keys);
-                    const { ncaSize } = await tmpDecomp.getSections();
-                    fileMetas.push({ name: outputName, size: ncaSize, isNcz: true, fileOffset: f.offset, nczLen: f.size, inputName: f.name });
-                } else {
-                    fileMetas.push({ name: outputName, size: f.size, isNcz: false, offset: f.offset, inputName: f.name });
-                }
-            }
-
-            const fileTotalSize = fileMetas.reduce((s, m) => s + m.size, 0);
-            const tmpWriter = new HFS0Writer(PARTITION_HEADER_SIZE);
-            for (const m of fileMetas) tmpWriter.addEntry(m.name, m.size);
-            const hfs0BufferSize = tmpWriter.getHeaderSize();
-
-            partitionMetas.push({
-                name: partition.name,
-                files: fileMetas,
-                totalSize: fileTotalSize,
-                hfs0BufferSize,
-                raw: false,
-                cnmtHashes
-            });
-        }
+        const adapter = {
+            read: (offset, size) => fileReader.read(offset, size),
+            log: onLog,
+            progress: onProgress,
+            createHash: () => {
+                const h = new SHA256();
+                return { update: (d) => h.update(d), digest: () => h.hexdigest() };
+            },
+        };
 
         if (writable) {
             onLog('info', 'Using streaming output (File System Access)');
-            const xciHeaderBytes = await fileReader.read(0, 0x200);
-            const ROOT_HFS0_OFFSET = 0xF000;
-
-            const rootWriter = new HFS0Writer(ROOT_HFS0_PADDED_SIZE);
-            const partSizes = [];
-            for (const pm of partitionMetas) {
-                const partSize = pm.raw ? pm.size : pm.hfs0BufferSize + pm.totalSize;
-                partSizes.push(partSize);
-                rootWriter.addEntry(pm.name, partSize);
-            }
-            const rootActualHeader = rootWriter.getActualHeaderSize();
-
-            let currentDataOffset = ROOT_HFS0_OFFSET + rootActualHeader;
-            const partOffsets = [];
-            for (let i = 0; i < partitionMetas.length; i++) {
-                partOffsets.push({ name: partitionMetas[i].name, offset: currentDataOffset });
-                currentDataOffset += partSizes[i];
-            }
-            const totalSize = currentDataOffset;
-
-            const rootHeader = rootWriter.buildHeader();
-            const xciOut = new Uint8Array(0x200);
-            xciOut.set(xciHeaderBytes, 0);
-            const xciView = new DataView(xciOut.buffer);
-            xciView.setBigUint64(0x118, BigInt(totalSize), true);
-            xciView.setBigUint64(0x130, BigInt(ROOT_HFS0_OFFSET), true);
-            xciView.setBigUint64(0x138, BigInt(rootActualHeader), true);
-
-            await writable.write({ type: 'write', position: 0, data: xciOut.buffer });
-            await writable.write({ type: 'write', position: ROOT_HFS0_OFFSET, data: rootHeader.buffer });
-
-            // Build/store partition HFS0 buffers, then write them
-            const totalDataSize = partitionMetas.reduce((s, m) => s + m.totalSize, 0);
-            let dataOverall = 0;
-            const pct = (bytes) => bytes / totalDataSize;
-
-            for (let pi = 0; pi < partitionMetas.length; pi++) {
-                const pm = partitionMetas[pi];
-                const po = partOffsets[pi];
-
-                if (pm.raw) {
-                    const data = await file.slice(pm.offset, pm.offset + pm.size).arrayBuffer();
-                    await writable.write({ type: 'write', position: po.offset, data });
-                    dataOverall += pm.size;
-                    onProgress(pct(dataOverall), `Copied raw partition ${pm.name}`);
-                    continue;
-                }
-
-                const pWriter = new HFS0Writer(PARTITION_HEADER_SIZE);
-                for (const m of pm.files) pWriter.addEntry(m.name, m.size);
-                const hfs0Header = pWriter.buildHeader();
-                await writable.write({ type: 'write', position: po.offset, data: hfs0Header });
-
-                let writePos = po.offset + PARTITION_HEADER_SIZE;
-                for (let fi = 0; fi < pm.files.length; fi++) {
-                    const meta = pm.files[fi];
-                    if (meta.isNcz) {
-                        const hasher = verify && new SHA256();
-                        const reader = new FileSliceReader(file, meta.fileOffset, meta.nczLen);
-                        const decomp = new NCZDecompressor(reader, this.keys);
-                        await decomp.decompress(
-                            (p) => onProgress(pct(dataOverall + meta.size * p), `Decompressing ${meta.inputName}...`),
-                            async (chunk, offset) => {
-                                if (hasher) hasher.update(chunk);
-                                await writable.write({ type: 'write', position: writePos + offset, data: chunk });
-                            });
-                        if (hasher) {
-                            const hash = hasher.hexdigest();
-                            onLog('info', `  SHA256: ${hash}`);
-                            if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                                if (pm.cnmtHashes.size > 0) {
-                                    verifyHash(hash, meta.name, pm.cnmtHashes, onLog);
-                                } else {
-                                    verifyFileNameHash(hash, meta.inputName, meta.name, onLog);
-                                }
-                            }
-                        }
-                    } else {
-                        onProgress(pct(dataOverall), `Copying ${meta.inputName}...`);
-                        const data = await file.slice(meta.offset, meta.offset + meta.size).arrayBuffer();
-                        await writable.write({ type: 'write', position: writePos, data });
-                    }
-                    writePos += meta.size;
-                    dataOverall += meta.size;
-                    onProgress(pct(dataOverall), `${pm.name}/${meta.inputName} done`);
-                }
-
-                // If partition HFS0 data area is smaller than the padded header, pad the file
-                const paddedDataSize = Math.max(PARTITION_HEADER_SIZE, writePos - po.offset);
-                if (paddedDataSize > writePos - po.offset) {
-                    const padSize = paddedDataSize - (writePos - po.offset);
-                    await writable.write({ type: 'write', position: writePos, data: new Uint8Array(padSize) });
-                }
-            }
-
+            adapter.write = (offset, data) => writable.write({ type: 'write', position: offset, data });
+            const totalSize = await convertXCZStreaming(xci, this.keys, adapter, {
+                verify,
+                log: onLog,
+                progress: onProgress,
+                createHash: adapter.createHash,
+            }, (d) => this.extractCnmtHashes(d));
             onProgress(1.0, 'Done!');
             const outputName = file.name.replace(/\.xcz$/i, '.xci');
             onLog('success', `Output: ${outputName} (${this.formatBytes(totalSize)})`);
             return { blob: null, name: outputName, size: totalSize, writable: true };
         } else {
-            // Memory path: build entire XCI in memory
             onLog('info', 'Using memory download');
-
-            const xciWriter = new XCIWriter(await fileReader.read(0, 0x200));
-            const totalDataSize = partitionMetas.reduce((s, m) => s + m.totalSize, 0);
-            let dataOverall = 0;
-            const pct = (bytes) => bytes / totalDataSize;
-
-            for (const pm of partitionMetas) {
-                if (pm.raw) {
-                    const rawData = await file.slice(pm.offset, pm.offset + pm.size).arrayBuffer();
-                    xciWriter.addPartition(pm.name, new Uint8Array(rawData));
-                    onLog('info', `  Copied raw partition ${pm.name}: ${rawData.byteLength} bytes`);
-                    dataOverall += pm.size;
-                    onProgress(pct(dataOverall), `Copied ${pm.name}`);
-                    continue;
-                }
-
-                const hfs0Writer = new HFS0Writer(PARTITION_HEADER_SIZE);
-
-                for (const meta of pm.files) {
-                    onLog('info', `${meta.isNcz ? 'Decompressing' : 'Copying'}: ${meta.inputName} -> ${meta.name}`);
-
-                    let fileData;
-                    if (meta.isNcz) {
-                        const nczReader = new FileSliceReader(file, meta.fileOffset, meta.nczLen);
-                        const decompressor = new NCZDecompressor(nczReader, this.keys);
-                        fileData = await decompressor.decompress((p) => onProgress(pct(dataOverall + meta.size * p), `Decompressing ${meta.inputName}...`));
-                        if (verify) {
-                            const hash = await sha256(fileData);
-                            onLog('info', `  SHA256: ${hash}`);
-                            if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                                if (pm.cnmtHashes.size > 0) {
-                                    verifyHash(hash, meta.name, pm.cnmtHashes, onLog);
-                                } else {
-                                    verifyFileNameHash(hash, meta.inputName, meta.name, onLog);
-                                }
-                            }
-                        }
-                    } else {
-                        onProgress(pct(dataOverall), `Copying ${meta.inputName}...`);
-                        fileData = new Uint8Array(await file.slice(meta.offset, meta.offset + meta.size).arrayBuffer());
-                    }
-
-                    hfs0Writer.addFile(meta.name, fileData);
-                    dataOverall += meta.size;
-                    onProgress(pct(dataOverall), `${pm.name}/${meta.inputName} done`);
-                }
-
-                const hfs0Data = hfs0Writer.build();
-                xciWriter.addPartition(pm.name, hfs0Data);
-                onLog('info', `  HFS0 partition ${pm.name} built: ${hfs0Data.length} bytes`);
-            }
-
-            onLog('info', 'Building XCI...');
-            const xciData = xciWriter.build();
-            onLog('info', `XCI built: ${xciData.length} bytes`);
-
+            const result = await convertXCZMemory(xci, this.keys, adapter, {
+                verify,
+                log: onLog,
+                progress: onProgress,
+                createHash: adapter.createHash,
+            }, (d) => this.extractCnmtHashes(d));
             onProgress(1.0, 'Done!');
             const outputName = file.name.replace(/\.xcz$/i, '.xci');
-            const blob = new Blob([xciData], { type: 'application/octet-stream' });
-            return { blob, name: outputName, size: xciData.length };
+            onLog('success', `Output: ${outputName} (${this.formatBytes(result.size)})`);
+            return { blob: result.blob, name: outputName, size: result.size };
         }
     }
 
@@ -588,37 +290,6 @@ class NSZConverter {
         return hashes;
     }
 
-    async buildPFS0(files, options = {}) {
-        const { file = null, onLog = () => {}, fixPadding = false, onProgress = () => {} } = options;
-        const outputName = file ? file.name.replace(/\.(nsz|nspz|nsx)$/i, '.nsp') : 'output.nsp';
-
-        const writer = new PFS0Writer(fixPadding);
-        for (const f of files) {
-            const data = f.data;
-            writer.add(f.name, data instanceof ArrayBuffer ? data.byteLength : data.length);
-        }
-
-        return this.buildPFS0Memory(writer, files, onProgress, onLog, outputName);
-    }
-
-    async buildPFS0Memory(writer, files, onProgress, onLog, outputName) {
-        const header = writer.buildHeader();
-        onLog('info', 'Building file in memory...');
-
-        const totalDataSize = writer.files.reduce((s, f) => s + f.size, 0);
-        const totalSize = header.length + totalDataSize;
-
-        const parts = [header];
-        for (let i = 0; i < writer.files.length; i++) {
-            const data = files[i].data;
-            const arr = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-            parts.push(arr);
-        }
-
-        const blob = new Blob(parts, { type: 'application/octet-stream' });
-        onProgress(1.0, 'Done!');
-        return { blob, name: outputName, size: totalSize };
-    }
 }
 
 export { NSZConverter };
