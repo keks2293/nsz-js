@@ -6,8 +6,8 @@ export class ContentEntry {
         this.ncaId = Array.from(new Uint8Array(buf.slice(32, 48))).map(b => b.toString(16).padStart(2, '0')).join('');
 
         const sizeLow = view.getUint32(48, true);
-        const sizeHigh = view.getUint8(52);
-        this.size = sizeLow | (sizeHigh << 32);
+        const sizeHigh = view.getUint16(52, true);
+        this.size = sizeLow + (sizeHigh * 0x100000000);
 
         this.type = view.getUint8(53);
     }
