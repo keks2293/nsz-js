@@ -4,6 +4,8 @@
 
 1. **Perf: simplify `AsyncBlockDecompressorReader.read()` to single block lookup, remove dead `concatBytes`** — `fs/ncz.js`. Replaced while-loop + `concatBytes(...)` pattern with direct single-block lookup. Each `read(n)` call now returns at most one block (subarray), eliminating the temporary buffer array and concat allocation. Function `concatBytes` removed as dead code. All existing tests pass.
 
+2. **Refactor: split decompress back to streaming/block paths, add FakeSection** — `fs/ncz.js`. Removed `ZstdStreamReader` buffered-reader abstraction, reverted to two independent paths: `_decompressStream` (for `decodeStream`/CLI stdout — processes chunks immediately via `for await`) and `_decompressBlocks` (for `AsyncBlockDecompressorReader` sections loop). Added `FakeSection` when `sections[0].offset > 0x4000` (matches Python nsz behavior). Fixed CLI exit handler race — register `close` listener immediately after `spawn`. Benchmarked copy overhead: ~10ms on 221MB (~0.03%) — negligible, but correctness fix for WASM. WASM `decodeStream` yields views into mutable WASM memory that must be consumed synchronously; `ZstdStreamReader` deferred consumption, forcing an unnecessary `Uint8Array(chunk)` copy. Immediate consumption eliminates the copy. All existing tests pass.
+
 ## ✅ Recent Changes (2026-06-29)
 
 1. **Refactor: extract converters into shared modules** — `fs/xcz-convert.js`, `fs/nsz-convert.js` (new).
