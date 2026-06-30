@@ -1,5 +1,9 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-06-30)
+
+1. **Perf: simplify `AsyncBlockDecompressorReader.read()` to single block lookup, remove dead `concatBytes`** — `fs/ncz.js`. Replaced while-loop + `concatBytes(...)` pattern with direct single-block lookup. Each `read(n)` call now returns at most one block (subarray), eliminating the temporary buffer array and concat allocation. Function `concatBytes` removed as dead code. All existing tests pass.
+
 ## ✅ Recent Changes (2026-06-29)
 
 1. **Refactor: extract converters into shared modules** — `fs/xcz-convert.js`, `fs/nsz-convert.js` (new).

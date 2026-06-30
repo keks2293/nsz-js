@@ -8,20 +8,6 @@ function allocByte(n) {
     return new Uint8Array(n);
 }
 
-function concatBytes(...arrays) {
-    let totalLength = 0;
-    for (const arr of arrays) {
-        totalLength += arr.length;
-    }
-    const result = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const arr of arrays) {
-        result.set(arr, offset);
-        offset += arr.length;
-    }
-    return result;
-}
-
 function bytesToAscii(bytes, start, end) {
     let str = '';
     for (let i = start; i < end; i++) {
@@ -509,26 +495,20 @@ class AsyncBlockDecompressorReader {
     }
 
     async read(size) {
-        const buffer = [];
-        let remaining = size;
+        const blockId = this.position >>> this.blockSizeExp;
+        if (blockId >= this.numberOfBlocks) return null;
 
-        while (remaining > 0) {
-            const blockOffset = this.position & (this.blockSize - 1);
-            const blockId = this.position >>> this.blockSizeExp;
+        const blockOffset = this.position & (this.blockSize - 1);
+        const block = await this.getBlock(blockId);
+        const available = block.length - blockOffset;
+        const toRead = Math.min(available, size);
 
-            if (blockId >= this.numberOfBlocks) break;
+        this.position += toRead;
+        return sliceBytes(block, blockOffset, blockOffset + toRead);
+    }
 
-            const block = await this.getBlock(blockId);
-            const available = block.length - blockOffset;
-            const toRead = Math.min(remaining, available);
-
-            buffer.push(sliceBytes(block, blockOffset, blockOffset + toRead));
-
-            this.position += toRead;
-            remaining -= toRead;
-        }
-
-        return concatBytes(...buffer);
+    close() {
+        // No resources to release
     }
 }
 
