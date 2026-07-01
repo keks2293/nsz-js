@@ -171,6 +171,15 @@ async function writePartitions(adapter, partitionMetas, layout, keys, verify, op
                 progress(pct(dataOverall), `Copying ${meta.inputName}...`);
                 const data = await adapter.read(meta.offset, meta.size);
                 await adapter.write(writePos, data);
+                if (verify && meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                    const hash = await sha256(data);
+                    log('info', `  SHA256: ${hash}`);
+                    if (pm.cnmtHashes.size > 0) {
+                        verifyHash(hash, meta.name, pm.cnmtHashes, log);
+                    } else {
+                        verifyFileNameHash(hash, meta.inputName, meta.name, log);
+                    }
+                }
             }
             writePos += meta.size;
             dataOverall += meta.size;
@@ -237,6 +246,15 @@ export async function convertXCZMemory(xci, keys, adapter, options, extractCnmtH
             } else {
                 progress(pct(dataOverall), `Copying ${meta.inputName}...`);
                 fileData = new Uint8Array(await adapter.read(meta.offset, meta.size));
+                if (verify && meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                    const hash = await sha256(fileData);
+                    log('info', `  SHA256: ${hash}`);
+                    if (pm.cnmtHashes.size > 0) {
+                        verifyHash(hash, meta.name, pm.cnmtHashes, log);
+                    } else {
+                        verifyFileNameHash(hash, meta.inputName, meta.name, log);
+                    }
+                }
             }
 
             hfs0Writer.addFile(meta.name, fileData);
