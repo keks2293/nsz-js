@@ -47,10 +47,10 @@ export async function convertNSZStreaming(pfs0, keys, adapter, options, extractC
     for (let idx = 0; idx < files.length; idx++) {
         const meta = outputMeta[idx];
         const f = files[idx];
-        options.log('info', `[EXISTS]     ${f.name}`);
         const writePos = writer.headerSize + writer.files[idx].offset;
 
         if (meta.isNcz) {
+            options.log('info', `[EXISTS]     ${f.name}`);
             const hasher = verify ? options.createHash() : null;
             const nczReader = new AdapterNCZReader(adapter, meta.offset, meta.nczLen);
             const decomp = new NCZDecompressor(nczReader, keys);
@@ -72,9 +72,19 @@ export async function convertNSZStreaming(pfs0, keys, adapter, options, extractC
                 }
             }
         } else {
+            options.log('info', `[EXISTS]     ${f.name}`);
             options.progress(pct(dataWritten), `Copying ${f.name}...`);
             const data = await adapter.read(meta.offset, meta.size);
             await adapter.write(writePos, data);
+            if (verify && meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                const hash = await sha256(data);
+                options.log('info', `NCA SHA256: ${hash}`);
+                if (cnmtHashes.size > 0) {
+                    verifyHash(hash, meta.name, cnmtHashes, options.log);
+                } else {
+                    verifyFileNameHash(hash, f.name, meta.name, options.log);
+                }
+            }
         }
 
         dataWritten += meta.size;
@@ -168,6 +178,15 @@ export async function convertNSZMemory(pfs0, keys, adapter, options, extractCnmt
         } else {
             options.progress(pct(dataWritten), `Copying ${f.name}...`);
             const data = await adapter.read(meta.offset, meta.size);
+            if (verify && meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                const hash = await sha256(data);
+                options.log('info', `NCA SHA256: ${hash}`);
+                if (cnmtHashes.size > 0) {
+                    verifyHash(hash, meta.name, cnmtHashes, options.log);
+                } else {
+                    verifyFileNameHash(hash, f.name, meta.name, options.log);
+                }
+            }
             outputFiles.push({ name: meta.name, data });
         }
 
