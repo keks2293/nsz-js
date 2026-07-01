@@ -423,7 +423,6 @@ class AsyncBlockDecompressorReader {
         this.reader = reader;
         this.baseOffset = baseOffset;
         this.blockSize = Math.pow(2, blockSizeExponent);
-        this.blockSizeExp = blockSizeExponent;
         this.numberOfBlocks = numberOfBlocks;
         this.decompressedSize = decompressedSize;
         this.currentBlock = null;
@@ -474,7 +473,7 @@ class AsyncBlockDecompressorReader {
     }
 
     async read(size) {
-        const blockId = this.position >>> this.blockSizeExp;
+        const blockId = Math.floor(this.position / this.blockSize);
         if (blockId >= this.numberOfBlocks) return null;
 
         const blockOffset = this.position & (this.blockSize - 1);

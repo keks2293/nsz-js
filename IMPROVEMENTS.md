@@ -37,6 +37,13 @@ Prioritized areas for improvement identified 2026-05-30.
 
 9. ❌ **Ненадёжная проверка magic bytes** — `fs/nca.js`. Bug report claimed `view.getUint8(4)` is used. **Not a bug**: code reads 4 bytes at `0x200-0x203` via `String.fromCharCode(buffer[0x200], buffer[0x201], buffer[0x202], buffer[0x203])` and compares against `'NCA3'`/`'NCA2'`. No single-byte check exists in this file.
 
+10. ✅ **Bit-shift overflow (`>>>`) in AES-CTR/XTS/block reader** — `crypto/aesctr.mjs`, `crypto/aesxts.mjs`, `fs/ncz.js`. `>>>` converts to Uint32 before shifting, silently truncating values above 2^32. **Что ломает**:
+    - **`aesctr.mjs:51`** — `tmp >>>= 8` в `seek()`: counter блока обрезается для файлов >64GB (offset/16 > 2^32). Результат: неправильный keystream → битые расшифрованные данные → NSP повреждён.
+    - **`aesxts.mjs:30`** — `sector >>>= 8` в `getTweakBytes()`: XTS tweak для sector > 2^32 получает неверные байты. На практике sector числа маленькие (<2^32), но код некорректен по спецификации.
+    - **`ncz.js:477`** — `position >>> blockSizeExp` в `AsyncBlockDecompressorReader.read()`: blockId обрезается для NCZ >2^(32+blockSizeExp). Блок-ридер пропускает данные или читает не тот блок → битая декомпрессия.
+    - **`aesctr.mjs:48`** — `offset >> 4` (арифметический сдвиг) ломался уже на >2GB. `>>>` ломается на >64GB. Python nsz использует произвольную точность int — проблем нет.
+    - **Фикс**: все три места заменены на `Math.floor(x / N)` — эквивалент питоновского `>> N` без overflow.
+
 
 ## Polish
 

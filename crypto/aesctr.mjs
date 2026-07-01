@@ -45,10 +45,10 @@ class AesCtr {
         if (!this._counter) this._counter = new Uint8Array(BLOCK_SIZE);
         const counter = this._counter;
         counter.set(this.nonce.subarray(0, 8));
-        let tmp = offset >> 4;
+        let tmp = Math.floor(offset / 16);
         for (let j = BLOCK_SIZE - 1; j >= 8; j--) {
             counter[j] = tmp & 0xff;
-            tmp >>>= 8;
+            tmp = Math.floor(tmp / 256);
         }
         if (useNodeCrypto) {
             this._cipher = nodeCrypto.createCipheriv('aes-128-ctr', this.key, counter);
