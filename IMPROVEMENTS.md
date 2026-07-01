@@ -61,11 +61,19 @@ Prioritized areas for improvement identified 2026-05-30.
 
 14. ❌ **Cache AesCtr by key+nonce in `_decompressBlocks`** — `fs/ncz.js`. Кешировали `AesCtr` по `key+nonce` через `Map`, чтобы переиспользовать cipher при одинаковых крипто-параметрах секций. **Не работает**: в реальных NSZ файлах counter всегда разный для каждой секции (Trackline Express: key один, counter `00000002...` vs `00000001...`). Кеш даёт 100% промахов, добавляя накладные расходы на `toString()` + `Map.get()` без выигрыша.
 
+15. ✅ ~~**ZstdStreamReader**~~ **Отказ от ZstdStreamReader** — `fs/ncz.js`. Пробовали ввести `ZstdStreamReader` — буферизированную обёртку `.read(n)` для потокового zstd (CLI spawn + WASM async generator), чтобы и блоки, и стриминг шли через единый цикл секций.
+    - **Проблема**: `ZstdStreamReader` откладывал потребление chunk'ов через async границы. WASM `decodeStream` возвращает `Uint8Array` view в `instance.exports.memory.buffer` — mutable WASM память. Если view не потребить синхронно, следующий вызов `ZSTD_decompressStream` перезаписывает данные.
+    - **Фикс**: вернулись к двум независимым путям. `_decompressStream` потребляет chunk'и сразу в `for await` без буферизации. `_decompressBlocks` использует `AsyncBlockDecompressorReader.read(n)` — работает с независимыми 16KB блоками, там нет этой проблемы.
+    - **Дополнительно**: добавлен `FakeSection` при `sections[0].offset > 0x4000` (совместимость с Python nsz). Пофикшен race condition в CLI — `close` listener теперь регистрируется сразу после `spawn`.
+    - **Benchmark**: копия при push в WASM давала ~10ms на 221MB (0.03%) — не проблема производительности, а корректности.
+
 ## Memory Optimization
 
 13. ❌ **Reduce READ_CHUNK_SIZE** — `fs/ncz.js:52` uses 16MB. **Keeping as-is** — matches Python nsz `SolidCompressor.CHUNK_SZ = 0x1000000`.
 
 14. ❌ **Delete _decompressBuffered for memory savings** — Attempted to eliminate full NCA buffer allocation in memory path. **Not possible** — blob-requirement needs full buffer for `new Blob([data])`.
+
+
 
 ## Info
 
@@ -79,4 +87,4 @@ Prioritized areas for improvement identified 2026-05-30.
 
 - ✅ **Lazy SW registration on first use in convert handler (`main.js`)** — SW no longer registers at DOMContentLoaded. Registration happens only when convert is triggered in SW or FSA mode, guarded by `window._swRegistered` flag.
 
-- ❌ **_decompressStream gap for first section** — Bug report claimed `_decompressStream` doesn't account for gap between `UNCOMPRESSABLE_HEADER_SIZE` (0x4000) and first real section. **Not a bug**: `getSections()` already inserts a `FakeSection` when `sections[0].offset > UNCOMPRESSABLE_HEADER_SIZE`, and `_processStreamDecompressedChunk` uses section-aware positioning for every decompressed byte with correct `ncaPos` tracking. Python nsz's approach (raw offset arithmetic) is equivalent.
+- ❌ **_decompressStream gap for first section** — Bug report claimed `_decompressStream` doesn't account for gap between `UNCOMPRESSABLE_HEADER_SIZE` (0x4000) and first real section. **Not a bug**: `getSections()` inserts FakeSection when `sections[0].offset > UNCOMPRESSABLE_HEADER_SIZE`. Python nsz's raw offset arithmetic is equivalent.
