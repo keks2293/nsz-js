@@ -158,7 +158,7 @@ async function writePartitions(adapter, partitionMetas, layout, keys, verify, op
                     });
                 if (hasher) {
                     const hash = hasher.digest();
-                    log('info', `  SHA256: ${hash}`);
+                    log('info', `  [NCA HASH]   ${hash}`);
                     if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
                         if (pm.cnmtHashes.size > 0) {
                             verifyHash(hash, meta.name, pm.cnmtHashes, log);
@@ -173,7 +173,7 @@ async function writePartitions(adapter, partitionMetas, layout, keys, verify, op
                 await adapter.write(writePos, data);
                 if (verify && meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
                     const hash = await sha256(data);
-                    log('info', `  SHA256: ${hash}`);
+                    log('info', `  [NCA HASH]   ${hash}`);
                     if (pm.cnmtHashes.size > 0) {
                         verifyHash(hash, meta.name, pm.cnmtHashes, log);
                     } else {
@@ -234,7 +234,7 @@ export async function convertXCZMemory(xci, keys, adapter, options, extractCnmtH
                     (p) => progress(pct(dataOverall + meta.size * p), `Decompressing ${meta.inputName}...`));
                 if (verify) {
                     const hash = await sha256(fileData);
-                    log('info', `  SHA256: ${hash}`);
+                    log('info', `  [NCA HASH]   ${hash}`);
                     if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
                         if (pm.cnmtHashes.size > 0) {
                             verifyHash(hash, meta.name, pm.cnmtHashes, log);
@@ -248,7 +248,7 @@ export async function convertXCZMemory(xci, keys, adapter, options, extractCnmtH
                 fileData = new Uint8Array(await adapter.read(meta.offset, meta.size));
                 if (verify && meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
                     const hash = await sha256(fileData);
-                    log('info', `  SHA256: ${hash}`);
+                    log('info', `  [NCA HASH]   ${hash}`);
                     if (pm.cnmtHashes.size > 0) {
                         verifyHash(hash, meta.name, pm.cnmtHashes, log);
                     } else {

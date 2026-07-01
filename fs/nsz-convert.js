@@ -36,7 +36,10 @@ export async function convertNSZStreaming(pfs0, keys, adapter, options, extractC
     const outputMeta = await collectOutputMeta(files, adapter, keys);
 
     const writer = new PFS0Writer(fixPadding);
-    for (const m of outputMeta) writer.add(m.name, m.size);
+    for (const m of outputMeta) {
+        options.log('info', `[ADDING]     ${m.name} 0x${m.size.toString(16)} bytes to PFS0 at 0x${(writer.addpos || 0).toString(16)}`);
+        writer.add(m.name, m.size);
+    }
     const header = writer.buildHeader();
     await adapter.write(0, header);
 
@@ -62,7 +65,7 @@ export async function convertNSZStreaming(pfs0, keys, adapter, options, extractC
                 });
             if (hasher) {
                 const hash = hasher.digest();
-                options.log('info', `NCA SHA256: ${hash}`);
+                options.log('info', `[NCA HASH]   ${hash}`);
                 if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
                     if (cnmtHashes.size > 0) {
                         verifyHash(hash, meta.name, cnmtHashes, options.log);
@@ -78,7 +81,7 @@ export async function convertNSZStreaming(pfs0, keys, adapter, options, extractC
             await adapter.write(writePos, data);
             if (verify && meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
                 const hash = await sha256(data);
-                options.log('info', `NCA SHA256: ${hash}`);
+                options.log('info', `[NCA HASH]   ${hash}`);
                 if (cnmtHashes.size > 0) {
                     verifyHash(hash, meta.name, cnmtHashes, options.log);
                 } else {
@@ -165,7 +168,7 @@ export async function convertNSZMemory(pfs0, keys, adapter, options, extractCnmt
                 (p) => options.progress(pct(dataWritten + meta.size * p), `Decompressing ${f.name}...`));
             if (verify) {
                 const hash = await sha256(nczData);
-                options.log('info', `NCA SHA256: ${hash}`);
+                options.log('info', `[NCA HASH]   ${hash}`);
                 if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
                     if (cnmtHashes.size > 0) {
                         verifyHash(hash, meta.name, cnmtHashes, options.log);
@@ -180,7 +183,7 @@ export async function convertNSZMemory(pfs0, keys, adapter, options, extractCnmt
             const data = await adapter.read(meta.offset, meta.size);
             if (verify && meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
                 const hash = await sha256(data);
-                options.log('info', `NCA SHA256: ${hash}`);
+                options.log('info', `[NCA HASH]   ${hash}`);
                 if (cnmtHashes.size > 0) {
                     verifyHash(hash, meta.name, cnmtHashes, options.log);
                 } else {
