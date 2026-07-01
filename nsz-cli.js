@@ -103,6 +103,7 @@ async function main() {
 }
 
 async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys, verify) {
+    console.log(`[VERIFY NSZ] ${inputPath}`);
     console.log('Detected XCZ file');
     const { XCIReader } = await import('./fs/xci.js');
     const outPath = outputPath || inputPath.replace(/\.xcz$/i, '.xci');
@@ -155,9 +156,13 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys, verify
 
 async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPadding, verify) {
     const outPath = outputPath || inputPath.replace(/\.(nsz|nspz|nsx)$/i, '.nsp');
+    console.log(`[VERIFY NSZ] ${inputPath}`);
     console.log(`Output: ${outPath}`);
 
     const pfs0Reader = await PFS0.open(inReader);
+    for (const f of pfs0Reader.getFiles()) {
+        console.log(`[OPEN  ]     ${f.name} 0x${f.size.toString(16)} bytes at 0x${f.offset.toString(16)}`);
+    }
 
     const outputFd = fs.openSync(outPath, 'w');
     try {

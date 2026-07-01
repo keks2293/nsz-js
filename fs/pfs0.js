@@ -74,6 +74,7 @@ class PFS0Writer {
             ? 0
             : this.files[this.files.length - 1].offset + this.files[this.files.length - 1].size;
         this.files.push({ name, offset, size });
+        this.addpos = offset + size;
     }
 
     get headerSize() {
