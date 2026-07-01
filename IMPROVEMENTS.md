@@ -74,6 +74,8 @@ Prioritized areas for improvement identified 2026-05-30.
     - **Дополнительно**: добавлен `FakeSection` при `sections[0].offset > 0x4000` (совместимость с Python nsz). Пофикшен race condition в CLI — `close` listener теперь регистрируется сразу после `spawn`.
     - **Benchmark**: копия при push в WASM давала ~10ms на 221MB (0.03%) — не проблема производительности, а корректности.
 
+- ✅ **AsyncBlockDecompressorReader ~30% faster — sequential block iteration** — `fs/ncz.js`. Removed per-read `position & (blockSize - 1)`, `getBlock()` cache lookup and `sliceBytes(block, blockOffset, …)` in favour of simple `nextBlock()` + consume-from-front pattern. Benchmarked on a generated block-mode NSZ (`NCZBLOCK` magic, 658 MB → 1.56 GB, 3 warm runs): OLD position-aware 0.11/0.08/0.12 s, NEW sequential 0.07/0.07/0.07 s → ~30% faster. On streaming NSZ the reader is not exercised, so refactor is a no-op there (~0.08 s both).
+
 ## Memory Optimization
 
 13. ❌ **Reduce READ_CHUNK_SIZE** — `fs/ncz.js:52` uses 16MB. **Keeping as-is** — matches Python nsz `SolidCompressor.CHUNK_SZ = 0x1000000`.
