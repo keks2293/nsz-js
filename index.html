@@ -732,6 +732,7 @@
     (function(){
         window.addLog('info', 'Loading...');
         import('./main.js').catch(function(e){
+            console.error(e);
             window.addLog('error', (e && e.message || e));
             window.addLog('error', 'Failed to load application');
             document.getElementById('loadingSpinner').style.display = 'none';
