@@ -69,6 +69,9 @@ class NSZConverter {
         const pfs0Reader = await PFS0.open(new FileSliceReader(file));
         const files = pfs0Reader.getFiles();
         onLog('info', `PFS0 header: ${files.length} files`);
+        for (const f of files) {
+            onLog('info', `[OPEN  ]     ${f.name} 0x${f.size.toString(16)} bytes at 0x${f.offset.toString(16)}`);
+        }
         onLog('info', `Found ${files.length} files in container`);
 
 
