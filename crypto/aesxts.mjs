@@ -27,7 +27,7 @@ function getTweakBytes(sector) {
     let tweak = 0;
     for (let i = 0; i < 16; i++) {
         tweak |= (sector & 0xFF) << (i * 8);
-        sector >>>= 8;
+        sector = Math.floor(sector / 256);
     }
     const hex = tweak.toString(16).padStart(32, '0');
     const buf = new Uint8Array(16);
