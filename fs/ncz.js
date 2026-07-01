@@ -426,8 +426,7 @@ class AsyncBlockDecompressorReader {
         this.numberOfBlocks = numberOfBlocks;
         this.decompressedSize = decompressedSize;
         this.currentBlock = null;
-        this.currentBlockId = -1;
-        this.position = 0;
+        this.currentBlockIndex = -1;
 
         const compressedBlockSizeList = [];
         for (let i = 0; i < numberOfBlocks; i++) {
@@ -444,11 +443,14 @@ class AsyncBlockDecompressorReader {
         this.compressedBlockSizeList = compressedBlockSizeList;
     }
 
-    async getBlock(blockId) {
-        if (this.currentBlockId === blockId) {
-            return this.currentBlock;
+    async nextBlock() {
+        this.currentBlockIndex++;
+        if (this.currentBlockIndex >= this.numberOfBlocks) {
+            this.currentBlock = null;
+            return null;
         }
 
+        const blockId = this.currentBlockIndex;
         const relOffset = this.compressedBlockOffsetList[blockId];
         const compressedSize = this.compressedBlockSizeList[blockId];
 
@@ -468,21 +470,25 @@ class AsyncBlockDecompressorReader {
             this.currentBlock = compressedData;
         }
 
-        this.currentBlockId = blockId;
         return this.currentBlock;
     }
 
     async read(size) {
-        const blockId = Math.floor(this.position / this.blockSize);
-        if (blockId >= this.numberOfBlocks) return null;
+        if (!this.currentBlock) {
+            await this.nextBlock();
+        }
+        if (!this.currentBlock) return null;
 
-        const blockOffset = this.position & (this.blockSize - 1);
-        const block = await this.getBlock(blockId);
-        const available = block.length - blockOffset;
-        const toRead = Math.min(available, size);
+        const toRead = Math.min(this.currentBlock.length, size);
+        const chunk = sliceBytes(this.currentBlock, 0, toRead);
 
-        this.position += toRead;
-        return sliceBytes(block, blockOffset, blockOffset + toRead);
+        if (toRead < this.currentBlock.length) {
+            this.currentBlock = this.currentBlock.subarray(toRead);
+        } else {
+            this.currentBlock = null;
+        }
+
+        return chunk;
     }
 
     close() {
