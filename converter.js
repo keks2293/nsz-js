@@ -12,6 +12,13 @@ import { AesEcb } from './crypto/aes128.js';
 import { convertXCZStreaming, convertXCZMemory } from './fs/xcz-convert.js';
 import { convertNSZStreaming, convertNSZMemory } from './fs/nsz-convert.js';
 
+const isNode = typeof process !== 'undefined' && process.versions?.node;
+let nodeCrypto = null;
+if (isNode) {
+    const mod = await import('crypto');
+    nodeCrypto = mod.default || mod;
+}
+
 class FileSliceReader extends DataReader {
     constructor(file, baseOffset = 0, totalLength = null) {
         super();
@@ -230,12 +237,11 @@ class NSZConverter {
                     const keyBlock = hdrDecrypted.subarray(0x300, 0x340);
 
                     let unwrapped;
-                    try {
-                        const nodeCrypto = await import('crypto');
+                    if (nodeCrypto) {
                         const ecb = nodeCrypto.createDecipheriv('aes-128-ecb', kak, null);
                         ecb.setAutoPadding(false);
                         unwrapped = new Uint8Array(ecb.update(keyBlock));
-                    } catch {
+                    } else {
                         const ecb = new AesEcb(kak);
                         unwrapped = ecb.decrypt(keyBlock);
                     }
