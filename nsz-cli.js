@@ -177,11 +177,18 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
             progress: () => {},
         };
 
-        const extractCnmtHashes = async (cnmtData) => {
+        let cnmtHashes = new Set();
+        if (verify) {
             const { NSZConverter } = await import('./converter.js');
             const converter = new NSZConverter(keys);
-            return converter.extractCnmtHashes(cnmtData);
-        };
+            const files = pfs0Reader.getFiles();
+            for (const f of files.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'))) {
+                const cnmtData = await adapter.read(f.offset, f.size);
+                const hashes = await converter.extractCnmtHashes(cnmtData);
+                hashes.forEach(h => cnmtHashes.add(h));
+            }
+            console.log(`Found ${cnmtHashes.size} expected NCA hashes from CNMT`);
+        }
 
         await convertNSZStreaming(pfs0Reader, keys, adapter, {
             verify, fixPadding,
@@ -191,7 +198,7 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
                 const h = crypto.createHash('sha256');
                 return { update: (d) => h.update(d), digest: () => h.digest('hex') };
             },
-        }, extractCnmtHashes);
+        }, cnmtHashes);
     } catch (e) {
         fs.closeSync(outputFd);
         try { fs.unlinkSync(outPath); } catch {}
