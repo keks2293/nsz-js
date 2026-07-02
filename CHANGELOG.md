@@ -1,5 +1,11 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-07-02)
+
+1. **Fix: remove double CNMT hash extraction in NSZ path** — `converter.js`, `nsz-convert.js`, `nsz-cli.js`. `decompressNSZtoNSP` collected `cnmtHashes` once (lines 85-96), then passed `extractCnmtHashes` callback to `convertNSZStreaming`, which called `collectCnmtHashes` that iterated files and decrypted CNMT again. Now `convertNZStreaming`/`convertNSZMemory` accept `cnmtHashes` Set directly (like Python's `ExtractHashes` → `Set` pattern). `collectCnmtHashes` removed. `nsz-cli.js` collects hashes once before calling `convertNZStreaming`. XCZ path unchanged (no duplication there).
+
+2. **Refactor: replace dynamic `import('crypto')` with `isNode` guard** — `converter.js`. Same pattern as `aesctr.mjs`/`aesxts.mjs`. Module-level detection, runs once. Browser uses pure-JS `AesEcb` (was always the fallback), Node.js uses native `crypto.createDecipheriv` (AES-NI). No performance change in browser path.
+
 ## ✅ Recent Changes (2026-06-30)
 
 1. **Perf: simplify `AsyncBlockDecompressorReader.read()` to single block lookup, remove dead `concatBytes`** — `fs/ncz.js`. Replaced while-loop + `concatBytes(...)` pattern with direct single-block lookup. Each `read(n)` call now returns at most one block (subarray), eliminating the temporary buffer array and concat allocation. Function `concatBytes` removed as dead code. All existing tests pass.
@@ -10,7 +16,7 @@
 
 1. **Refactor: extract converters into shared modules** — `fs/xcz-convert.js`, `fs/nsz-convert.js` (new).
    - `fs/xcz-convert.js`: `convertXCZStreaming` + `convertXCZMemory` with adapter interface `{ read, write, createHash, log, progress }`. XCI layout computed via `buildPartitionMetas`+`computeLayout`, written by `writeXciHeaders`+`writePartitions`. Shared with `converter.js` (browser) and `nsz-cli.js` (Node).
-   - `fs/nsz-convert.js`: `convertNSZStreaming` + `convertNSZMemory` with same adapter pattern. `collectOutputMeta`/`collectCnmtHashes` helpers reused in both paths. `buildPfs0Blob` shared.
+    - `fs/nsz-convert.js`: `convertNSZStreaming` + `convertNSZMemory` with same adapter pattern. `collectOutputMeta` helper reused in both paths. `buildPfs0Blob` shared. (Note: `collectCnmtHashes` removed 2026-07-02 — now receives `cnmtHashes` Set directly.)
    - `converter.js`: 496→280 lines, delegates to shared modules. `nsz-cli.js`: ~170→~30 lines per function.
    - `fs/ncz.js`: `AdapterNCZReader` (colocated with `DataReader` base class), reused by both converter modules.
    - `verifyHash`/`verifyFileNameHash`: local functions in `fs/nsz-convert.js` + `fs/xcz-convert.js` (not a shared module — inline per consumer matches pre-refactoring pattern). Non-NCZ files are not hashed (matches Python nsz behavior).
