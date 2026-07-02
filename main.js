@@ -186,6 +186,30 @@ async function main() {
             progressTitle.textContent = 'Ready';
             updateProgress(0);
         }
+
+        snapFileListHeight();
+    }
+
+    function snapFileListHeight() {
+        if (files.length > 0) {
+            const firstItem = fileListScroll.querySelector('.file');
+            if (firstItem) {
+                const itemHeight = firstItem.getBoundingClientRect().height;
+                const border = 4;
+                const totalHeight = Math.max(120, Math.min(200, window.innerWidth * 0.22));
+                const maxFit = Math.max(1, Math.floor((totalHeight - border) / itemHeight));
+                const visibleCount = Math.min(files.length, maxFit);
+                dropZone.style.transition = 'none';
+                dropZone.style.height = `${visibleCount * itemHeight + border}px`;
+                requestAnimationFrame(() => dropZone.style.transition = '');
+                fileListScroll.classList.toggle('is-full', files.length > maxFit);
+                return;
+            }
+        }
+        dropZone.style.transition = 'none';
+        dropZone.style.height = '';
+        requestAnimationFrame(() => dropZone.style.transition = '');
+        fileListScroll.classList.remove('is-full');
     }
 
     function updateFileProgress(index, pct) {
@@ -479,6 +503,9 @@ async function main() {
     if (sp) sp.style.display = 'none';
 
     await loadDefaultKeys();
+
+    const ro = new ResizeObserver(() => snapFileListHeight());
+    ro.observe(dropZone);
 
     progressTitle.textContent = 'Ready';
     addLog('info', 'Ready');
