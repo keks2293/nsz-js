@@ -25,13 +25,9 @@ function verifyFileNameHash(hash, nczName, ncaName, onLog) {
     }
 }
 
-export async function convertNSZStreaming(pfs0, keys, adapter, options, extractCnmtHashes) {
+export async function convertNSZStreaming(pfs0, keys, adapter, options, cnmtHashes = new Set()) {
     const { verify = false, fixPadding = false } = options;
     const files = pfs0.getFiles();
-
-    const cnmtHashes = verify && extractCnmtHashes
-        ? await collectCnmtHashes(files, adapter, extractCnmtHashes)
-        : new Set();
 
     const outputMeta = await collectOutputMeta(files, adapter, keys);
 
@@ -114,17 +110,6 @@ async function collectOutputMeta(files, adapter, keys) {
     return outputMeta;
 }
 
-async function collectCnmtHashes(files, adapter, extractCnmtHashes) {
-    const cnmtHashes = new Set();
-    const cnmtFiles = files.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
-    for (const cnmtFile of cnmtFiles) {
-        const cnmtData = await adapter.read(cnmtFile.offset, cnmtFile.size);
-        const hashes = await extractCnmtHashes(cnmtData);
-        hashes.forEach(h => cnmtHashes.add(h));
-    }
-    return cnmtHashes;
-}
-
 function buildPfs0Blob(outputFiles, fixPadding) {
     const writer = new PFS0Writer(fixPadding);
     for (const f of outputFiles) {
@@ -141,13 +126,9 @@ function buildPfs0Blob(outputFiles, fixPadding) {
     return { blob: new Blob(parts, { type: 'application/octet-stream' }), size: header.length + totalDataSize };
 }
 
-export async function convertNSZMemory(pfs0, keys, adapter, options, extractCnmtHashes) {
+export async function convertNSZMemory(pfs0, keys, adapter, options, cnmtHashes = new Set()) {
     const { verify = false, fixPadding = false } = options;
     const files = pfs0.getFiles();
-
-    const cnmtHashes = verify && extractCnmtHashes
-        ? await collectCnmtHashes(files, adapter, extractCnmtHashes)
-        : new Set();
 
     const outputMeta = await collectOutputMeta(files, adapter, keys);
 
