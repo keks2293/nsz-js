@@ -112,7 +112,7 @@ class NSZConverter {
                     const h = new SHA256();
                     return { update: (d) => h.update(d), digest: () => h.hexdigest() };
                 },
-            }, (d) => this.extractCnmtHashes(d));
+            }, cnmtHashes);
             onProgress(1.0, 'Done!');
             const outputName = file.name.replace(/\.nsz$/i, '.nsp');
             const totalSize = result.headerSize + result.totalDataSize;
@@ -133,7 +133,7 @@ class NSZConverter {
                     const h = new SHA256();
                     return { update: (d) => h.update(d), digest: () => h.hexdigest() };
                 },
-            }, (d) => this.extractCnmtHashes(d));
+            }, cnmtHashes);
             onProgress(1.0, 'Done!');
             const outputName = file.name.replace(/\.nsz$/i, '.nsp');
             onLog('success', `Output: ${outputName} (${this.formatBytes(result.size)})`);
