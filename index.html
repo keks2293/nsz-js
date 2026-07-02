@@ -223,7 +223,8 @@
             transition: background 0.15s;
         }
 
-        .file:not(:last-child) { border-bottom: 1px solid var(--border); }
+        .file { border-bottom: 1px solid var(--border); }
+        .files-body.is-full .file:last-child { border-bottom: none; }
 
         .file-badge {
             width: 32px;
