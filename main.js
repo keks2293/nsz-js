@@ -190,26 +190,43 @@ async function main() {
         snapFileListHeight();
     }
 
+    let itemHeight = 0;
+
+    function measureItemHeight() {
+        if (itemHeight) return itemHeight;
+        const d = document.createElement('div');
+        d.className = 'file';
+        d.style.position = 'absolute';
+        d.style.visibility = 'hidden';
+        d.style.pointerEvents = 'none';
+        d.innerHTML = '<div class="file-badge nsz">NSZ</div><div class="file-meta"><div class="file-name">x</div><div class="file-size">0 B</div><div class="file-pprogress"><div class="file-pprogress-fill"></div></div></div><button class="file-x"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
+        dropZone.appendChild(d);
+        itemHeight = d.getBoundingClientRect().height;
+        dropZone.removeChild(d);
+        return itemHeight;
+    }
+
     function snapFileListHeight() {
-        if (files.length > 0) {
-            const firstItem = fileListScroll.querySelector('.file');
-            if (firstItem) {
-                const itemHeight = firstItem.getBoundingClientRect().height;
-                const border = 4;
-                const totalHeight = Math.max(120, Math.min(200, window.innerWidth * 0.22));
-                const maxFit = Math.max(1, Math.floor((totalHeight - border) / itemHeight));
-                const visibleCount = Math.min(files.length, maxFit);
-                dropZone.style.transition = 'none';
-                dropZone.style.height = `${visibleCount * itemHeight + border}px`;
-                requestAnimationFrame(() => dropZone.style.transition = '');
-                fileListScroll.classList.toggle('is-full', files.length > maxFit);
-                return;
-            }
-        }
+        const h = measureItemHeight();
+        if (!h) return;
+
+        const border = 4;
+        const minSlotHeight = 3 * h + border;
+        const totalHeight = Math.max(120, Math.min(200, window.innerWidth * 0.22), minSlotHeight);
+
         dropZone.style.transition = 'none';
-        dropZone.style.height = '';
+
+        if (files.length > 0) {
+            const maxFit = Math.max(1, Math.floor((totalHeight - border) / h));
+            const visibleCount = Math.min(files.length, maxFit);
+            dropZone.style.height = `${Math.max(visibleCount * h + border, minSlotHeight)}px`;
+            fileListScroll.classList.toggle('is-full', files.length > maxFit);
+        } else {
+            dropZone.style.height = `${totalHeight}px`;
+            fileListScroll.classList.remove('is-full');
+        }
+
         requestAnimationFrame(() => dropZone.style.transition = '');
-        fileListScroll.classList.remove('is-full');
     }
 
     function updateFileProgress(index, pct) {
@@ -504,7 +521,7 @@ async function main() {
 
     await loadDefaultKeys();
 
-    const ro = new ResizeObserver(() => snapFileListHeight());
+    const ro = new ResizeObserver(() => requestAnimationFrame(() => snapFileListHeight()));
     ro.observe(dropZone);
 
     progressTitle.textContent = 'Ready';
