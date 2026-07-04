@@ -32,6 +32,7 @@ node nsz-cli.js <input> [output] [keys.txt] [options]
 ```
 
 Options:
+- `-o, --output <dir>` - Output directory
 - `-w, --overwrite` - Overwrite existing output files
 - `--rm-source` - Delete input file after successful conversion
 - `--keys <path>` - Path to prod.keys file
