@@ -28,11 +28,15 @@ A **100% local** pure JavaScript converter for Nintendo Switch compressed game f
 ### Node.js Version
 
 ```bash
-node nsz-cli.js <input> [output] [keys.txt] [-p]
+node nsz-cli.js <input> [output] [keys.txt] [options]
 ```
 
 Options:
-- `-p, --fix-padding` - Use 0x20-byte alignment (default: 16-byte)
+- `-w, --overwrite` - Overwrite existing output files
+- `--rm-source` - Delete input file after successful conversion
+- `--keys <path>` - Path to prod.keys file
+- `--no-verify, -nv` - Skip SHA256 verification (faster)
+- `--fix-padding, -p` - Use 0x20-byte alignment (default: 16-byte)
 - `-h, --help` - Show usage information
 
 ## Python nsz Compatibility
