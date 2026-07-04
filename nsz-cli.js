@@ -23,6 +23,8 @@ async function main() {
     let keysPath = null;
     let fixPadding = false;
     let verify = true;
+    let overwrite = false;
+    let rmSource = false;
 
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--fix-padding' || args[i] === '-p') {
@@ -34,6 +36,10 @@ async function main() {
             process.exit(0);
         } else if (args[i] === '--keys' && i + 1 < args.length) {
             keysPath = args[++i];
+        } else if (args[i] === '--overwrite' || args[i] === '-w') {
+            overwrite = true;
+        } else if (args[i] === '--rm-source') {
+            rmSource = true;
         } else if (!inputPath) {
             inputPath = args[i];
         } else if (!outputPath && !args[i].startsWith('-')) {
@@ -53,6 +59,8 @@ async function main() {
         console.log('  .xcz                -> .xci');
         console.log('');
         console.log('Options:');
+        console.log('  -w, --overwrite      Overwrite existing output files');
+        console.log('  --rm-source          Delete input file after successful conversion');
         console.log('  --no-verify, -nv     Skip SHA256 verification (faster, no CNMT parsing)');
         console.log('  --fix-padding, -p    Use 0x20-byte alignment (default: 16-byte, matching Python nsz)');
         console.log('');
@@ -93,21 +101,26 @@ async function main() {
 
     try {
         if (isXcz) {
-            await convertXCZ(inReader, inputFd, inputPath, outputPath, keys, verify);
+            await convertXCZ(inReader, inputFd, inputPath, outputPath, keys, verify, overwrite, rmSource);
         } else {
-            await convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPadding, verify);
+            await convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPadding, verify, overwrite, rmSource);
         }
     } finally {
         fs.closeSync(inputFd);
     }
 }
 
-async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys, verify) {
+async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys, verify, overwrite, rmSource) {
     console.log(`[VERIFY NSZ] ${inputPath}`);
     console.log('Detected XCZ file');
     const { XCIReader } = await import('./fs/xci.js');
     const outPath = outputPath || inputPath.replace(/\.xcz$/i, '.xci');
     console.log(`Output: ${outPath}`);
+
+    if (!overwrite && fs.existsSync(outPath)) {
+        console.error(`Error: ${outPath} already exists. Use -w/--overwrite to overwrite.`);
+        process.exit(1);
+    }
 
     const xci = new XCIReader(inReader);
     await xci.parse();
@@ -152,12 +165,22 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys, verify
     console.log('');
     console.log('=== DONE ===');
     console.log(`Output: ${outPath} (${formatBytes(outStat.size)})`);
+
+    if (rmSource) {
+        fs.unlinkSync(inputPath);
+        console.log(`Deleted source: ${inputPath}`);
+    }
 }
 
-async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPadding, verify) {
+async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPadding, verify, overwrite, rmSource) {
     const outPath = outputPath || inputPath.replace(/\.(nsz|nspz|nsx)$/i, '.nsp');
     console.log(`[VERIFY NSZ] ${inputPath}`);
     console.log(`Output: ${outPath}`);
+
+    if (!overwrite && fs.existsSync(outPath)) {
+        console.error(`Error: ${outPath} already exists. Use -w/--overwrite to overwrite.`);
+        process.exit(1);
+    }
 
     const pfs0Reader = await PFS0.open(inReader);
     for (const f of pfs0Reader.getFiles()) {
@@ -210,6 +233,11 @@ async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPad
     console.log('');
     console.log('=== DONE ===');
     console.log(`Output: ${outPath} (${formatBytes(outStat.size)})`);
+
+    if (rmSource) {
+        fs.unlinkSync(inputPath);
+        console.log(`Deleted source: ${inputPath}`);
+    }
 }
 
 main().catch(err => {

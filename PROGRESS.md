@@ -2,6 +2,12 @@
 
 ## ✅ Recent Changes (2026-07-04)
 
+1. **CLI: added `-w, --overwrite`** — `nsz-cli.js`. Skips conversion if output exists unless `-w` is passed. `convertNSZ`/`convertXCZ` check `fs.existsSync(outPath)` before opening output fd. Matches Python nsz `-w, --overwrite`.
+
+2. **CLI: added `--rm-source`** — `nsz-cli.js`. Deletes input file after successful conversion. `convertNSZ`/`convertXCZ` call `fs.unlinkSync(inputPath)` after `=== DONE ===`. Matches Python nsz `--rm-source`.
+
+2. **Perf: skip redundant `slice(0)` in SWDownloader for standalone buffers** — `main.js`, `crypto/zstd.js`. Added `ZstdDecompressor.wasmBuffer` getter. `SWDownloader.write()` now checks `view.buffer === wasmMem`: WASM views still `slice(0)`, standalone buffers (WebCrypto output, ~90%+ of data) transferred directly — no copy. Eliminates one allocation + memcpy per chunk for encrypted sections.
+
 1. **Perf: skip redundant `slice(0)` in SWDownloader for standalone buffers** — `main.js`, `crypto/zstd.js`. Added `ZstdDecompressor.wasmBuffer` getter. `SWDownloader.write()` now checks `view.buffer === wasmMem`: WASM views still `slice(0)`, standalone buffers (WebCrypto output, ~90%+ of data) transferred directly — no copy. Eliminates one allocation + memcpy per chunk for encrypted sections.
 
 2. **Fix: dropzone empty height — show space for 3 files, no jump on load** — `main.js`. Removed `Math.min(200, ...)` cap, set `height = minSlotHeight` (= 3×itemHeight + border) instead of CSS `clamp(120px, ...)`. `snapFileListHeight()` called synchronously during init before first paint — no jump from 120px to file height.
