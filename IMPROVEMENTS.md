@@ -56,7 +56,7 @@ Prioritized areas for improvement identified 2026-05-30.
 
 ## Speed Optimization
 
-- ❌ **Remove SW slice(0) copy** — Attempted to remove `view.slice(0)` in SWDownloader.write. **Reverted** — zstddec yields Uint8Array views into WASM memory; Transferable would transfer entire WASM ArrayBuffer, crashing the WASM instance.
+- ✅ **Optimize SW slice(0) copy** — `SWDownloader.write()` now checks if data is a WASM memory view via `view.buffer === wasmInstance.exports.memory.buffer`. WASM views still get `slice(0)`, standalone buffers (e.g. WebCrypto output) are transferred directly. Added `ZstdDecompressor.wasmBuffer` getter. No copy for ~90%+ of data (encrypted sections).
 
 - ✅ **Remove CLI Buffer.from(chunk) copies** — `nsz-cli.js` used `Buffer.from(chunk)` before `fs.writeSync`. Removed — `fs.writeSync` accepts Uint8Array directly, no copy needed.
 

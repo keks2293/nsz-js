@@ -24,6 +24,10 @@ class ZstdDecompressor {
         return wasmInstance;
     }
 
+    static get wasmBuffer() {
+        return wasmInstance ? wasmInstance.exports.memory.buffer : null;
+    }
+
     static async decompressBuffer(data) {
         await ZstdDecompressor.load();
         if (!sharedDecoder) throw new Error('zstddec not loaded');
