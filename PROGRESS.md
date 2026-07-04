@@ -2,9 +2,11 @@
 
 ## ✅ Recent Changes (2026-07-04)
 
-1. **CLI: added `-w, --overwrite`** — `nsz-cli.js`. Skips conversion if output exists unless `-w` is passed. `convertNSZ`/`convertXCZ` check `fs.existsSync(outPath)` before opening output fd. Matches Python nsz `-w, --overwrite`.
+1. **CLI: added `-o, --output`** — `nsz-cli.js`. Output directory for converted files. Matches Python nsz `-o, --output`.
 
-2. **CLI: added `--rm-source`** — `nsz-cli.js`. Deletes input file after successful conversion. `convertNSZ`/`convertXCZ` call `fs.unlinkSync(inputPath)` after `=== DONE ===`. Matches Python nsz `--rm-source`.
+2. **CLI: added `-w, --overwrite`** — `nsz-cli.js`. Skips conversion if output exists unless `-w` is passed. `convertNSZ`/`convertXCZ` check `fs.existsSync(outPath)` before opening output fd. Matches Python nsz `-w, --overwrite`.
+
+3. **CLI: added `--rm-source`** — `nsz-cli.js`. Deletes input file after successful conversion. `convertNSZ`/`convertXCZ` call `fs.unlinkSync(inputPath)` after `=== DONE ===`. Matches Python nsz `--rm-source`.
 
 2. **Perf: skip redundant `slice(0)` in SWDownloader for standalone buffers** — `main.js`, `crypto/zstd.js`. Added `ZstdDecompressor.wasmBuffer` getter. `SWDownloader.write()` now checks `view.buffer === wasmMem`: WASM views still `slice(0)`, standalone buffers (WebCrypto output, ~90%+ of data) transferred directly — no copy. Eliminates one allocation + memcpy per chunk for encrypted sections.
 

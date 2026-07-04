@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'fs';
+import path from 'path';
 import crypto from 'crypto';
 import { PFS0 } from './fs/pfs0.js';
 import { FileDescriptorReader } from './fs/ncz.js';
@@ -19,7 +20,7 @@ function formatBytes(bytes) {
 async function main() {
     const args = process.argv.slice(2);
     let inputPath = null;
-    let outputPath = null;
+    let outputDir = null;
     let keysPath = null;
     let fixPadding = false;
     let verify = true;
@@ -40,10 +41,10 @@ async function main() {
             overwrite = true;
         } else if (args[i] === '--rm-source') {
             rmSource = true;
+        } else if ((args[i] === '-o' || args[i] === '--output') && i + 1 < args.length) {
+            outputDir = args[++i];
         } else if (!inputPath) {
             inputPath = args[i];
-        } else if (!outputPath && !args[i].startsWith('-')) {
-            outputPath = args[i];
         } else if (!keysPath && !args[i].startsWith('-')) {
             keysPath = args[i];
         }
@@ -59,6 +60,7 @@ async function main() {
         console.log('  .xcz                -> .xci');
         console.log('');
         console.log('Options:');
+        console.log('  -o, --output <dir>   Output directory');
         console.log('  -w, --overwrite      Overwrite existing output files');
         console.log('  --rm-source          Delete input file after successful conversion');
         console.log('  --no-verify, -nv     Skip SHA256 verification (faster, no CNMT parsing)');
@@ -101,20 +103,20 @@ async function main() {
 
     try {
         if (isXcz) {
-            await convertXCZ(inReader, inputFd, inputPath, outputPath, keys, verify, overwrite, rmSource);
+            await convertXCZ(inReader, inputFd, inputPath, outputDir, keys, verify, overwrite, rmSource);
         } else {
-            await convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPadding, verify, overwrite, rmSource);
+            await convertNSZ(inReader, inputFd, inputPath, outputDir, keys, fixPadding, verify, overwrite, rmSource);
         }
     } finally {
         fs.closeSync(inputFd);
     }
 }
 
-async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys, verify, overwrite, rmSource) {
+async function convertXCZ(inReader, inputFd, inputPath, outputDir, keys, verify, overwrite, rmSource) {
     console.log(`[VERIFY NSZ] ${inputPath}`);
     console.log('Detected XCZ file');
     const { XCIReader } = await import('./fs/xci.js');
-    const outPath = outputPath || inputPath.replace(/\.xcz$/i, '.xci');
+    const outPath = outputDir ? path.join(outputDir, path.basename(inputPath).replace(/\.xcz$/i, '.xci')) : inputPath.replace(/\.xcz$/i, '.xci');
     console.log(`Output: ${outPath}`);
 
     if (!overwrite && fs.existsSync(outPath)) {
@@ -172,8 +174,8 @@ async function convertXCZ(inReader, inputFd, inputPath, outputPath, keys, verify
     }
 }
 
-async function convertNSZ(inReader, inputFd, inputPath, outputPath, keys, fixPadding, verify, overwrite, rmSource) {
-    const outPath = outputPath || inputPath.replace(/\.(nsz|nspz|nsx)$/i, '.nsp');
+async function convertNSZ(inReader, inputFd, inputPath, outputDir, keys, fixPadding, verify, overwrite, rmSource) {
+    const outPath = outputDir ? path.join(outputDir, path.basename(inputPath).replace(/\.(nsz|nspz|nsx)$/i, '.nsp')) : inputPath.replace(/\.(nsz|nspz|nsx)$/i, '.nsp');
     console.log(`[VERIFY NSZ] ${inputPath}`);
     console.log(`Output: ${outPath}`);
 
