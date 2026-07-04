@@ -1,4 +1,5 @@
 import { NSZConverter } from './converter.js';
+import { ZstdDecompressor } from './crypto/zstd.js';
 
 class SWDownloader {
     constructor(outputName, iframe) {
@@ -45,8 +46,9 @@ class SWDownloader {
     async write({ type, position, data }) {
         if (type !== 'write' || !this.sw) return;
         const view = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-        const copy = view.slice(0);
-        this.sw.postMessage({ type: 'data', url: this.streamUrl, chunk: copy.buffer }, [copy.buffer]);
+        const wasmMem = ZstdDecompressor.wasmBuffer;
+        const chunk = (wasmMem && view.buffer === wasmMem) ? view.slice(0) : view;
+        this.sw.postMessage({ type: 'data', url: this.streamUrl, chunk: chunk.buffer }, [chunk.buffer]);
     }
 
     async close() {
