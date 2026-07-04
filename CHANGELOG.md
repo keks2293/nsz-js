@@ -6,6 +6,8 @@
 
 2. **Fix: dropzone empty height — show space for 3 files, no jump on load** — `main.js`. Removed `Math.min(200, ...)` cap, set `height = minSlotHeight` (= 3×itemHeight + border) instead of CSS `clamp(120px, ...)`. `snapFileListHeight()` called synchronously during init before first paint — no jump from 120px to file height.
 
+3. **UX: replace pill CSS tooltips with ⓘ info popovers** — `index.html`. Removed `.pill[title]::after` CSS tooltip (per-pill `:focus` popup on mobile). Added ⓘ buttons next to "Download mode" and "Options" labels that open a native `popover` with grouped descriptions of all modes/options. `title` attributes kept on individual pills for desktop hover. Uses Popover API — no JS. Popover anchored to label via CSS `position-area: bottom; justify-self: anchor-center` — appears below the label button, not centered on screen.
+
 ## ✅ Recent Changes (2026-07-02)
 
 1. **Fix: remove double CNMT hash extraction in NSZ path** — `converter.js`, `nsz-convert.js`, `nsz-cli.js`. `decompressNSZtoNSP` collected `cnmtHashes` once (lines 85-96), then passed `extractCnmtHashes` callback to `convertNSZStreaming`, which called `collectCnmtHashes` that iterated files and decrypted CNMT again. Now `convertNZStreaming`/`convertNSZMemory` accept `cnmtHashes` Set directly (like Python's `ExtractHashes` → `Set` pattern). `collectCnmtHashes` removed. `nsz-cli.js` collects hashes once before calling `convertNZStreaming`. XCZ path unchanged (no duplication there).
