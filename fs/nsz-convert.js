@@ -74,7 +74,6 @@ export async function convertNSZStreaming(pfs0, keys, adapter, options, cnmtHash
             options.log('info', `[EXISTS]     ${f.name}`);
             options.progress(pct(dataWritten), `Copying ${f.name}...`);
             const data = await adapter.read(meta.offset, meta.size);
-            await adapter.write(writePos, data);
             if (verify && meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
                 const hash = await sha256(data);
                 options.log('info', `[NCA HASH]   ${hash}`);
@@ -84,6 +83,7 @@ export async function convertNSZStreaming(pfs0, keys, adapter, options, cnmtHash
                     verifyFileNameHash(hash, f.name, meta.name, options.log);
                 }
             }
+            await adapter.write(writePos, data);
         }
 
         dataWritten += meta.size;
