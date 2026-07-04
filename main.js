@@ -214,9 +214,9 @@ async function main() {
 
         const border = 4;
         const minSlotHeight = 3 * h + border;
-        const totalHeight = Math.max(120, Math.min(200, window.innerWidth * 0.22), minSlotHeight);
 
         if (files.length > 0) {
+            const totalHeight = Math.max(window.innerWidth * 0.22, minSlotHeight);
             const maxFit = Math.max(1, Math.floor((totalHeight - border) / h));
             const visibleCount = Math.min(files.length, maxFit);
             dropZone.style.height = `${Math.max(visibleCount * h + border, minSlotHeight)}px`;
@@ -505,6 +505,10 @@ async function main() {
         updateProgress(1);
     });
 
+    const ro = new ResizeObserver(() => requestAnimationFrame(() => snapFileListHeight()));
+    ro.observe(dropZone);
+    snapFileListHeight();
+
     const sp = document.getElementById('loadingSpinner');
     try {
         await converter.init();
@@ -518,9 +522,6 @@ async function main() {
     if (sp) sp.style.display = 'none';
 
     await loadDefaultKeys();
-
-    const ro = new ResizeObserver(() => snapFileListHeight());
-    ro.observe(dropZone);
 
     progressTitle.textContent = 'Ready';
     addLog('info', 'Ready');
