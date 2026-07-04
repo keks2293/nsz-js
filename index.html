@@ -110,11 +110,12 @@
             border: 2px dashed var(--border);
             border-radius: 12px;
             cursor: pointer;
-            transition: background 0.2s ease, border-color 0.2s ease;
+            transition: all 0.2s ease;
             background: var(--bg-glass-darker);
             position: relative;
             overflow: hidden;
-            height: clamp(120px, 22vw, 200px);
+            height: max(calc(3 * var(--slot-h) + 4px), min(22vw, 200px));
+            --slot-h: 56px;
             display: flex;
             flex-direction: column;
         }
