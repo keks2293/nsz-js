@@ -1,5 +1,11 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-07-04)
+
+1. **Perf: skip redundant `slice(0)` in SWDownloader for standalone buffers** — `main.js`, `crypto/zstd.js`. Added `ZstdDecompressor.wasmBuffer` getter. `SWDownloader.write()` now checks `view.buffer === wasmMem`: WASM views still `slice(0)`, standalone buffers (WebCrypto output, ~90%+ of data) transferred directly — no copy. Eliminates one allocation + memcpy per chunk for encrypted sections.
+
+2. **Fix: dropzone height flicker on file add/remove** — `index.html`, `main.js`. CSS transition changed from `all` to `background, border-color` (height no longer animates). Removed `rAF` wrapper from `ResizeObserver`. Removed `transition = 'none'` + `offsetHeight` + `rAF(restore)` hack from `snapFileListHeight()`. Restored `minSlotHeight`.
+
 ## ✅ Recent Changes (2026-07-02)
 
 1. **Fix: remove double CNMT hash extraction in NSZ path** — `converter.js`, `nsz-convert.js`, `nsz-cli.js`. `decompressNSZtoNSP` collected `cnmtHashes` once (lines 85-96), then passed `extractCnmtHashes` callback to `convertNSZStreaming`, which called `collectCnmtHashes` that iterated files and decrypted CNMT again. Now `convertNZStreaming`/`convertNSZMemory` accept `cnmtHashes` Set directly (like Python's `ExtractHashes` → `Set` pattern). `collectCnmtHashes` removed. `nsz-cli.js` collects hashes once before calling `convertNZStreaming`. XCZ path unchanged (no duplication there).
