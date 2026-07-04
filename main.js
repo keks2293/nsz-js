@@ -214,19 +214,15 @@ async function main() {
         const minSlotHeight = 3 * h + border;
         const totalHeight = Math.max(120, Math.min(200, window.innerWidth * 0.22), minSlotHeight);
 
-        dropZone.style.transition = 'none';
-
         if (files.length > 0) {
             const maxFit = Math.max(1, Math.floor((totalHeight - border) / h));
             const visibleCount = Math.min(files.length, maxFit);
             dropZone.style.height = `${Math.max(visibleCount * h + border, minSlotHeight)}px`;
             fileListScroll.classList.toggle('is-full', files.length > maxFit);
         } else {
-            dropZone.style.height = `${totalHeight}px`;
+            dropZone.style.height = '';
             fileListScroll.classList.remove('is-full');
         }
-
-        requestAnimationFrame(() => dropZone.style.transition = '');
     }
 
     function updateFileProgress(index, pct) {
@@ -521,7 +517,7 @@ async function main() {
 
     await loadDefaultKeys();
 
-    const ro = new ResizeObserver(() => requestAnimationFrame(() => snapFileListHeight()));
+    const ro = new ResizeObserver(() => snapFileListHeight());
     ro.observe(dropZone);
 
     progressTitle.textContent = 'Ready';
