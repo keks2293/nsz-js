@@ -170,7 +170,6 @@ async function writePartitions(adapter, partitionMetas, layout, keys, verify, op
             } else {
                 progress(pct(dataOverall), `Copying ${meta.inputName}...`);
                 const data = await adapter.read(meta.offset, meta.size);
-                await adapter.write(writePos, data);
                 if (verify && meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
                     const hash = await sha256(data);
                     log('info', `  [NCA HASH]   ${hash}`);
@@ -180,6 +179,7 @@ async function writePartitions(adapter, partitionMetas, layout, keys, verify, op
                         verifyFileNameHash(hash, meta.inputName, meta.name, log);
                     }
                 }
+                await adapter.write(writePos, data);
             }
             writePos += meta.size;
             dataOverall += meta.size;
