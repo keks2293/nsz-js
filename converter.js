@@ -8,16 +8,8 @@ import { NCAHeader } from './fs/nca.js';
 import { XCIReader } from './fs/xci.js';
 import { AesXts } from './crypto/aesxts.mjs';
 import { AesCtr } from './crypto/aesctr.mjs';
-import { AesEcb } from './crypto/aes128.js';
 import { convertXCZStreaming, convertXCZMemory } from './fs/xcz-convert.js';
 import { convertNSZStreaming, convertNSZMemory } from './fs/nsz-convert.js';
-
-const isNode = typeof process !== 'undefined' && process.versions?.node;
-let nodeCrypto = null;
-if (isNode) {
-    const mod = await import('crypto');
-    nodeCrypto = mod.default || mod;
-}
 
 class FileSliceReader extends DataReader {
     constructor(file, baseOffset = 0, totalLength = null) {
@@ -214,48 +206,22 @@ class NSZConverter {
             const hdrEncrypted = arr.subarray(0, hdrLen);
             const hdrDecrypted = xts.decrypt(hdrEncrypted, 0);
 
-            const header = NCAHeader.parse(hdrDecrypted);
+            const header = NCAHeader.parse(hdrDecrypted, this.keys);
 
-            if (header && header.sectionTables && header.sectionTables[0]) {
-                const fsOffset = header.sectionTables[0].offset;
-                const fsEndOffset = header.sectionTables[0].endOffset;
-                const fsSize = fsEndOffset - fsOffset;
+            if (header && header.sections && header.sections[0]) {
+                const section = header.sections[0];
+                const fsOffset = section.offset;
+                const fsSize = section.size;
 
                 if (fsSize > 0 && fsOffset + fsSize <= arr.length) {
                     const sectionData = arr.subarray(fsOffset, fsOffset + fsSize);
 
-                    const keysArr = this.keys.keyAreaKeys;
-                    const mk = header.masterKey;
-                    const kakHex = keysArr[mk] && keysArr[mk][0];
-
-                    if (!kakHex) {
-                        console.error('No key_area_key_application for masterKey:', mk);
+                    if (!section.cryptoKey) {
+                        console.error('No titleKeyDec for masterKey:', header.masterKey);
                         return hashes;
                     }
 
-                    const kak = new Uint8Array(kakHex.match(/.{2}/g).map(b => parseInt(b, 16)));
-                    const keyBlock = hdrDecrypted.subarray(0x300, 0x340);
-
-                    let unwrapped;
-                    if (nodeCrypto) {
-                        const ecb = nodeCrypto.createDecipheriv('aes-128-ecb', kak, null);
-                        ecb.setAutoPadding(false);
-                        unwrapped = new Uint8Array(ecb.update(keyBlock));
-                    } else {
-                        const ecb = new AesEcb(kak);
-                        unwrapped = ecb.decrypt(keyBlock);
-                    }
-                    const sectionKey = unwrapped.subarray(32, 48);
-
-                    const sectionHdr = hdrDecrypted.subarray(0x400, 0x600);
-                    const ivBytes = sectionHdr.subarray(0x140, 0x148);
-
-                    const raw = new Uint8Array(16);
-                    for (let j = 0; j < 8; j++) raw[j] = 0;
-                    raw.set(ivBytes, 8);
-                    const cryptoCounter = new Uint8Array(raw).reverse();
-
-                    const aesCtr = new AesCtr(sectionKey, cryptoCounter);
+                    const aesCtr = new AesCtr(section.cryptoKey, section.cryptoCounter);
                     aesCtr.seek(fsOffset);
 
                     const fsData = await aesCtr.decrypt(sectionData);
