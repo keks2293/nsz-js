@@ -1,5 +1,22 @@
+import { AesEcb } from '../crypto/aes128.js';
+
+const FsType = Object.freeze({ NONE: 0, PFS0: 2, ROMFS: 3 });
+
+class SectionHeader {
+    constructor(buffer) {
+        const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+        this.fsType = buffer[0x3];
+        this.cryptoType = buffer[0x4];
+        this.sectionStart = Number(view.getBigUint64(0x40, true));
+        this.size = Number(view.getBigUint64(0x48, true));
+        this.bktr1Buffer = buffer.slice(0x100, 0x120);
+        this.bktr2Buffer = buffer.slice(0x120, 0x140);
+        this.cryptoCounter = buffer.slice(0x140, 0x148).reverse();
+    }
+}
+
 export class NCAHeader {
-    static parse(buffer) {
+    static parse(buffer, keys = null) {
         const arr = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
         const view = new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
 
@@ -43,6 +60,56 @@ export class NCAHeader {
 
         const keyBlock = arr.slice(0x300, 0x340);
         const masterKey = Math.max(cryptoType, cryptoType2) - 1;
+        const mk = masterKey < 0 ? 0 : masterKey;
+
+        // Decrypt key block to get titleKeyDec
+        let titleKeyDec = null;
+        if (keys) {
+            const kakHex = keys.keyAreaKeys?.[mk]?.[0];
+            if (kakHex) {
+                const kak = typeof kakHex === 'string'
+                    ? KeysParser_hexToBytes(kakHex)
+                    : kakHex;
+                const ecb = new AesEcb(kak);
+                const unwrapped = ecb.decrypt(keyBlock);
+                titleKeyDec = unwrapped.slice(32, 48);
+            }
+        }
+
+        // Parse section headers (0x200 bytes each at offset 0x400)
+        const sections = [];
+        const sectionFilesystems = [];
+        for (let i = 0; i < 4; i++) {
+            const sectionHeaderOffset = 0x400 + i * 0x200;
+            const sectionHeaderData = arr.slice(sectionHeaderOffset, sectionHeaderOffset + 0x200);
+            const sectionHdr = new SectionHeader(sectionHeaderData);
+            const st = sectionTables[i];
+
+            if (sectionHdr.fsType) {
+                sections.push({
+                    offset: st.offset,
+                    endOffset: st.endOffset,
+                    size: st.endOffset - st.offset,
+                    fsType: sectionHdr.fsType,
+                    cryptoType: sectionHdr.cryptoType,
+                    cryptoKey: titleKeyDec,
+                    sectionStart: sectionHdr.sectionStart,
+                    sectionSize: sectionHdr.size,
+                    cryptoCounter: sectionHdr.cryptoCounter,
+                    bktr1Buffer: sectionHdr.bktr1Buffer,
+                    bktr2Buffer: sectionHdr.bktr2Buffer,
+                });
+                sectionFilesystems.push({
+                    fsType: sectionHdr.fsType,
+                    cryptoType: sectionHdr.cryptoType,
+                    sectionStart: sectionHdr.sectionStart,
+                    size: sectionHdr.size,
+                    cryptoCounter: sectionHdr.cryptoCounter,
+                    bktr1Buffer: sectionHdr.bktr1Buffer,
+                    bktr2Buffer: sectionHdr.bktr2Buffer,
+                });
+            }
+        }
 
         return {
             magic,
@@ -58,8 +125,11 @@ export class NCAHeader {
             rightsId,
             sectionTables,
             keyBlock,
-            masterKey: masterKey < 0 ? 0 : masterKey,
-            hasTitleRights: rightsId !== '0'.repeat(32)
+            masterKey: mk,
+            hasTitleRights: rightsId !== '0'.repeat(32),
+            titleKeyDec,
+            sections,
+            sectionFilesystems,
         };
     }
 
@@ -67,6 +137,15 @@ export class NCAHeader {
         const names = ['PROGRAM', 'META', 'CONTROL', 'MANUAL', 'DATA', 'PUBLICDATA'];
         return names[type] || 'UNKNOWN';
     }
+}
+
+// Inline hex-to-bytes to avoid importing KeysParser (circular dependency risk)
+function KeysParser_hexToBytes(hex) {
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < hex.length; i += 2) {
+        bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+    }
+    return bytes;
 }
 
 export class BKTR {
@@ -95,3 +174,5 @@ export class BKTR {
         };
     }
 }
+
+export { FsType, SectionHeader };
