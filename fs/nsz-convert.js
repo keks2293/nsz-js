@@ -1,5 +1,6 @@
-import { PFS0Writer } from './pfs0.js';
+import { PFS0, PFS0Writer } from './pfs0.js';
 import { NCZDecompressor, AdapterNCZReader } from './ncz.js';
+import { NCA, formatBytes, extractNCA } from './nca.js';
 import { sha256 } from '../crypto/sha256.js';
 
 function verifyHash(hash, name, fileHashes, onLog) {
@@ -182,4 +183,68 @@ export async function convertNSZMemory(pfs0, keys, adapter, options, cnmtHashes 
     const { blob, size } = buildPfs0Blob(outputFiles, fixPadding);
     options.progress(1.0, 'Done!');
     return { blob, size };
+}
+
+export async function getInfoNSZ(pfs0Reader, keys) {
+    const files = pfs0Reader.getFiles();
+    return { files };
+}
+
+export async function extractNSZContainer(reader, inputPath, outputDir, keys, depth, extractRegex, adapter) {
+    const a = adapter || {};
+    const log = a.log || ((msg) => console.log(msg));
+    const read = a.read || (() => { throw new Error('read not implemented'); });
+    const pathJoin = a.pathJoin || ((...p) => p.join('/'));
+    const basename = a.basename || ((p) => p.split('/').pop());
+    const mkdir = a.mkdir || (() => { throw new Error('mkdir not implemented'); });
+    const exists = a.exists || (() => false);
+
+    const containerName = basename(inputPath);
+    const baseName = basename(inputPath.replace(/\.(nsz|nspz|nsx)$/i, ''));
+
+    log(`[EXTRACT] ${containerName}`);
+
+    if (!outputDir) {
+        outputDir = baseName;
+    }
+
+    if (!exists(outputDir)) {
+        mkdir(outputDir);
+    }
+
+    const pfs0Reader = await PFS0.open(reader);
+    const files = pfs0Reader.getFiles();
+
+    for (const f of files) {
+        if (f.name.toLowerCase().endsWith('.nca')) {
+            const ncaData = await read(f.offset, f.size);
+            await extractNCA(ncaData, f.name, outputDir, keys, depth, extractRegex, a);
+        }
+    }
+}
+
+export async function printNSZInfo(reader, inputPath, keys, depth, adapter) {
+    const a = adapter || {};
+    const log = a.log || ((msg) => console.log(msg));
+    const read = a.read || (() => { throw new Error('read not implemented'); });
+    const basename = a.basename || ((p) => p.split('/').pop());
+
+    const containerName = basename(inputPath);
+
+    log(`[INFO] ${containerName}`);
+    log('');
+
+    const pfs0Reader = await PFS0.open(reader);
+    const info = await getInfoNSZ(pfs0Reader, keys);
+
+    for (const f of info.files) {
+        log(`  ${f.name}  ${formatBytes(f.size)}`);
+        if (f.name.toLowerCase().endsWith('.nca') && keys) {
+            const ncaData = await read(f.offset, f.size);
+            const nca = await NCA.open(ncaData, keys);
+            if (nca) {
+                await nca.printInfo((s) => log(s), depth, 1);
+            }
+        }
+    }
 }

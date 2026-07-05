@@ -1,5 +1,11 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-07-05)
+
+1. **NCA: sections/sectionFilesystems split with crypto utilities and CLI** — `fs/nca.js`, `nsz-cli.js`, `fs/xcz-convert.js`, `fs/nsz-convert.js`. New `NCA` class with `sections` (metadata) / `sectionFilesystems` (PFS0 parsers) split, `[Symbol.iterator]` over sectionFilesystems. `extractNCASections` decrypts NCA header via XTS, unwraps key block via AES-ECB, decrypts section data via AES-CTR, finds PFS0 magic. Added `hexToBytes`, `findPfs0Start`, `unwrapKeyBlock`, `formatBytes`, `getFsTypeName`, `getCryptoTypeName`, `getBuildId` helpers. CLI: `-x/--extract` recursively extracts NCA contents via `sectionFilesystems` iterator, `-i/--info` shows NCA structure with configurable `--depth`. `getInfoNSZ`/`getInfoXCZ` shared helpers.
+
+2. **Extract: add container extraction and info to converter modules** — `fs/nca.js`, `fs/nsz-convert.js`, `fs/xcz-convert.js`, `nsz-cli.js`. `extractNCA` (NCA-level recursive extraction via `sectionFilesystems`) added to `fs/nca.js`. `extractNSZContainer`/`printNSZInfo` added to `fs/nsz-convert.js`, `extractXCZContainer`/`printXCZInfo` to `fs/xcz-convert.js`. All use adapter pattern (`{ log, writeFile, mkdir, read, pathJoin, basename, exists }`). CLI dispatches by extension — thin adapter layer, no separate `fs/extract.js`. `formatBytes` moved from `nsz-cli.js` to `fs/nca.js`.
+
 ## ✅ Recent Changes (2026-07-04)
 
 1. **CLI: added `-o, --output`** — `nsz-cli.js`. Output directory for converted files. Matches Python nsz `-o, --output`.

@@ -1,6 +1,7 @@
 import { NCZDecompressor, AdapterNCZReader } from './ncz.js';
 import { HFS0Writer } from './hfs0.js';
 import { XCIWriter } from './xci.js';
+import { NCA, formatBytes, extractNCA } from './nca.js';
 import { sha256 } from '../crypto/sha256.js';
 
 function verifyHash(hash, name, fileHashes, onLog) {
@@ -274,4 +275,89 @@ export async function convertXCZMemory(xci, keys, adapter, options, extractCnmtH
     progress(1.0, 'Done!');
     const blob = new Blob([xciData], { type: 'application/octet-stream' });
     return { blob, size: xciData.length };
+}
+
+export async function getInfoXCZ(xci, keys) {
+    const partitions = xci.getPartitions();
+    const result = [];
+    for (const p of partitions) {
+        try {
+            const fs = await xci.readPartitionFiles(p);
+            const files = fs.getFiles();
+            result.push({ name: p.name, size: p.size, files });
+        } catch {
+            result.push({ name: p.name, size: p.size, files: [] });
+        }
+    }
+    return { partitions: result };
+}
+
+export async function extractXCZContainer(reader, inputPath, outputDir, keys, depth, extractRegex, adapter) {
+    const a = adapter || {};
+    const log = a.log || ((msg) => console.log(msg));
+    const read = a.read || (() => { throw new Error('read not implemented'); });
+    const pathJoin = a.pathJoin || ((...p) => p.join('/'));
+    const basename = a.basename || ((p) => p.split('/').pop());
+    const mkdir = a.mkdir || (() => { throw new Error('mkdir not implemented'); });
+    const exists = a.exists || (() => false);
+
+    const { XCIReader } = await import('./xci.js');
+    const containerName = basename(inputPath);
+
+    log(`[EXTRACT] ${containerName}`);
+
+    if (!outputDir) {
+        outputDir = basename(inputPath.replace(/\.xcz$/i, ''));
+    }
+
+    if (!exists(outputDir)) {
+        mkdir(outputDir);
+    }
+
+    const xci = new XCIReader(reader);
+    await xci.parse();
+    const partitions = xci.getPartitions();
+
+    for (const p of partitions) {
+        try {
+            const fs = await xci.readPartitionFiles(p);
+            for (const f of fs.getFiles()) {
+                if (f.name.toLowerCase().endsWith('.nca')) {
+                    const ncaData = await read(f.offset, f.size);
+                    await extractNCA(ncaData, f.name, outputDir, keys, depth, extractRegex, a);
+                }
+            }
+        } catch {}
+    }
+}
+
+export async function printXCZInfo(reader, inputPath, keys, depth, adapter) {
+    const a = adapter || {};
+    const log = a.log || ((msg) => console.log(msg));
+    const read = a.read || (() => { throw new Error('read not implemented'); });
+    const basename = a.basename || ((p) => p.split('/').pop());
+
+    const { XCIReader } = await import('./xci.js');
+    const containerName = basename(inputPath);
+
+    log(`[INFO] ${containerName}`);
+    log('');
+
+    const xci = new XCIReader(reader);
+    await xci.parse();
+    const info = await getInfoXCZ(xci, keys);
+
+    for (const p of info.partitions) {
+        log(`  ${p.name}:`);
+        for (const f of p.files) {
+            log(`    ${f.name}  ${formatBytes(f.size)}`);
+            if (f.name.toLowerCase().endsWith('.nca') && keys) {
+                const ncaData = await read(f.offset, f.size);
+                const nca = await NCA.open(ncaData, keys);
+                if (nca) {
+                    await nca.printInfo((s) => log(s), depth);
+                }
+            }
+        }
+    }
 }

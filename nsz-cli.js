@@ -6,15 +6,41 @@ import crypto from 'crypto';
 import { PFS0 } from './fs/pfs0.js';
 import { FileDescriptorReader } from './fs/ncz.js';
 import { KeysParser } from './keys.js';
-import { convertXCZStreaming } from './fs/xcz-convert.js';
-import { convertNSZStreaming } from './fs/nsz-convert.js';
+import { convertXCZStreaming, getInfoXCZ, extractXCZContainer, printXCZInfo } from './fs/xcz-convert.js';
+import { convertNSZStreaming, getInfoNSZ, extractNSZContainer, printNSZInfo } from './fs/nsz-convert.js';
+import { NCA, formatBytes } from './fs/nca.js';
 
-function formatBytes(bytes) {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+function makeAdapter(inputFd, outputFd) {
+    return {
+        read: (offset, size) => {
+            const buf = Buffer.alloc(size);
+            fs.readSync(inputFd, buf, 0, size, offset);
+            return buf;
+        },
+        write: (offset, data) => fs.writeSync(outputFd, data, 0, data.byteLength, offset),
+        log: (level, msg) => console.log(msg),
+        progress: () => {},
+    };
+}
+
+function makeExtractAdapter(inputFd) {
+    return {
+        log: (msg) => console.log(msg),
+        writeFile: (p, data) => {
+            const fd = fs.openSync(p, 'w');
+            fs.writeSync(fd, data, 0, data.length, 0);
+            fs.closeSync(fd);
+        },
+        mkdir: (dir) => fs.mkdirSync(dir, { recursive: true }),
+        read: (offset, size) => {
+            const buf = Buffer.alloc(size);
+            fs.readSync(inputFd, buf, 0, size, offset);
+            return buf;
+        },
+        pathJoin: (...parts) => path.join(...parts),
+        basename: (p, ext) => ext ? path.basename(p, ext) : path.basename(p),
+        exists: (p) => fs.existsSync(p),
+    };
 }
 
 async function main() {
@@ -26,6 +52,10 @@ async function main() {
     let verify = true;
     let overwrite = false;
     let rmSource = false;
+    let extractMode = false;
+    let infoMode = false;
+    let depth = 1;
+    let extractRegex = null;
 
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--fix-padding' || args[i] === '-p') {
@@ -43,6 +73,14 @@ async function main() {
             rmSource = true;
         } else if ((args[i] === '-o' || args[i] === '--output') && i + 1 < args.length) {
             outputDir = args[++i];
+        } else if (args[i] === '--extract' || args[i] === '-x') {
+            extractMode = true;
+        } else if (args[i] === '--extractregex' && i + 1 < args.length) {
+            extractRegex = args[++i];
+        } else if (args[i] === '--info' || args[i] === '-i') {
+            infoMode = true;
+        } else if (args[i] === '--depth' && i + 1 < args.length) {
+            depth = parseInt(args[++i], 10);
         } else if (!inputPath) {
             inputPath = args[i];
         } else if (!keysPath && !args[i].startsWith('-')) {
@@ -61,6 +99,10 @@ async function main() {
         console.log('');
         console.log('Options:');
         console.log('  -o, --output <dir>   Output directory');
+        console.log('  -i, --info           Show NCA/container information');
+        console.log('  -x, --extract        Extract NCA contents recursively');
+        console.log('  --depth <n>          Extraction/info depth (default: 1)');
+        console.log('  --extractregex <rx>  Regex filter for extracted files');
         console.log('  -w, --overwrite      Overwrite existing output files');
         console.log('  --rm-source          Delete input file after successful conversion');
         console.log('  --no-verify, -nv     Skip SHA256 verification (faster, no CNMT parsing)');
@@ -95,17 +137,34 @@ async function main() {
     const isXcz = inputPath.toLowerCase().endsWith('.xcz');
     const inStat = fs.statSync(inputPath);
     const inputSize = inStat.size;
-    console.log('=== NSZ to NSP Converter ===');
-    console.log(`Input: ${inputPath} (${formatBytes(inputSize)})`);
 
     const inputFd = fs.openSync(inputPath, 'r');
     const inReader = new FileDescriptorReader(inputFd, 0, inputSize);
 
     try {
-        if (isXcz) {
-            await convertXCZ(inReader, inputFd, inputPath, outputDir, keys, verify, overwrite, rmSource);
+        if (infoMode) {
+            console.log('');
+            if (isXcz) {
+                await printXCZInfo(inReader, inputPath, keys, depth, makeExtractAdapter(inputFd));
+            } else {
+                await printNSZInfo(inReader, inputPath, keys, depth, makeExtractAdapter(inputFd));
+            }
+        } else if (extractMode) {
+            console.log('');
+            if (isXcz) {
+                await extractXCZContainer(inReader, inputPath, outputDir, keys, depth, extractRegex, makeExtractAdapter(inputFd));
+            } else {
+                await extractNSZContainer(inReader, inputPath, outputDir, keys, depth, extractRegex, makeExtractAdapter(inputFd));
+            }
         } else {
-            await convertNSZ(inReader, inputFd, inputPath, outputDir, keys, fixPadding, verify, overwrite, rmSource);
+            console.log('=== NSZ to NSP Converter ===');
+            console.log(`Input: ${inputPath} (${formatBytes(inputSize)})`);
+
+            if (isXcz) {
+                await convertXCZ(inReader, inputFd, inputPath, outputDir, keys, verify, overwrite, rmSource);
+            } else {
+                await convertNSZ(inReader, inputFd, inputPath, outputDir, keys, fixPadding, verify, overwrite, rmSource);
+            }
         }
     } finally {
         fs.closeSync(inputFd);
@@ -130,16 +189,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputDir, keys, verify,
 
     const outputFd = fs.openSync(outPath, 'w');
     try {
-        const adapter = {
-            read: (offset, size) => {
-                const buf = Buffer.alloc(size);
-                fs.readSync(inputFd, buf, 0, size, offset);
-                return buf;
-            },
-            write: (offset, data) => fs.writeSync(outputFd, data, 0, data.byteLength, offset),
-            log: (level, msg) => console.log(msg),
-            progress: () => {},
-        };
+        const adapter = makeAdapter(inputFd, outputFd);
 
         const extractCnmtHashes = async (cnmtData) => {
             const { NSZConverter } = await import('./converter.js');
@@ -191,16 +241,7 @@ async function convertNSZ(inReader, inputFd, inputPath, outputDir, keys, fixPadd
 
     const outputFd = fs.openSync(outPath, 'w');
     try {
-        const adapter = {
-            read: (offset, size) => {
-                const buf = Buffer.alloc(size);
-                fs.readSync(inputFd, buf, 0, size, offset);
-                return buf;
-            },
-            write: (offset, data) => fs.writeSync(outputFd, data, 0, data.byteLength, offset),
-            log: (level, msg) => console.log(msg),
-            progress: () => {},
-        };
+        const adapter = makeAdapter(inputFd, outputFd);
 
         let cnmtHashes = new Set();
         if (verify) {
@@ -212,7 +253,7 @@ async function convertNSZ(inReader, inputFd, inputPath, outputDir, keys, fixPadd
                 const hashes = await converter.extractCnmtHashes(cnmtData);
                 hashes.forEach(h => cnmtHashes.add(h));
             }
-            console.log(`Found ${cnmtHashes.size} expected NCA hashes from CNMT`);
+            console.log(`Found ${cnmtHashes.size} expected NCA hahses from CNMT`);
         }
 
         await convertNSZStreaming(pfs0Reader, keys, adapter, {

@@ -10,6 +10,8 @@ A **100% local** pure JavaScript converter for Nintendo Switch compressed game f
 - **Zstandard decompression**: Full support for both streaming and block compression
 - **NCA encryption**: Supports CTR and BKTR encryption modes
 - **Integrity verification**: Validates NCA file hashes against CNMT records (per-partition for XCZ)
+- **NCA extraction**: Recursively extract NCA contents with `-x/--extract`
+- **NCA info**: Inspect NCA structure, sections, and crypto metadata with `-i/--info`
 - **Python nsz compatible**: Output matches Python nsz byte-for-byte
 - **Large file support**: Streaming decompression for files up to 8GB+
 - **Batch processing**: Process multiple NSZ files at once
@@ -35,6 +37,9 @@ Options:
 - `-o, --output <dir>` - Output directory
 - `-w, --overwrite` - Overwrite existing output files
 - `--rm-source` - Delete input file after successful conversion
+- `-x, --extract` - Extract NCA contents recursively
+- `-i, --info` - Show NCA/container information
+- `--depth <n>` - Extraction/info depth (default: 1)
 - `--keys <path>` - Path to prod.keys file
 - `--no-verify, -nv` - Skip SHA256 verification (faster)
 - `--fix-padding, -p` - Use 0x20-byte alignment (default: 16-byte)
@@ -75,7 +80,9 @@ nsz-js/
 │   ├── hfs0.js             # HFS0 container parsing and writing
 │   ├── ticket.js           # Ticket parsing
 │   ├── cnmt.js             # CNMT (Content Metadata) parsing
-│   └── nca.js              # NCA header parsing
+│   ├── nca.js              # NCA header parsing, decryption, sections split, extract, info
+│   ├── nsz-convert.js      # NSZ→NSP conversion, NSZ container extract/info
+│   ├── xcz-convert.js      # XCZ→XCI conversion, XCZ container extract/info
 ├── crypto/                 # Cryptographic utilities
 │   ├── aes128.js           # AES-128 ECB/CBC implementation
 │   ├── aesctr.mjs          # AES-CTR mode (Node.js native crypto / Web Crypto API)
@@ -104,7 +111,8 @@ nsz-js/
 - **fs/hfs0.js** - `HFS0Reader` and `HFS0Writer` for HFS0 container support
 - **fs/ticket.js** - `Ticket` class for parsing ticket files
 - **fs/cnmt.js** - `Cnmt` and `ContentEntry` classes for parsing Content Metadata
-- **fs/nca.js** - `NCAHeader` class for parsing NCA headers
+- **fs/nca.js** - `NCAHeader`, `NCA` classes и `extractNCA`. `NCA.open()` — дешифровка NCA (XTS заголовка, AES-ECB развёртка ключей, AES-CTR секций), возвращает `sections` (метаданные) и `sectionFilesystems` (парсеры PFS0). `NCA` с `[Symbol.iterator]`, `printInfo` с рекурсивной глубиной, `getBuildId`. `extractNCA` — рекурсивное извлечение файлов из NCA (adapter pattern). Также экспортирует `formatBytes`.
+- **fs/nsz-convert.js**/[**xcz-convert.js**](disambiguation) - Ядро конвертации NSZ→NSP и XCZ→XCI. Также содержат `extractNSZContainer`/`extractXCZContainer` и `printNSZInfo`/`printXCZInfo` для извлечения и просмотра информации о контейнерах (adapter pattern для CLI/браузер).
 - **keys.js** - `KeysParser` class for parsing prod.keys files and deriving title KEKs and key area keys
 
 ### Crypto Files
