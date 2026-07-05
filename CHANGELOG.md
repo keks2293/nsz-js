@@ -1,5 +1,11 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-07-05)
+
+1. **NCAHeader: sections/sectionFilesystems split** — `fs/nca.js`. Added `SectionHeader` class parsing 0x200-byte section headers at offset 0x400. `NCAHeader.parse()` now returns parallel `sections[]` and `sectionFilesystems[]` arrays (matching Python nsz `Nca.open()` pattern). `sections[i]` has: `offset`, `endOffset`, `size`, `fsType`, `cryptoType`, `cryptoKey` (= `titleKeyDec`), `sectionStart`, `sectionSize`, `cryptoCounter`, BKTR buffers. `sectionFilesystems[i]` has: `fsType`, `cryptoType`, `sectionStart`, `size`, `cryptoCounter`, BKTR buffers. Only sections with `fsType !== 0` included. Added `FsType` constants. `NCAHeader.parse(buffer, keys)` now accepts optional `keys` parameter for key block decryption (AES-ECB with `key_area_key_application[masterKey]`, bytes 32-48 = `titleKeyDec`).
+
+2. **Simplified extractCnmtHashes** — `converter.js`. Removed manual key block decryption (25 lines). Now uses `header.sections[0].cryptoKey` and `header.sections[0].cryptoCounter` directly. Removed unused `AesEcb` import and `nodeCrypto` dynamic import.
+
 ## ✅ Recent Changes (2026-07-04)
 
 1. **CLI: added `-o, --output`** — `nsz-cli.js`. Output directory for converted files. Matches Python nsz `-o, --output`.
