@@ -1,3 +1,5 @@
+import { ZSTDDecoder } from '../static/zstddec.mjs';
+
 let ready = false;
 let sharedDecoder = null;
 let wasmInstance = null;
@@ -5,10 +7,8 @@ let wasmInstance = null;
 class ZstdDecompressor {
     static async load() {
         if (ready) return;
-        const module = await import('../static/zstddec.mjs');
 
-        const OrigDecoder = module.ZSTDDecoder;
-        class CapturingDecoder extends OrigDecoder {
+        class CapturingDecoder extends ZSTDDecoder {
             _init(result) {
                 wasmInstance = result.instance;
                 return super._init(result);

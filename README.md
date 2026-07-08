@@ -131,7 +131,7 @@ The `static/` folder contains downloaded copies of browser dependencies for offl
 
 | File | Package | Version | Source |
 |------|---------|---------|--------|
-| `static/zstddec.mjs` | zstddec | 0.2.0 | Copied from `node_modules/zstddec/dist/zstddec-stream.modern.js` |
+| `static/zstddec.mjs` | zstddec | 0.2.0 | Copied from `node_modules/zstddec/dist/zstddec-stream.modern.js`. Bundled into `out/app.mjs` by esbuild — no separate HTTP request at runtime. |
 | `static/prod.keys` | - | - | Nintendo Switch keys file (user-provided) |
 
 AES-CTR uses native crypto — Node.js `crypto.createCipheriv` or browser Web Crypto API. No external AES library needed.
