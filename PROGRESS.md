@@ -1,5 +1,11 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-07-08)
+
+1. **Build: copy runtime assets to `out/`, key files only** — `build.js`. Copies `favicon.svg`, `download-worker.js`, `static/prod.keys` to `out/`. No longer copies `static/zstddec.mjs` — it's bundled into `app.mjs` now. Graceful skip if `prod.keys` missing. Extracted `ENTRY`/`OUT`/`ASSETS` constants. Assumes `netlify.toml` with `publish = "out"`.
+
+2. **ZstdDecoder: replace dynamic `import()` with static `import`** — `crypto/zstd.js`. Changed `await import('../static/zstddec.mjs')` to `import { ZSTDDecoder } from '../static/zstddec.mjs'`. esbuild bundles it into `app.mjs`, eliminating one HTTP request at startup.
+
 ## ✅ Recent Changes (2026-07-05)
 
 1. **NCAHeader: sections/sectionFilesystems split** — `fs/nca.js`. Added `SectionHeader` class parsing 0x200-byte section headers at offset 0x400. `NCAHeader.parse()` now returns parallel `sections[]` and `sectionFilesystems[]` arrays (matching Python nsz `Nca.open()` pattern). `sections[i]` has: `offset`, `endOffset`, `size`, `fsType`, `cryptoType`, `cryptoKey` (= `titleKeyDec`), `sectionStart`, `sectionSize`, `cryptoCounter`, BKTR buffers. `sectionFilesystems[i]` has: `fsType`, `cryptoType`, `sectionStart`, `size`, `cryptoCounter`, BKTR buffers. Only sections with `fsType !== 0` included. Added `FsType` constants. `NCAHeader.parse(buffer, keys)` now accepts optional `keys` parameter for key block decryption (AES-ECB with `key_area_key_application[masterKey]`, bytes 32-48 = `titleKeyDec`).
