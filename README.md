@@ -68,6 +68,7 @@ nsz-js/
 ├── nsz-cli.js              # Node.js CLI entry point
 ├── keys.js                 # Browser key parsing and derivation
 ├── download-worker.js      # Service Worker for streaming downloads
+├── build.js                # esbuild bundler script (app.mjs + asset copy)
 ├── fs/                     # File format modules (mirrors Python nsz Fs/)
 │   ├── pfs0.js             # PFS0 container parsing and writing
 │   ├── ncz.js              # NCZ decompression, DataReader hierarchy, AsyncBlockDecompressorReader
@@ -109,6 +110,7 @@ nsz-js/
 - **fs/cnmt.js** - `Cnmt` and `ContentEntry` classes for parsing Content Metadata
 - **fs/nca.js** - `NCAHeader` class for parsing NCA headers
 - **keys.js** - `KeysParser` class for parsing prod.keys files and deriving title KEKs and key area keys
+- **build.js** - esbuild bundler script, builds `out/app.mjs` and copies runtime assets
 - **fs/nsz-convert.js** - NSZ→NSP streaming/memory conversion (adapter pattern, shared with CLI)
 - **fs/xcz-convert.js** - XCZ→XCI streaming/memory conversion (adapter pattern, shared with CLI)
 
