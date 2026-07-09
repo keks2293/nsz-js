@@ -24,15 +24,10 @@ function xor(a, b) {
 }
 
 function getTweakBytes(sector) {
-    let tweak = 0;
-    for (let i = 0; i < 16; i++) {
-        tweak |= (sector & 0xFF) << (i * 8);
-        sector = Math.floor(sector / 256);
-    }
-    const hex = tweak.toString(16).padStart(32, '0');
     const buf = new Uint8Array(16);
-    for (let i = 0; i < 16; i++) {
-        buf[i] = parseInt(hex.substr(i * 2, 2), 16);
+    for (let i = 15; i >= 0; i--) {
+        buf[i] = sector & 0xFF;
+        sector = Math.floor(sector / 256);
     }
     return buf;
 }
@@ -47,12 +42,12 @@ function gf128Mul(tweak) {
     if (t & (1n << 128n)) {
         t ^= (1n << 128n) | 0x87n;
     }
-    const hex = t.toString(16).padStart(32, '0');
     const result = new Uint8Array(16);
     for (let i = 0; i < 16; i++) {
-        result[i] = parseInt(hex.substr(i * 2, 2), 16);
+        result[15 - i] = Number(t & 0xffn);
+        t >>= 8n;
     }
-    return result.reverse();
+    return result;
 }
 
 function aesEcbEncryptNode(key, data) {
