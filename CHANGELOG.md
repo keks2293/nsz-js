@@ -1,5 +1,9 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-07-09)
+
+1. **Perf: replace string conversion in `getTweakBytes` with direct byte writes** — `crypto/aesxts.mjs:26`. Removed `Number → hex string → parseInt` roundtrip. Now writes sector bytes directly into `Uint8Array` from MSB to LSB. Same big-endian output, no intermediate string allocation.
+
 ## ✅ Recent Changes (2026-07-08)
 
 1. **Build: copy runtime assets to `out/`, key files only** — `build.js`. Copies `favicon.svg`, `download-worker.js`, `static/prod.keys` to `out/`. No longer copies `static/zstddec.mjs` — it's bundled into `app.mjs` now. Graceful skip if `prod.keys` missing. Extracted `ENTRY`/`OUT`/`ASSETS` constants. Assumes `netlify.toml` with `publish = "out"`.
