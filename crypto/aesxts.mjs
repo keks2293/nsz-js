@@ -50,18 +50,6 @@ function gf128Mul(tweak) {
     return result;
 }
 
-function aesEcbEncryptNode(key, data) {
-    const c = nodeCrypto.createCipheriv('aes-128-ecb', key, null);
-    c.setAutoPadding(false);
-    return new Uint8Array(c.update(data));
-}
-
-function aesEcbDecryptNode(key, data) {
-    const d = nodeCrypto.createDecipheriv('aes-128-ecb', key, null);
-    d.setAutoPadding(false);
-    return new Uint8Array(d.update(data));
-}
-
 class AesXts {
     constructor(key) {
         if (key.length !== 32) throw new Error('XTS key must be 32 bytes');
@@ -69,8 +57,12 @@ class AesXts {
         this.k2 = key.subarray(16, 32);
 
         if (nodeCrypto) {
-            this._encTweak = (tweakBytes) => aesEcbEncryptNode(this.k2, tweakBytes);
-            this._decData = (block) => aesEcbDecryptNode(this.k1, block);
+            this._encTweakCipher = nodeCrypto.createCipheriv('aes-128-ecb', this.k2, null);
+            this._encTweakCipher.setAutoPadding(false);
+            this._decDataCipher = nodeCrypto.createDecipheriv('aes-128-ecb', this.k1, null);
+            this._decDataCipher.setAutoPadding(false);
+            this._encTweak = (tweakBytes) => new Uint8Array(this._encTweakCipher.update(tweakBytes));
+            this._decData = (block) => new Uint8Array(this._decDataCipher.update(block));
         } else {
             this._aesEnc = new AesEcb(this.k2);
             this._aesDec = new AesEcb(this.k1);
