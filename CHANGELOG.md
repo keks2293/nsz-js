@@ -1,5 +1,9 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-07-14)
+
+1. **Perf: T-tables for AES-ECB encrypt + decrypt** — `crypto/aes128.js`. Added T0–T3 and T0inv–T3inv lookup tables combining SubBytes/ShiftRows/MixColumns into single 32-bit lookups. Rewrote `encryptBlock()` and `decryptBlock()` to use T-tables. Pre-computed `decKeys` (rounds 1–9 InvMixColumns) in constructor. Added `_gmul` and `_invMixColumnsWord` helpers. Removed old step-by-step methods (subBytes, shiftRows, mixColumns, etc.). Trimmed rconTable 180→40 entries. Encrypt: ~7.4x faster (728K → 5.4M ops/s). Decrypt: ~34x faster (163K → 5.5M ops/s).
+
 ## ✅ Recent Changes (2026-07-09)
 
 1. **Perf: replace string conversion in `getTweakBytes` with direct byte writes** — `crypto/aesxts.mjs:26`. Removed `Number → hex string → parseInt` roundtrip. Now writes sector bytes directly into `Uint8Array` from MSB to LSB. Same big-endian output, no intermediate string allocation.
