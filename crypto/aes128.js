@@ -5,21 +5,7 @@ const rconTable = [
     0x6c, 0xd8, 0xab, 0x4d, 0x9a, 0x2f, 0x5e, 0xbc, 0x63, 0xc6, 0x97,
     0x35, 0x6a, 0xd4, 0xb3, 0x7d, 0xfa, 0xef, 0xc5, 0x91, 0x39, 0x72,
     0xe4, 0xd3, 0xbd, 0x61, 0xc2, 0x9f, 0x25, 0x4a, 0x94, 0x33, 0x66,
-    0xcc, 0x83, 0x1d, 0x3a, 0x74, 0xe8, 0xcb, 0x8d, 0x01, 0x02, 0x04,
-    0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36, 0x6c, 0xd8, 0xab, 0x4d,
-    0x9a, 0x2f, 0x5e, 0xbc, 0x63, 0xc6, 0x97, 0x35, 0x6a, 0xd4, 0xb3,
-    0x7d, 0xfa, 0xef, 0xc5, 0x91, 0x39, 0x72, 0xe4, 0xd3, 0xbd, 0x61,
-    0xc2, 0x9f, 0x25, 0x4a, 0x94, 0x33, 0x66, 0xcc, 0x83, 0x1d, 0x3a,
-    0x74, 0xe8, 0xcb, 0x8d, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40,
-    0x80, 0x1b, 0x36, 0x6c, 0xd8, 0xab, 0x4d, 0x9a, 0x2f, 0x5e, 0xbc,
-    0x63, 0xc6, 0x97, 0x35, 0x6a, 0xd4, 0xb3, 0x7d, 0xfa, 0xef, 0xc5,
-    0x91, 0x39, 0x72, 0xe4, 0xd3, 0xbd, 0x61, 0xc2, 0x9f, 0x25, 0x4a,
-    0x94, 0x33, 0x66, 0xcc, 0x83, 0x1d, 0x3a, 0x74, 0xe8, 0xcb, 0x8d,
-    0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36, 0x6c,
-    0xd8, 0xab, 0x4d, 0x9a, 0x2f, 0x5e, 0xbc, 0x63, 0xc6, 0x97, 0x35,
-    0x6a, 0xd4, 0xb3, 0x7d, 0xfa, 0xef, 0xc5, 0x91, 0x39, 0x72, 0xe4,
-    0xd3, 0xbd, 0x61, 0xc2, 0x9f, 0x25, 0x4a, 0x94, 0x33, 0x66, 0xcc,
-    0x83, 0x1d, 0x3a, 0x74, 0xe8, 0xcb
+    0xcc, 0x83, 0x1d, 0x3a, 0x74, 0xe8, 0xcb
 ];
 
 const sbox = [
@@ -60,6 +46,58 @@ const invSbox = [
     0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d
 ];
 
+const T0 = new Uint32Array(256);
+const T1 = new Uint32Array(256);
+const T2 = new Uint32Array(256);
+const T3 = new Uint32Array(256);
+const T0inv = new Uint32Array(256);
+const T1inv = new Uint32Array(256);
+const T2inv = new Uint32Array(256);
+const T3inv = new Uint32Array(256);
+
+{
+    const xtime = (x) => ((x << 1) ^ (((x >> 7) & 1) * 0x1b)) & 0xff;
+
+    for (let i = 0; i < 256; i++) {
+        const s = sbox[i];
+        const s2 = xtime(s);
+        const s3 = s2 ^ s;
+        T0[i] = (s2 << 24) | (s << 16) | (s << 8) | s3;
+
+        const is = invSbox[i];
+        T0inv[i] = (_gmul(0x0e, is) << 24) | (_gmul(0x09, is) << 16) | (_gmul(0x0d, is) << 8) | _gmul(0x0b, is);
+        T1inv[i] = (_gmul(0x0b, is) << 24) | (_gmul(0x0e, is) << 16) | (_gmul(0x09, is) << 8) | _gmul(0x0d, is);
+        T2inv[i] = (_gmul(0x0d, is) << 24) | (_gmul(0x0b, is) << 16) | (_gmul(0x0e, is) << 8) | _gmul(0x09, is);
+        T3inv[i] = (_gmul(0x09, is) << 24) | (_gmul(0x0d, is) << 16) | (_gmul(0x0b, is) << 8) | _gmul(0x0e, is);
+    }
+
+    for (let i = 0; i < 256; i++) {
+        T1[i] = ((T0[i] << 24) | (T0[i] >>> 8)) >>> 0;
+        T2[i] = ((T0[i] << 16) | (T0[i] >>> 16)) >>> 0;
+        T3[i] = ((T0[i] << 8) | (T0[i] >>> 24)) >>> 0;
+    }
+}
+
+function _gmul(a, b) {
+    let p = 0;
+    for (let i = 0; i < 8; i++) {
+        if (b & 1) p ^= a;
+        const hi = a & 0x80;
+        a = (a << 1) & 0xff;
+        if (hi) a ^= 0x1b;
+        b >>= 1;
+    }
+    return p;
+}
+
+function _invMixColumnsWord(w) {
+    const a0 = (w >>> 24) & 0xff, a1 = (w >>> 16) & 0xff, a2 = (w >>> 8) & 0xff, a3 = w & 0xff;
+    return ((_gmul(0x0e,a0)^_gmul(0x0b,a1)^_gmul(0x0d,a2)^_gmul(0x09,a3)) << 24 |
+        (_gmul(0x09,a0)^_gmul(0x0e,a1)^_gmul(0x0b,a2)^_gmul(0x0d,a3)) << 16 |
+        (_gmul(0x0d,a0)^_gmul(0x09,a1)^_gmul(0x0e,a2)^_gmul(0x0b,a3)) << 8 |
+        (_gmul(0x0b,a0)^_gmul(0x0d,a1)^_gmul(0x09,a2)^_gmul(0x0e,a3))) >>> 0;
+}
+
 function _checkAes128Key(key) {
     if (key.length !== BLOCK_SIZE) throw new Error(`Key must be ${BLOCK_SIZE} bytes`);
 }
@@ -76,6 +114,12 @@ class AesEcb {
     constructor(key) {
         _checkAes128Key(key);
         this.keys = this.keySchedule(key);
+        this.decKeys = this.keys.slice();
+        for (let r = 1; r < 10; r++) {
+            for (let c = 0; c < 4; c++) {
+                this.decKeys[r * 4 + c] = _invMixColumnsWord(this.keys[r * 4 + c]);
+            }
+        }
     }
 
     keySchedule(key) {
@@ -103,10 +147,10 @@ class AesEcb {
     }
 
     subWord(word) {
-        return (sbox[(word >> 0) & 0xff] << 0) |
-               (sbox[(word >> 8) & 0xff] << 8) |
-               (sbox[(word >> 16) & 0xff] << 16) |
-               (sbox[(word >> 24) & 0xff] << 24);
+        return (sbox[(word >>> 0) & 0xff] << 0) |
+               (sbox[(word >>> 8) & 0xff] << 8) |
+               (sbox[(word >>> 16) & 0xff] << 16) |
+               (sbox[(word >>> 24) & 0xff] << 24);
     }
 
     encrypt(data) {
@@ -130,127 +174,77 @@ class AesEcb {
     }
 
     encryptBlock(block) {
-        const state = [...block];
-        this.addRoundKey(state, this.keys, 0);
+        const k = this.keys;
+        let s0 = ((block[0] << 24) | (block[1] << 16) | (block[2] << 8) | block[3]) ^ k[0];
+        let s1 = ((block[4] << 24) | (block[5] << 16) | (block[6] << 8) | block[7]) ^ k[1];
+        let s2 = ((block[8] << 24) | (block[9] << 16) | (block[10] << 8) | block[11]) ^ k[2];
+        let s3 = ((block[12] << 24) | (block[13] << 16) | (block[14] << 8) | block[15]) ^ k[3];
 
-        for (let round = 1; round < 10; round++) {
-            this.subBytes(state);
-            this.shiftRows(state);
-            this.mixColumns(state);
-            this.addRoundKey(state, this.keys, round * 4);
+        for (let r = 1; r < 10; r++) {
+            const rk = r << 2;
+            const t0 = T0[s0 >>> 24] ^ T1[(s1 >>> 16) & 0xff] ^ T2[(s2 >>> 8) & 0xff] ^ T3[s3 & 0xff] ^ k[rk];
+            const t1 = T0[s1 >>> 24] ^ T1[(s2 >>> 16) & 0xff] ^ T2[(s3 >>> 8) & 0xff] ^ T3[s0 & 0xff] ^ k[rk | 1];
+            const t2 = T0[s2 >>> 24] ^ T1[(s3 >>> 16) & 0xff] ^ T2[(s0 >>> 8) & 0xff] ^ T3[s1 & 0xff] ^ k[rk | 2];
+            const t3 = T0[s3 >>> 24] ^ T1[(s0 >>> 16) & 0xff] ^ T2[(s1 >>> 8) & 0xff] ^ T3[s2 & 0xff] ^ k[rk | 3];
+            s0 = t0; s1 = t1; s2 = t2; s3 = t3;
         }
 
-        this.subBytes(state);
-        this.shiftRows(state);
-        this.addRoundKey(state, this.keys, 10 * 4);
-
-        return new Uint8Array(state);
+        const rk = 40;
+        return new Uint8Array([
+            (sbox[s0 >>> 24] ^ (k[rk] >>> 24)) & 0xff,
+            (sbox[(s1 >>> 16) & 0xff] ^ (k[rk] >>> 16)) & 0xff,
+            (sbox[(s2 >>> 8) & 0xff] ^ (k[rk] >>> 8)) & 0xff,
+            (sbox[s3 & 0xff] ^ k[rk]) & 0xff,
+            (sbox[s1 >>> 24] ^ (k[rk | 1] >>> 24)) & 0xff,
+            (sbox[(s2 >>> 16) & 0xff] ^ (k[rk | 1] >>> 16)) & 0xff,
+            (sbox[(s3 >>> 8) & 0xff] ^ (k[rk | 1] >>> 8)) & 0xff,
+            (sbox[s0 & 0xff] ^ k[rk | 1]) & 0xff,
+            (sbox[s2 >>> 24] ^ (k[rk | 2] >>> 24)) & 0xff,
+            (sbox[(s3 >>> 16) & 0xff] ^ (k[rk | 2] >>> 16)) & 0xff,
+            (sbox[(s0 >>> 8) & 0xff] ^ (k[rk | 2] >>> 8)) & 0xff,
+            (sbox[s1 & 0xff] ^ k[rk | 2]) & 0xff,
+            (sbox[s3 >>> 24] ^ (k[rk | 3] >>> 24)) & 0xff,
+            (sbox[(s0 >>> 16) & 0xff] ^ (k[rk | 3] >>> 16)) & 0xff,
+            (sbox[(s1 >>> 8) & 0xff] ^ (k[rk | 3] >>> 8)) & 0xff,
+            (sbox[s2 & 0xff] ^ k[rk | 3]) & 0xff
+        ]);
     }
 
     decryptBlock(block) {
-        const state = [...block];
-        this.addRoundKey(state, this.keys, 10 * 4);
+        const k = this.decKeys;
+        let s0 = ((block[0] << 24) | (block[1] << 16) | (block[2] << 8) | block[3]) ^ k[40];
+        let s1 = ((block[4] << 24) | (block[5] << 16) | (block[6] << 8) | block[7]) ^ k[41];
+        let s2 = ((block[8] << 24) | (block[9] << 16) | (block[10] << 8) | block[11]) ^ k[42];
+        let s3 = ((block[12] << 24) | (block[13] << 16) | (block[14] << 8) | block[15]) ^ k[43];
 
-        for (let round = 9; round > 0; round--) {
-            this.invShiftRows(state);
-            this.invSubBytes(state);
-            this.addRoundKey(state, this.keys, round * 4);
-            this.invMixColumns(state);
+        for (let r = 9; r > 0; r--) {
+            const rk = r << 2;
+            const t0 = T0inv[s0 >>> 24] ^ T1inv[(s3 >>> 16) & 0xff] ^ T2inv[(s2 >>> 8) & 0xff] ^ T3inv[s1 & 0xff] ^ k[rk];
+            const t1 = T0inv[s1 >>> 24] ^ T1inv[(s0 >>> 16) & 0xff] ^ T2inv[(s3 >>> 8) & 0xff] ^ T3inv[s2 & 0xff] ^ k[rk | 1];
+            const t2 = T0inv[s2 >>> 24] ^ T1inv[(s1 >>> 16) & 0xff] ^ T2inv[(s0 >>> 8) & 0xff] ^ T3inv[s3 & 0xff] ^ k[rk | 2];
+            const t3 = T0inv[s3 >>> 24] ^ T1inv[(s2 >>> 16) & 0xff] ^ T2inv[(s1 >>> 8) & 0xff] ^ T3inv[s0 & 0xff] ^ k[rk | 3];
+            s0 = t0; s1 = t1; s2 = t2; s3 = t3;
         }
 
-        this.invShiftRows(state);
-        this.invSubBytes(state);
-        this.addRoundKey(state, this.keys, 0);
-
-        return new Uint8Array(state);
-    }
-
-    subBytes(state) {
-        for (let i = 0; i < BLOCK_SIZE; i++) {
-            state[i] = sbox[state[i] & 0xff];
-        }
-    }
-
-    shiftRows(state) {
-        const tmp = new Array(BLOCK_SIZE);
-        for (let i = 0; i < 4; i++) {
-            for (let j = 0; j < 4; j++) {
-                tmp[i * 4 + j] = state[j * 4 + i];
-            }
-        }
-        for (let i = 0; i < 4; i++) {
-            for (let j = 0; j < 4; j++) {
-                state[j * 4 + i] = tmp[i * 4 + (j + i) % 4];
-            }
-        }
-    }
-
-    invSubBytes(state) {
-        for (let i = 0; i < BLOCK_SIZE; i++) {
-            state[i] = invSbox[state[i] & 0xff];
-        }
-    }
-
-    invShiftRows(state) {
-        const tmp = new Array(BLOCK_SIZE);
-        for (let i = 0; i < 4; i++) {
-            for (let j = 0; j < 4; j++) {
-                tmp[i * 4 + j] = state[j * 4 + i];
-            }
-        }
-        for (let i = 0; i < 4; i++) {
-            for (let j = 0; j < 4; j++) {
-                state[j * 4 + i] = tmp[i * 4 + (j - i + 4) % 4];
-            }
-        }
-    }
-
-    mixColumns(state) {
-        const mult2 = (x) => x & 0x80 ? ((x << 1) ^ 0x1b) : (x << 1);
-        const mult3 = (x) => mult2(x) ^ x;
-
-        for (let c = 0; c < 4; c++) {
-            const idx = c * 4;
-            const s0 = state[idx], s1 = state[idx + 1], s2 = state[idx + 2], s3 = state[idx + 3];
-
-            state[idx] = mult2(s0) ^ mult3(s1) ^ s2 ^ s3;
-            state[idx + 1] = s0 ^ mult2(s1) ^ mult3(s2) ^ s3;
-            state[idx + 2] = s0 ^ s1 ^ mult2(s2) ^ mult3(s3);
-            state[idx + 3] = mult3(s0) ^ s1 ^ s2 ^ mult2(s3);
-        }
-    }
-
-    invMixColumns(state) {
-        const gmul = (a, b) => {
-            let p = 0;
-            for (let i = 0; i < 8; i++) {
-                if (b & 1) p ^= a;
-                const hiBitSet = a & 0x80;
-                a = (a << 1) & 0xff;
-                if (hiBitSet) a ^= 0x1b;
-                b >>= 1;
-            }
-            return p;
-        };
-
-        for (let c = 0; c < 4; c++) {
-            const idx = c * 4;
-            const s0 = state[idx], s1 = state[idx + 1], s2 = state[idx + 2], s3 = state[idx + 3];
-
-            state[idx] = gmul(0x0e, s0) ^ gmul(0x0b, s1) ^ gmul(0x0d, s2) ^ gmul(0x09, s3);
-            state[idx + 1] = gmul(0x09, s0) ^ gmul(0x0e, s1) ^ gmul(0x0b, s2) ^ gmul(0x0d, s3);
-            state[idx + 2] = gmul(0x0d, s0) ^ gmul(0x09, s1) ^ gmul(0x0e, s2) ^ gmul(0x0b, s3);
-            state[idx + 3] = gmul(0x0b, s0) ^ gmul(0x0d, s1) ^ gmul(0x09, s2) ^ gmul(0x0e, s3);
-        }
-    }
-
-    addRoundKey(state, expandedKey, offset) {
-        for (let i = 0; i < BLOCK_SIZE; i++) {
-            const row = i % 4;
-            const col = Math.floor(i / 4);
-            const keyByte = (expandedKey[offset + col] >> ((3 - row) * 8)) & 0xff;
-            state[i] ^= keyByte;
-        }
+        const rk = 0;
+        return new Uint8Array([
+            (invSbox[s0 >>> 24] ^ (k[rk] >>> 24)) & 0xff,
+            (invSbox[(s3 >>> 16) & 0xff] ^ (k[rk] >>> 16)) & 0xff,
+            (invSbox[(s2 >>> 8) & 0xff] ^ (k[rk] >>> 8)) & 0xff,
+            (invSbox[s1 & 0xff] ^ k[rk]) & 0xff,
+            (invSbox[s1 >>> 24] ^ (k[rk | 1] >>> 24)) & 0xff,
+            (invSbox[(s0 >>> 16) & 0xff] ^ (k[rk | 1] >>> 16)) & 0xff,
+            (invSbox[(s3 >>> 8) & 0xff] ^ (k[rk | 1] >>> 8)) & 0xff,
+            (invSbox[s2 & 0xff] ^ k[rk | 1]) & 0xff,
+            (invSbox[s2 >>> 24] ^ (k[rk | 2] >>> 24)) & 0xff,
+            (invSbox[(s1 >>> 16) & 0xff] ^ (k[rk | 2] >>> 16)) & 0xff,
+            (invSbox[(s0 >>> 8) & 0xff] ^ (k[rk | 2] >>> 8)) & 0xff,
+            (invSbox[s3 & 0xff] ^ k[rk | 2]) & 0xff,
+            (invSbox[s3 >>> 24] ^ (k[rk | 3] >>> 24)) & 0xff,
+            (invSbox[(s2 >>> 16) & 0xff] ^ (k[rk | 3] >>> 16)) & 0xff,
+            (invSbox[(s1 >>> 8) & 0xff] ^ (k[rk | 3] >>> 8)) & 0xff,
+            (invSbox[s0 & 0xff] ^ k[rk | 3]) & 0xff
+        ]);
     }
 }
 
