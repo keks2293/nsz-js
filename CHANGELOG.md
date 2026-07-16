@@ -1,5 +1,13 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-07-15)
+
+1. **Perf: T-tables for AES-ECB decrypt** — `crypto/aes128.js`. Added T1inv/T2inv/T3inv tables computed directly per InvMixColumns column (not via rotation from T0inv — InvMixColumns matrix is NOT circulant). Added `_invMixColumnsWord()` helper. Pre-computed `decKeys` (rounds 1–9 InvMixColumns'd) in `AesEcb` constructor. Rewrote `decryptBlock()` to use T-tables (symmetric performance with encrypt). Also removed 3× duplicated `rconTable` entries (180→40 entries). Decrypt ~8.6M blocks/s (symmetric with encrypt ~8.2M blocks/s).
+
+2. **Perf: Replace BigInt gf128Mul with byte-level implementation** — `crypto/aes128.js`. GF(2^128) doubling now uses pure byte ops, no BigInt. Byte order matches BigInt reference (tweak[15] = MSB, tweak[0] = LSB). 17.6x faster on gf128Mul alone (4.5ms vs 71.5ms per 100K calls), 4.5x faster on real XTS decrypt (569ms vs 2573ms per 50MB). All 1000 test vectors match BigInt reference.
+
+3. **Fix: gf128Mul byte order bug** — `crypto/aesxts.mjs`. Byte-level GF(2^128) doubling had wrong carry direction (carried from byte 15→0 instead of 0→15). Broke XTS decryption for files with cryptoType=XTS (e.g. Trackline Express). Root cause: BigInt representation treats tweak[15] as MSB, tweak[0] as LSB — carry propagates LSB→MSB (byte 0→15). Confirmed against Python nsz reference (`aes128.py:144-148`). All 1005 test vectors pass.
+
 ## ✅ Recent Changes (2026-07-14)
 
 1. **Perf: T-tables for AES-ECB encrypt + decrypt** — `crypto/aes128.js`. Added T0–T3 and T0inv–T3inv lookup tables combining SubBytes/ShiftRows/MixColumns into single 32-bit lookups. Rewrote `encryptBlock()` and `decryptBlock()` to use T-tables. Pre-computed `decKeys` (rounds 1–9 InvMixColumns) in constructor. Added `_gmul` and `_invMixColumnsWord` helpers. Removed old step-by-step methods (subBytes, shiftRows, mixColumns, etc.). Trimmed rconTable 180→40 entries. Encrypt: ~7.4x faster (728K → 5.4M ops/s). Decrypt: ~34x faster (163K → 5.5M ops/s).

@@ -34,11 +34,13 @@ function getTweakBytes(sector) {
 
 function gf128Mul(tweak) {
     const result = new Uint8Array(16);
-    const carry = (tweak[15] & 0x80) ? 0x87 : 0;
-    for (let i = 0; i < 15; i++) {
-        result[i] = ((tweak[15 - i] << 1) | (tweak[14 - i] >>> 7)) & 0xff;
+    let carry = 0;
+    for (let i = 0; i < 16; i++) {
+        const newCarry = (tweak[i] >>> 7) & 1;
+        result[i] = ((tweak[i] << 1) | carry) & 0xff;
+        carry = newCarry;
     }
-    result[15] = ((tweak[0] << 1) ^ carry) & 0xff;
+    if (carry) result[0] ^= 0x87;
     return result;
 }
 
