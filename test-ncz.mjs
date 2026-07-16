@@ -6,7 +6,7 @@
 
 import fs from 'fs';
 import { NCZDecompressor } from './fs/ncz.js';
-import { AesCtr } from './crypto/aesctr.mjs';
+import { AesCtr } from './crypto/aes-ops.mjs';
 import { ZstdDecompressor } from './crypto/zstd.js';
 import { PFS0 } from './fs/pfs0.js';
 import { KeysParser } from './keys.js';

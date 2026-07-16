@@ -15,7 +15,7 @@
     <div id="output"></div>
     <script type="module">
         // Import production AesCtr
-        const { AesCtr } = await import('./crypto/aesctr.mjs');
+        const { AesCtr } = await import('./crypto/aes-ops.mjs');
 
         const output = document.getElementById('output');
         let total = 0, passed = 0;
