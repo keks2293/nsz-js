@@ -352,8 +352,7 @@ class NCZDecompressor {
                 const chunk = await reader.read(chunkSize);
                 if (!chunk || chunk.length === 0) break;
 
-                let data = chunk;
-                if (aesCtr) data = await aesCtr.decrypt(data);
+                const data = aesCtr ? await aesCtr.decrypt(chunk) : chunk;
                 await writeChunk(data, i);
 
                 i += chunk.length;
