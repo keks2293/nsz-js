@@ -236,14 +236,18 @@ class NCZDecompressor {
             let lastDecryptEnd = -1;
             while (offset < chunk.length) {
                 const ncaPos = decompOffset + offset;
+                let lo = 0, hi = sortedSections.length;
+                while (lo < hi) {
+                    const mid = (lo + hi) >>> 1;
+                    if (ncaPos >= sortedSections[mid].offset + sortedSections[mid].size) lo = mid + 1;
+                    else hi = mid;
+                }
                 let aesCtr = null;
                 let boundary = chunk.length;
-                for (const s of sortedSections) {
-                    if (ncaPos >= s.offset && ncaPos < s.offset + s.size) {
-                        if (sectionAesCtrs.has(s)) aesCtr = sectionAesCtrs.get(s);
-                        boundary = Math.min(boundary, offset + (s.offset + s.size - ncaPos));
-                        break;
-                    }
+                if (lo < sortedSections.length) {
+                    const s = sortedSections[lo];
+                    aesCtr = sectionAesCtrs.get(s) || null;
+                    boundary = Math.min(chunk.length, offset + (s.offset + s.size - ncaPos));
                 }
                 const subSize = boundary - offset;
                 let data = chunk.subarray(offset, offset + subSize);
