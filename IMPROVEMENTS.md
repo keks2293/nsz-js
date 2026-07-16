@@ -75,6 +75,15 @@ Prioritized areas for improvement identified 2026-05-30.
 
 - ✅ **AsyncBlockDecompressorReader ~30% faster — sequential block iteration** — `fs/ncz.js`. Removed per-read `position & (blockSize - 1)`, `getBlock()` cache lookup and `sliceBytes(block, blockOffset, …)` in favour of simple `nextBlock()` + consume-from-front pattern. Benchmarked on a generated block-mode NSZ (`NCZBLOCK` magic, 658 MB → 1.56 GB, 3 warm runs): OLD position-aware 0.11/0.08/0.12 s, NEW sequential 0.07/0.07/0.07 s → ~30% faster. On streaming NSZ the reader is not exercised, so refactor is a no-op there (~0.08 s both).
 
+- ❌ **Pipeline overlap: prefetch + async write** — `fs/ncz.js`, `crypto/zstddec-stream-wrapper.js`. Тестировали перекрытие записи/чтения с декомпрессией в обоих режимах:
+    - **Block mode** (`_decompressBlocks`): prefetch следующего блока — `nextBlock()` в фоне пока текущий блок проходит AES + write. Без изменений — block reader уже prefetch'ит следующий блок при consumption текущего.
+    - **Streaming mode** (`_decompressStream`): prefetch compressed read в `decodeStream` — `nextRead = readChunk()` до yield, I/O перекрывается с `processChunk` (AES + write).
+    - **Pending writes**: `pendingWrite` паттерн — ждать завершения предыдущей записи перед стартом следующей. Без изменений в скорости — write и так моментальный (буферизуется на уровне ОС/браузера).
+    - **Замер**: 1.56GB NSZ (Little Nightmares II, SW streaming): 34.8 MB/s (с prefetch) vs 35.0 MB/s (без) — в пределах погрешности.
+    - **Root cause**: WASM `ZSTD_decompressStream` — синхронный, блокирует event loop. Пока WASM работает, никакой I/O overlap невозможен. Write буферизуется на уровне ОС (CLI), FSA writable (браузер) или SW — моментально возвращает промис.
+    - **Аналогия**: Python nsz использует тот же sync pipeline — декомпрессия и обработка в одном потоке.
+    - **Потенциал**: Web Worker + SharedArrayBuffer дали бы ~33% ускорение (параллельная декомпрессия + AES/write), но требует cross-origin isolation заголовков (COOP/COEP) и значительной переработки архитектуры. Пока оставляем как есть.
+
 ## Memory Optimization
 
 - ❌ **Reduce READ_CHUNK_SIZE** — `fs/ncz.js:52` uses 16MB. **Keeping as-is** — matches Python nsz `SolidCompressor.CHUNK_SZ = 0x1000000`.
