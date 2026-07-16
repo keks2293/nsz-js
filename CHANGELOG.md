@@ -8,6 +8,8 @@
 
 3. **Fix: gf128Mul byte order bug** — `crypto/aesxts.mjs`. Byte-level GF(2^128) doubling had wrong carry direction (carried from byte 15→0 instead of 0→15). Broke XTS decryption for files with cryptoType=XTS (e.g. Trackline Express). Root cause: BigInt representation treats tweak[15] as MSB, tweak[0] as LSB — carry propagates LSB→MSB (byte 0→15). Confirmed against Python nsz reference (`aes128.py:144-148`). All 1005 test vectors pass.
 
+4. **Refactor: consolidate crypto layer** — Deleted `crypto/aesctr.mjs` and `crypto/aesxts.mjs`. Moved `AesXts` class, `xor`, `xorInto`, `getTweakBytes`, `gf128Mul` into `crypto/aes128.js`. Renamed `aesCtr` → `AesCtrJS` in `aes128.js`. Added `crypto/aes-ops.mjs`: `AesCtr` class with Node.js (`crypto.createCipheriv`), WebCrypto (`crypto.subtle.encrypt`), and pure-JS fallback. Added `createAesXts()` factory that overrides pure JS with native AES-ECB on Node.js. Updated all imports. Fix: `test_ticket_keys.mjs` `AESCTR` → `AesCtr` naming.
+
 ## ✅ Recent Changes (2026-07-14)
 
 1. **Perf: T-tables for AES-ECB encrypt + decrypt** — `crypto/aes128.js`. Added T0–T3 and T0inv–T3inv lookup tables combining SubBytes/ShiftRows/MixColumns into single 32-bit lookups. Rewrote `encryptBlock()` and `decryptBlock()` to use T-tables. Pre-computed `decKeys` (rounds 1–9 InvMixColumns) in constructor. Added `_gmul` and `_invMixColumnsWord` helpers. Removed old step-by-step methods (subBytes, shiftRows, mixColumns, etc.). Trimmed rconTable 180→40 entries. Encrypt: ~7.4x faster (728K → 5.4M ops/s). Decrypt: ~34x faster (163K → 5.5M ops/s).
