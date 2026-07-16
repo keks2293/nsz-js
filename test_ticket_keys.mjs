@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'fs';
 import { PFS0 } from './fs/pfs0.js';
-import { AESCTR } from './crypto/aesctr.mjs';
+import { AesCtr } from './crypto/aes-ops.mjs';
 
 const args = process.argv.slice(2);
 const NSZ_PATH = args[0];
@@ -148,7 +148,7 @@ async function test() {
         ['Key at 0x180', keyAt180],
         ['Working title key (0x130)', workingTitleKey],
     ]) {
-        const aesCtr = new AESCTR(keyData, sec0Ctr);
+        const aesCtr = new AesCtr(keyData, sec0Ctr);
         aesCtr.seek(headerEnd + 0x4000);
         const decrypted = await aesCtr.decrypt(new Uint8Array(firstChunk));
         const hasMagic = decrypted[0] === zstdMagic[0] && decrypted[1] === zstdMagic[1] &&

@@ -1,5 +1,5 @@
 import { ZstdDecompressor } from '../crypto/zstd.js';
-import { AesCtr } from '../crypto/aesctr.mjs';
+import { AesCtr } from '../crypto/aes-ops.mjs';
 
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
 const SECTION_CHUNK_SIZE = 0x1000000; // 16MB

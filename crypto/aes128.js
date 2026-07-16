@@ -248,7 +248,7 @@ class AesEcb {
     }
 }
 
-function aesCtr(aes, counter, data) {
+function AesCtrJS(aes, counter, data) {
     const out = new Uint8Array(data.length);
     for (let off = 0; off < data.length; off += BLOCK_SIZE) {
         const ks = aes.encryptBlock(counter);
@@ -263,4 +263,74 @@ function aesCtr(aes, counter, data) {
     return out;
 }
 
-export { AesEcb, aesCtr };
+function xor(a, b) {
+    const r = new Uint8Array(a.length);
+    for (let i = 0; i < a.length; i++) r[i] = a[i] ^ b[i];
+    return r;
+}
+
+function xorInto(dst, a, b) {
+    for (let i = 0; i < dst.length; i++) dst[i] = a[i] ^ b[i];
+}
+
+function getTweakBytes(sector) {
+    const buf = new Uint8Array(16);
+    for (let i = 15; i >= 0; i--) {
+        buf[i] = sector & 0xFF;
+        sector = Math.floor(sector / 256);
+    }
+    return buf;
+}
+
+function gf128Mul(tweak) {
+    const result = new Uint8Array(16);
+    let carry = 0;
+    for (let i = 0; i < 16; i++) {
+        const newCarry = (tweak[i] >>> 7) & 1;
+        result[i] = ((tweak[i] << 1) | carry) & 0xff;
+        carry = newCarry;
+    }
+    if (carry) result[0] ^= 0x87;
+    return result;
+}
+
+const SECTOR_SIZE = 0x200;
+
+class AesXts {
+    constructor(key) {
+        if (key.length !== 32) throw new Error('XTS key must be 32 bytes');
+        this.k1 = key.subarray(0, 16);
+        this.k2 = key.subarray(16, 32);
+        const aesEnc = new AesEcb(this.k2);
+        const aesDec = new AesEcb(this.k1);
+        this._encTweak = (tweakBytes) => aesEnc.encryptBlock(tweakBytes);
+        this._decData = (block) => aesDec.decryptBlock(block);
+    }
+
+    decrypt(data, startSector = 0) {
+        const result = new Uint8Array(data.length);
+        let sector = startSector;
+
+        for (let offset = 0; offset < data.length; offset += SECTOR_SIZE) {
+            const chunkSize = Math.min(SECTOR_SIZE, data.length - offset);
+            const chunk = data.subarray(offset, offset + chunkSize);
+            const tweakBytes = getTweakBytes(sector);
+            let tweak = this._encTweak(tweakBytes);
+            const xored = new Uint8Array(BLOCK_SIZE);
+
+            for (let i = 0; i < chunk.length; i += BLOCK_SIZE) {
+                const blockEnd = Math.min(i + BLOCK_SIZE, chunk.length);
+                if (blockEnd - i < BLOCK_SIZE) break;
+                const block = chunk.subarray(i, i + BLOCK_SIZE);
+                xorInto(xored, block, tweak);
+                const decrypted = this._decData(xored);
+                xorInto(result.subarray(offset + i, offset + i + BLOCK_SIZE), decrypted, tweak);
+                tweak = gf128Mul(tweak);
+            }
+            sector++;
+        }
+        return result;
+    }
+}
+
+export { BLOCK_SIZE, AesEcb, AesCtrJS, AesXts };

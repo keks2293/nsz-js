@@ -1,4 +1,4 @@
-import { AesCtr } from './crypto/aesctr.mjs';
+import { AesCtr } from './crypto/aes-ops.mjs';
 
 // Section 5: AES-CTR Test Vector from Python nsz
 // Run: node test_vector.mjs
