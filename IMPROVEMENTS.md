@@ -54,6 +54,8 @@ Prioritized areas for improvement identified 2026-05-30.
 
 - ✅ **Мёртвое поле hfs0Data** — `nsz-cli.js:129,139`. Поле `hfs0Data: null` в partitionMetas никогда не читалось — осталось от рефакторинга на HFS0Writer. Удалено.
 
+- ❌ **verifyHash/verifyFileNameHash дублирование** — `fs/nsz-convert.js:5-26`, `fs/xcz-convert.js:6-27`. Функции идентичны в обоих файлах. Python nsz делает то же самое — verification inline в `__decompressContainer()` и `decompress()`. Не будем выносить в общий модуль — это соответствует паттерну Python nsz.
+
 ## Speed Optimization
 
 - ✅ **Optimize SW slice(0) copy** — `SWDownloader.write()` now checks if data is a WASM memory view via `view.buffer === wasmInstance.exports.memory.buffer`. WASM views still get `slice(0)`, standalone buffers (e.g. WebCrypto output) are transferred directly. Added `ZstdDecompressor.wasmBuffer` getter. No copy for ~90%+ of data (encrypted sections).
