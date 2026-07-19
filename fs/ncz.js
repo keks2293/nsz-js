@@ -115,34 +115,6 @@ class ChunkedBufferReader extends DataReader {
     }
 }
 
-class FileDescriptorReader extends DataReader {
-    constructor(fd, baseOffset = 0, totalLength = null) {
-        super();
-        this.fd = fd;
-        this.baseOffset = baseOffset;
-        this._length = totalLength;
-    }
-
-    get length() {
-        return this._length;
-    }
-
-    async read(offset, size) {
-        const buf = Buffer.alloc(size);
-        const fs = await import('fs');
-        const { bytesRead } = await new Promise((resolve, reject) => {
-            fs.read(this.fd, buf, 0, size, this.baseOffset + offset, (err, bytesRead, buffer) => {
-                if (err) reject(err);
-                else resolve({ bytesRead, buffer });
-            });
-        });
-        if (bytesRead < size) {
-            return new Uint8Array(buf.buffer, buf.byteOffset, bytesRead);
-        }
-        return new Uint8Array(buf.buffer, buf.byteOffset, size);
-    }
-}
-
 class NCZSection {
     constructor(data, offset) {
         this.offset = Number(readBigUInt64LE(data, offset));
@@ -494,4 +466,4 @@ class AsyncBlockDecompressorReader {
     }
 }
 
-export { NCZDecompressor, DataReader, AdapterNCZReader, BufferReader, ChunkedBufferReader, FileDescriptorReader, READ_CHUNK_SIZE };
+export { NCZDecompressor, DataReader, AdapterNCZReader, BufferReader, ChunkedBufferReader, READ_CHUNK_SIZE };

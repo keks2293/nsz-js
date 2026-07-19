@@ -4,10 +4,32 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { PFS0 } from './fs/pfs0.js';
-import { FileDescriptorReader } from './fs/ncz.js';
+import { DataReader } from './fs/ncz.js';
 import { KeysParser } from './keys.js';
 import { convertXCZStreaming } from './fs/xcz-convert.js';
 import { convertNSZStreaming } from './fs/nsz-convert.js';
+
+class FileDescriptorReader extends DataReader {
+    constructor(fd, baseOffset = 0, totalLength = null) {
+        super();
+        this.fd = fd;
+        this.baseOffset = baseOffset;
+        this._length = totalLength;
+    }
+
+    get length() {
+        return this._length;
+    }
+
+    async read(offset, size) {
+        const buf = Buffer.allocUnsafe(size);
+        const bytesRead = fs.readSync(this.fd, buf, 0, size, this.baseOffset + offset);
+        if (bytesRead < size) {
+            return new Uint8Array(buf.buffer, buf.byteOffset, bytesRead);
+        }
+        return new Uint8Array(buf.buffer, buf.byteOffset, size);
+    }
+}
 
 function formatBytes(bytes) {
     if (bytes === 0) return '0 B';
@@ -132,7 +154,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputDir, keys, verify,
     try {
         const adapter = {
             read: (offset, size) => {
-                const buf = Buffer.alloc(size);
+                const buf = Buffer.allocUnsafe(size);
                 fs.readSync(inputFd, buf, 0, size, offset);
                 return buf;
             },
@@ -193,7 +215,7 @@ async function convertNSZ(inReader, inputFd, inputPath, outputDir, keys, fixPadd
     try {
         const adapter = {
             read: (offset, size) => {
-                const buf = Buffer.alloc(size);
+                const buf = Buffer.allocUnsafe(size);
                 fs.readSync(inputFd, buf, 0, size, offset);
                 return buf;
             },
