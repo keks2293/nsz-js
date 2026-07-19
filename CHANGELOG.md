@@ -1,5 +1,17 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-07-19)
+
+1. **Perf: module-level `fs` import + sync read in FileDescriptorReader** — `nsz-cli.js`. `FileDescriptorReader.read()` previously called `await import('fs')` on every invocation — 100K+ times on block-mode NCZ. Replaced with a top-level `import fs from 'fs'` and sync `fs.readSync()`, eliminating the dynamic import + Promise + microtask yield per read.
+
+2. **Perf: `Buffer.alloc()` → `Buffer.allocUnsafe()`** — `nsz-cli.js:135,196`, `fs/ncz.js:137`. `Buffer.alloc()` zero-fills then `fs.readSync` immediately overwrites. `allocUnsafe()` skips zero-fill — saves ~1-2µs per 16KB block × 100K+ blocks = ~100-200ms on large files.
+
+3. **Perf: PFS0Writer string table** — `fs/pfs0.js`. Earlier versions rebuilt `join('\0')` on every access and created `new TextEncoder()` multiple times (`_stringTable` getter + `_paddedStringTableSize` + 3× in `buildHeader()`). The `7f4bdb6` refactor consolidated all of this into a single inline computation in `buildHeader()` — `stringTable` built once via `map().join('\0')`, encoded once via `new TextEncoder().encode(padded)`. No cached getters remain; layout is computed once per `buildHeader()` call.
+
+4. **Perf: HFS0Writer string table** — `fs/hfs0.js`. Earlier versions had `_buildStringTable()` creating `new TextEncoder()` every call plus another inside the loop in `_writeHeader()`. The `7f4bdb6` refactor removed these: `_stringTableBytes()` encodes once, `_buildLayout()` computes the layout a single time, and `_writeHeader()` no longer creates a `TextEncoder` per entry (uses `e.name.length` for the offset). Eliminated the N+1 `TextEncoder` creations.
+
+5. **Fix: PFS0Writer `fixPadding=false` (default) padding** — `fs/pfs0.js`. The old `else` branch added 16-byte alignment `(16 - rawSize%16) % 16` to the string table, which does NOT match Python nsz. In nsz `BlockCompressor.blockCompressNsp`, the `!fixPadding` path uses `container.getFirstFileOffset()` / `container.getStringTableSize()` — i.e. it adds **no padding** (data starts right after the unpadded header). Changed `paddedSize` to `namesLen` (no padding) for the default branch; `fixPadding=true` already matched nsz `getPaddedHeaderSize()` (round whole header up to 0x20). Updated `NSZ-FORMAT-ANALYSIS.md` to correct the false "16-byte alignment matches nsz default" claim.
+
 ## ✅ Recent Changes (2026-07-15)
 
 1. **Perf: T-tables for AES-ECB decrypt** — `crypto/aes128.js`. Added T1inv/T2inv/T3inv tables computed directly per InvMixColumns column (not via rotation from T0inv — InvMixColumns matrix is NOT circulant). Added `_invMixColumnsWord()` helper. Pre-computed `decKeys` (rounds 1–9 InvMixColumns'd) in `AesEcb` constructor. Rewrote `decryptBlock()` to use T-tables (symmetric performance with encrypt). Also removed 3× duplicated `rconTable` entries (180→40 entries). Decrypt ~8.6M blocks/s (symmetric with encrypt ~8.2M blocks/s).

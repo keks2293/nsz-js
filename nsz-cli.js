@@ -86,7 +86,7 @@ async function main() {
         console.log('  -w, --overwrite      Overwrite existing output files');
         console.log('  --rm-source          Delete input file after successful conversion');
         console.log('  --no-verify, -nv     Skip SHA256 verification (faster, no CNMT parsing)');
-        console.log('  --fix-padding, -p    Use 0x20-byte alignment (default: 16-byte, matching Python nsz)');
+        console.log('  --fix-padding, -p    Re-pad PFS0 header to 0x20 boundary (default: reuse input string-table size, matching Python nsz)');
         console.log('');
     }
 

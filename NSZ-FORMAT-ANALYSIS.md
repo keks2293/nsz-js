@@ -37,7 +37,25 @@ This always rounds up to the next 0x20 boundary — when already aligned, it sti
 
 With 16-byte alignment, the 515-byte header took 13 bytes of padding to reach 528. With Python's 0x20 alignment, it takes 29 bytes to reach 544.
 
-nsz-js matches this exact behavior when `fixPadding` is enabled. When disabled (default), nsz-js uses 16-byte alignment `(16 - n%16) % 16`, matching Python nsz's default output format. Both modes produce identical file data — only the header padding differs. nsz-js default mode output has been verified byte-identical to Python nsz output.
+### nsz-js `fixPadding` modes (verified against `nsz/Fs/Pfs0.py` + `BlockCompressor.py`)
+
+In Python nsz, `BlockCompressor.blockCompressNsp` chooses the output PFS0 header size as:
+
+```python
+with Pfs0.Pfs0Stream(
+    container.getPaddedHeaderSize() if fixPadding else container.getFirstFileOffset(),
+    None if fixPadding else container.getStringTableSize(),
+    str(nszPath)) as nsp:
+```
+
+- **`fixPadding=True`** → `getPaddedHeaderSize() = _headerSize + allign0x20(_headerSize)` (rounds whole header up to 0x20). nsz-js matches this exactly.
+- **`fixPadding=False` (default)** → nsz reuses the **input container's** geometry. For the PFS0 string table it copies the input file's `stringTableSize` field **verbatim** (`container.getStringTableSize()` returns the parsed `_stringTableSize`, not a recomputed value). For the full header it uses `getFirstFileOffset()` (data starts right after the unpadded header). Note: `getStringTableSize()` itself always pads the string table to 0x20 via `allign0x20(headerSizeNonPadded)` when called fresh — but in the `!fixPadding` branch nsz passes the **input's already-padded** size instead of recomputing, so it inherits whatever alignment the source NSP had. nsz-js mirrors this by accepting `inputStringTableSize` in `PFS0Writer` and using it verbatim when `!fixPadding`. The previously-claimed "16-byte alignment" was **wrong**: the 6-byte difference seen on a real file (input stringTableSize 160 vs raw `namesLen` 154) was misread as a 16-byte rule; in reality nsz just copies the input size.
+
+### nsz-js improvement over Python nsz (no behavior change)
+
+Python nsz **duplicates** the `fixPadding` branch in 3 separate call sites — `BlockCompressor.py:218`, `SolidCompressor.py:132`, and `NszDecompressor.py:226` — each repeating the same `container.getPaddedHeaderSize() if fixPadding else container.getFirstFileOffset()` / `None if fixPadding else container.getStringTableSize()` expression inline inside the `Pfs0Stream(...)` constructor call. It is copy-pasted logic with no shared helper.
+
+nsz-js instead **encapsulates** the branch once inside `PFS0Writer.buildHeader()` (`fs/pfs0.js`), keyed on `this.fixPadding`. All call paths (block / solid / decompress) simply call `writer.buildHeader()` / `writer.build()`. Semantically identical to nsz, but the alignment decision lives in a single place — no duplicated branch, no drift risk between the 3 code paths.
 
 ### `--fix-padding` per-format applicability
 

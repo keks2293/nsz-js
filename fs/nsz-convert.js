@@ -31,12 +31,13 @@ export async function convertNSZStreaming(pfs0, keys, adapter, options, cnmtHash
 
     const outputMeta = await collectOutputMeta(files, adapter, keys);
 
-    const writer = new PFS0Writer(fixPadding);
+    const writer = new PFS0Writer(fixPadding, pfs0.stringTableSize);
     for (const m of outputMeta) {
         options.log('info', `[ADDING]     ${m.name} 0x${m.size.toString(16)} bytes to PFS0 at 0x${(writer.addpos || 0).toString(16)}`);
         writer.add(m.name, m.size);
     }
-    const header = writer.buildHeader();
+    const pfs0Header = writer.buildHeader();
+    const header = pfs0Header.buffer;
     await adapter.write(0, header);
 
     let dataWritten = 0;
@@ -46,7 +47,7 @@ export async function convertNSZStreaming(pfs0, keys, adapter, options, cnmtHash
     for (let idx = 0; idx < files.length; idx++) {
         const meta = outputMeta[idx];
         const f = files[idx];
-        const writePos = writer.headerSize + writer.files[idx].offset;
+        const writePos = pfs0Header.headerSize + writer.files[idx].offset;
 
         if (meta.isNcz) {
             options.log('info', `[EXISTS]     ${f.name}`);
@@ -90,7 +91,7 @@ export async function convertNSZStreaming(pfs0, keys, adapter, options, cnmtHash
         options.progress(pct(dataWritten), `File ${idx + 1}/${files.length} done`);
     }
 
-    return { headerSize: writer.headerSize, totalDataSize };
+    return { headerSize: pfs0Header.headerSize, totalDataSize };
 }
 
 async function collectOutputMeta(files, adapter, keys) {
@@ -110,20 +111,23 @@ async function collectOutputMeta(files, adapter, keys) {
     return outputMeta;
 }
 
-function buildPfs0Blob(outputFiles, fixPadding) {
-    const writer = new PFS0Writer(fixPadding);
+function buildPfs0Header(inputStringTableSize, fixPadding, outputFiles) {
+    const writer = new PFS0Writer(fixPadding, inputStringTableSize);
     for (const f of outputFiles) {
         const data = f.data;
         writer.add(f.name, data instanceof ArrayBuffer ? data.byteLength : data.length);
     }
-    const header = writer.buildHeader();
-    const totalDataSize = writer.files.reduce((s, f) => s + f.size, 0);
+    return writer.buildHeader();
+}
+
+function buildPfs0Blob(inputStringTableSize, fixPadding, outputFiles) {
+    const { buffer: header, headerSize } = buildPfs0Header(inputStringTableSize, fixPadding, outputFiles);
+    const totalDataSize = outputFiles.reduce((s, f) => s + (f.data instanceof ArrayBuffer ? f.data.byteLength : f.data.length), 0);
     const parts = [header];
-    for (let i = 0; i < writer.files.length; i++) {
-        const data = outputFiles[i].data;
-        parts.push(data instanceof ArrayBuffer ? new Uint8Array(data) : data);
+    for (const f of outputFiles) {
+        parts.push(f.data instanceof ArrayBuffer ? new Uint8Array(f.data) : f.data);
     }
-    return { blob: new Blob(parts, { type: 'application/octet-stream' }), size: header.length + totalDataSize };
+    return { blob: new Blob(parts, { type: 'application/octet-stream' }), size: headerSize + totalDataSize };
 }
 
 export async function convertNSZMemory(pfs0, keys, adapter, options, cnmtHashes = new Set()) {
@@ -179,7 +183,7 @@ export async function convertNSZMemory(pfs0, keys, adapter, options, cnmtHashes 
     }
 
     options.log('info', 'Building PFS0 container...');
-    const { blob, size } = buildPfs0Blob(outputFiles, fixPadding);
+    const { blob, size } = buildPfs0Blob(pfs0.stringTableSize, fixPadding, outputFiles);
     options.progress(1.0, 'Done!');
     return { blob, size };
 }

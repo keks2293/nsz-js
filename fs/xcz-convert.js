@@ -99,9 +99,11 @@ function computeLayout(partitionMetas) {
         partSizes.push(partSize);
         rootWriter.addEntry(pm.name, partSize);
     }
-    const rootActualHeader = rootWriter.getActualHeaderSize();
+    const rootHfs0 = rootWriter.buildHeader();
+    const rootHeader = rootHfs0.buffer;
+    const rootActualHeader = rootHfs0.actualHeader;
 
-    let currentDataOffset = ROOT_HFS0_OFFSET + rootActualHeader;
+    let currentDataOffset = ROOT_HFS0_OFFSET + rootHfs0.headerSize;
     const partOffsets = [];
     for (let i = 0; i < partitionMetas.length; i++) {
         partOffsets.push({ name: partitionMetas[i].name, offset: currentDataOffset });
@@ -109,13 +111,12 @@ function computeLayout(partitionMetas) {
     }
     const totalSize = currentDataOffset;
 
-    return { rootWriter, rootActualHeader, partSizes, partOffsets, totalSize };
+    return { rootWriter, rootHeader, rootActualHeader, partSizes, partOffsets, totalSize };
 }
 
 async function writeXciHeaders(adapter, xciHeaderBytes, layout) {
-    const { rootWriter, rootActualHeader, totalSize } = layout;
+    const { rootHeader, rootActualHeader, totalSize } = layout;
 
-    const rootHeader = rootWriter.buildHeader();
     const xciOut = new Uint8Array(0x200);
     xciOut.set(xciHeaderBytes instanceof Uint8Array ? xciHeaderBytes : new Uint8Array(xciHeaderBytes), 0);
     const xciView = new DataView(xciOut.buffer);
