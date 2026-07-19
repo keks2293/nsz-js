@@ -72,21 +72,8 @@ export class HFS0Writer {
         this.entries.push({ name, data: null, size });
     }
 
-    _buildStringTable() {
-        return new TextEncoder().encode(this.entries.map(e => e.name).join('\0') + '\0');
-    }
-
-    _getActualHeaderSize(stringBytes) {
-        return 0x10 + this.entries.length * 0x40 + stringBytes.length;
-    }
-
-    _getHeaderSize(stringBytes) {
-        return Math.max(this._paddingSize, this._getActualHeaderSize(stringBytes));
-    }
-
-    _writeHeader(output, stringBytes, dataStart) {
+    _writeHeader(output, stringBytes, dataStart, actualHeader) {
         const view = new DataView(output.buffer, output.byteOffset, output.byteLength);
-        const actualHeader = this._getActualHeaderSize(stringBytes);
 
         output[0] = 0x48; output[1] = 0x46; output[2] = 0x53; output[3] = 0x30;
         view.setUint32(4, this.entries.length, true);
@@ -108,29 +95,37 @@ export class HFS0Writer {
             view.setUint32(pos + 24, 0, true);
             view.setUint32(pos + 28, 0, true);
             view.setBigUint64(pos + 32, 0n, true);
-            const enc = new TextEncoder().encode(e.name);
-            sOff += enc.length + 1;
+            sOff += e.name.length + 1;
             filePos += e.size;
         }
     }
 
+    _stringTableBytes() {
+        return new TextEncoder().encode(this.entries.map(e => e.name).join('\0') + '\0');
+    }
+
+    _buildLayout() {
+        const stringBytes = this._stringTableBytes();
+        const actualHeader = 0x10 + this.entries.length * 0x40 + stringBytes.length;
+        const headerSize = Math.max(this._paddingSize, actualHeader);
+        return { stringBytes, actualHeader, headerSize };
+    }
+
     buildHeader() {
-        const stringBytes = this._buildStringTable();
-        const headerSize = this._getHeaderSize(stringBytes);
+        const { stringBytes, actualHeader, headerSize } = this._buildLayout();
         const output = new Uint8Array(headerSize);
-        this._writeHeader(output, stringBytes, headerSize);
-        return output;
+        this._writeHeader(output, stringBytes, headerSize, actualHeader);
+        return { buffer: output, actualHeader, headerSize };
     }
 
     build() {
-        const stringBytes = this._buildStringTable();
-        const headerSize = this._getHeaderSize(stringBytes);
+        const { buffer: header, actualHeader, headerSize } = this.buildHeader();
 
         let totalDataSize = 0;
         for (const e of this.entries) totalDataSize += e.size;
 
         const output = new Uint8Array(headerSize + totalDataSize);
-        this._writeHeader(output, stringBytes, headerSize);
+        output.set(header, 0);
 
         let dataPos = headerSize;
         for (const e of this.entries) {
@@ -142,13 +137,5 @@ export class HFS0Writer {
         }
 
         return output;
-    }
-
-    getActualHeaderSize() {
-        return this._getActualHeaderSize(this._buildStringTable());
-    }
-
-    getHeaderSize() {
-        return this._getHeaderSize(this._buildStringTable());
     }
 }
