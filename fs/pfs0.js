@@ -25,6 +25,7 @@ class PFS0 {
 
         const fileCount = this._view.getUint32(4, true);
         const stringTableSize = this._view.getUint32(8, true);
+        this.stringTableSize = stringTableSize;
         this.headerSize = 0x10 + fileCount * 0x18 + stringTableSize;
 
         const stringTableOffset = 0x10 + fileCount * 0x18;
@@ -64,9 +65,10 @@ class PFS0 {
 }
 
 class PFS0Writer {
-    constructor(fixPadding = false) {
+    constructor(fixPadding = false, inputStringTableSize = null) {
         this.files = [];
         this.fixPadding = fixPadding;
+        this.inputStringTableSize = inputStringTableSize;
     }
 
     add(name, size) {
@@ -77,45 +79,31 @@ class PFS0Writer {
         this.addpos = offset + size;
     }
 
-    get headerSize() {
-        return 0x10 + this.files.length * 0x18 + this._paddedStringTableSize;
-    }
-
-    get _stringTable() {
-        return this.files.map(f => f.name).join('\0') + '\0';
-    }
-
-    get _paddedStringTableSize() {
-        const enc = new TextEncoder();
-        const names = this._stringTable;
-        const namesLen = enc.encode(names).length;
-        const rawSize = 0x10 + this.files.length * 0x18 + namesLen;
-        if (this.fixPadding) {
-            return namesLen + (0x20 - (rawSize % 0x20));
-        }
-        const pad16 = (16 - (rawSize % 16)) % 16;
-        return namesLen + pad16;
-    }
-
     buildHeader() {
-        const enc = new TextEncoder();
-        const names = this._stringTable;
-        const tableSize = this._paddedStringTableSize;
-        const namesLen = enc.encode(names).length;
-        const paddedBytes = tableSize > namesLen
-            ? new Uint8Array(tableSize)
-            : enc.encode(names);
-        if (tableSize > namesLen) {
-            paddedBytes.set(enc.encode(names), 0);
-            paddedBytes.fill(0, namesLen);
-        }
-        const size = this.headerSize;
-        const buf = new Uint8Array(size);
+        const namesLen = this.files.reduce((sum, f) => sum + f.name.length + 1, 1);
+        const rawSize = 0x10 + this.files.length * 0x18 + namesLen;
+        // nsz getStringTableSize() always pads the string table to 0x20 via
+        // allign0x20(rawSize). When reusing the input container geometry
+        // (fixPadding=false, nsz's default), nsz copies the input PFS0's
+        // stringTableSize field verbatim instead of recomputing. We mirror that:
+        // use the input size if provided, else apply the 0x20 alignment.
+        const paddedSize = this.fixPadding
+            ? namesLen + (0x20 - (rawSize % 0x20))
+            : (this.inputStringTableSize ?? (namesLen + (0x20 - (rawSize % 0x20))));
+        const stringTable = this.files.map(f => f.name).join('\0') + '\0';
+        const padded = stringTable.length < paddedSize
+            ? stringTable + '\0'.repeat(paddedSize - stringTable.length)
+            : stringTable;
+        const namesBytes = new TextEncoder().encode(padded);
+        const headerSize = this.fixPadding
+            ? (0x10 + this.files.length * 0x18 + paddedSize) + (0x20 - ((0x10 + this.files.length * 0x18 + paddedSize) % 0x20))
+            : (0x10 + this.files.length * 0x18 + paddedSize);
+        const buf = new Uint8Array(headerSize);
         const v = new DataView(buf.buffer);
 
         buf[0] = 0x50; buf[1] = 0x46; buf[2] = 0x53; buf[3] = 0x30;
         v.setUint32(4, this.files.length, true);
-        v.setUint32(8, tableSize, true);
+        v.setUint32(8, paddedSize, true);
         v.setUint32(12, 0, true);
 
         let soff = 0;
@@ -126,11 +114,11 @@ class PFS0Writer {
             v.setBigUint64(pos + 8, BigInt(f.size), true);
             v.setUint32(pos + 16, soff, true);
             v.setUint32(pos + 20, 0, true);
-            soff += enc.encode(f.name).length + 1;
+            soff += f.name.length + 1;
         }
 
-        buf.set(paddedBytes, 0x10 + this.files.length * 0x18);
-        return buf;
+        buf.set(namesBytes, 0x10 + this.files.length * 0x18);
+        return { buffer: buf, headerSize };
     }
 }
 

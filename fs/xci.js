@@ -97,10 +97,13 @@ export class XCIWriter {
 
         const rootWriter = new HFS0Writer(PARTITION_HEADER_SIZE);
         for (const p of this.partitions) rootWriter.addEntry(p.name, p.data.length);
-        const rootActualHeader = rootWriter.getActualHeaderSize();
+        const rootHfs0 = rootWriter.buildHeader();
+        const rootHeader = rootHfs0.buffer;
+        const rootActualHeader = rootHfs0.actualHeader;
+        const rootHeaderSize = rootHfs0.headerSize;
 
         let partitionFilePos = 0;
-        let currentDataOffset = ROOT_HFS0_OFFSET + rootActualHeader;
+        let currentDataOffset = ROOT_HFS0_OFFSET + rootHeaderSize;
         const partitionEntries = [];
         for (const p of this.partitions) {
             const paddedSize = Math.max(PARTITION_HEADER_SIZE, p.data.length);
@@ -109,13 +112,12 @@ export class XCIWriter {
             partitionFilePos += p.data.length;
         }
 
-        const totalPaddedSize = currentDataOffset - (ROOT_HFS0_OFFSET + rootActualHeader);
-        const totalSize = ROOT_HFS0_OFFSET + rootActualHeader + totalPaddedSize;
+        const totalPaddedSize = currentDataOffset - (ROOT_HFS0_OFFSET + rootHeaderSize);
+        const totalSize = ROOT_HFS0_OFFSET + rootHeaderSize + totalPaddedSize;
         const output = new Uint8Array(totalSize);
         const view = new DataView(output.buffer);
 
-        const rootHeader = rootWriter.buildHeader();
-        output.set(rootHeader, ROOT_HFS0_OFFSET);
+        output.set(rootHeader.buffer, ROOT_HFS0_OFFSET);
 
         for (let i = 0; i < this.partitions.length; i++) {
             const p = this.partitions[i];
