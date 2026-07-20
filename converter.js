@@ -7,8 +7,26 @@ import { Cnmt } from './fs/cnmt.js';
 import { NCAHeader } from './fs/nca.js';
 import { XCIReader } from './fs/xci.js';
 import { AesCtr, AesXts } from './crypto/aes-ops.mjs';
-import { convertXCZStreaming, convertXCZMemory } from './fs/xcz-convert.js';
-import { convertNSZStreaming, convertNSZMemory } from './fs/nsz-convert.js';
+import { convertXCZStreaming } from './fs/xcz-convert.js';
+import { convertNSZStreaming } from './fs/nsz-convert.js';
+
+export function createStreamingAdapter(read, write, callbacks = {}) {
+    const { log = () => {}, progress = () => {}, createHash } = callbacks;
+    return { read, write, log, progress, createHash };
+}
+
+export function createMemoryAdapter(read, callbacks = {}) {
+    const { log = () => {}, progress = () => {}, createHash } = callbacks;
+    const chunks = [];
+    return {
+        read,
+        write: (offset, data) => { chunks.push({ offset, data }); },
+        log,
+        progress,
+        createHash,
+        collect: () => chunks.sort((a, b) => a.offset - b.offset),
+    };
+}
 
 class FileSliceReader extends DataReader {
     constructor(file, baseOffset = 0, totalLength = null) {
@@ -87,22 +105,20 @@ class NSZConverter {
         }
 
         const fileReader = new FileSliceReader(file, 0, file.size);
+        const read = (offset, size) => fileReader.read(offset, size);
+        const createHash = () => {
+            const h = new SHA256();
+            return { update: (d) => h.update(d), digest: () => h.hexdigest() };
+        };
+
         if (writable) {
             onLog('info', 'Using streaming output (File System Access)');
-            const adapter = {
-                read: (offset, size) => fileReader.read(offset, size),
-                write: (offset, data) => writable.write({ type: 'write', position: offset, data }),
-                log: onLog,
-                progress: onProgress,
-            };
+            const adapter = createStreamingAdapter(read, (offset, data) => writable.write({ type: 'write', position: offset, data }), { log: onLog, progress: onProgress, createHash });
             const result = await convertNSZStreaming(pfs0Reader, this.keys, adapter, {
                 verify, fixPadding,
                 log: onLog,
                 progress: onProgress,
-                createHash: () => {
-                    const h = new SHA256();
-                    return { update: (d) => h.update(d), digest: () => h.hexdigest() };
-                },
+                createHash,
             }, cnmtHashes);
             onProgress(1.0, 'Done!');
             const outputName = file.name.replace(/\.nsz$/i, '.nsp');
@@ -111,24 +127,19 @@ class NSZConverter {
             return { blob: null, name: outputName, size: totalSize, writable: true };
         } else {
             onLog('info', 'Using memory download (no File System Access)');
-            const adapter = {
-                read: (offset, size) => fileReader.read(offset, size),
-                log: onLog,
-                progress: onProgress,
-            };
-            const result = await convertNSZMemory(pfs0Reader, this.keys, adapter, {
+            const adapter = createMemoryAdapter(read, { log: onLog, progress: onProgress, createHash });
+            const result = await convertNSZStreaming(pfs0Reader, this.keys, adapter, {
                 verify, fixPadding,
                 log: onLog,
                 progress: onProgress,
-                createHash: () => {
-                    const h = new SHA256();
-                    return { update: (d) => h.update(d), digest: () => h.hexdigest() };
-                },
+                createHash,
             }, cnmtHashes);
             onProgress(1.0, 'Done!');
             const outputName = file.name.replace(/\.nsz$/i, '.nsp');
-            onLog('success', `Output: ${outputName} (${this.formatBytes(result.size)})`);
-            return { blob: result.blob, name: outputName, size: result.size };
+            const blob = new Blob(adapter.collect().map(c => c.data), { type: 'application/octet-stream' });
+            const totalSize = result.headerSize + result.totalDataSize;
+            onLog('success', `Output: ${outputName} (${this.formatBytes(totalSize)})`);
+            return { blob, name: outputName, size: totalSize };
         }
     }
 
@@ -141,42 +152,30 @@ class NSZConverter {
         const partitions = xci.getPartitions();
         onLog('info', `Found ${partitions.length} partitions: ${partitions.map(p => p.name).join(', ')}`);
 
-        const adapter = {
-            read: (offset, size) => fileReader.read(offset, size),
-            log: onLog,
-            progress: onProgress,
-            createHash: () => {
-                const h = new SHA256();
-                return { update: (d) => h.update(d), digest: () => h.hexdigest() };
-            },
+        const createHash = () => {
+            const h = new SHA256();
+            return { update: (d) => h.update(d), digest: () => h.hexdigest() };
         };
+        const extractCnmtHashes = (d) => this.extractCnmtHashes(d);
+        const read = (offset, size) => fileReader.read(offset, size);
 
+        let totalSize, blob = null;
         if (writable) {
             onLog('info', 'Using streaming output (File System Access)');
-            adapter.write = (offset, data) => writable.write({ type: 'write', position: offset, data });
-            const totalSize = await convertXCZStreaming(xci, this.keys, adapter, {
-                verify,
-                log: onLog,
-                progress: onProgress,
-                createHash: adapter.createHash,
-            }, (d) => this.extractCnmtHashes(d));
-            onProgress(1.0, 'Done!');
-            const outputName = file.name.replace(/\.xcz$/i, '.xci');
-            onLog('success', `Output: ${outputName} (${this.formatBytes(totalSize)})`);
-            return { blob: null, name: outputName, size: totalSize, writable: true };
+            const adapter = createStreamingAdapter(read, (offset, data) => writable.write({ type: 'write', position: offset, data }), { log: onLog, progress: onProgress, createHash });
+            totalSize = await convertXCZStreaming(xci, this.keys, adapter, { verify, log: onLog, progress: onProgress, createHash }, extractCnmtHashes);
         } else {
-            onLog('info', 'Using memory download');
-            const result = await convertXCZMemory(xci, this.keys, adapter, {
-                verify,
-                log: onLog,
-                progress: onProgress,
-                createHash: adapter.createHash,
-            }, (d) => this.extractCnmtHashes(d));
-            onProgress(1.0, 'Done!');
-            const outputName = file.name.replace(/\.xcz$/i, '.xci');
-            onLog('success', `Output: ${outputName} (${this.formatBytes(result.size)})`);
-            return { blob: result.blob, name: outputName, size: result.size };
+            onLog('info', 'Using memory download (no File System Access)');
+            const adapter = createMemoryAdapter(read, { log: onLog, progress: onProgress, createHash });
+            totalSize = await convertXCZStreaming(xci, this.keys, adapter, { verify, log: onLog, progress: onProgress, createHash }, extractCnmtHashes);
+            const chunks = adapter.collect();
+            blob = new Blob(chunks.map(c => c.data), { type: 'application/octet-stream' });
         }
+
+        onProgress(1.0, 'Done!');
+        const outputName = file.name.replace(/\.xcz$/i, '.xci');
+        onLog('success', `Output: ${outputName} (${this.formatBytes(totalSize)})`);
+        return { blob, name: outputName, size: totalSize, writable: !!writable };
     }
 
     async extractCnmtHashes(cnmtData) {

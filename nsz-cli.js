@@ -7,6 +7,7 @@ import { PFS0 } from './fs/pfs0.js';
 import { DataReader } from './fs/ncz.js';
 import { KeysParser } from './keys.js';
 import { convertXCZStreaming } from './fs/xcz-convert.js';
+import { createStreamingAdapter } from './converter.js';
 import { convertNSZStreaming } from './fs/nsz-convert.js';
 
 class FileDescriptorReader extends DataReader {
@@ -152,16 +153,19 @@ async function convertXCZ(inReader, inputFd, inputPath, outputDir, keys, verify,
 
     const outputFd = fs.openSync(outPath, 'w');
     try {
-        const adapter = {
-            read: (offset, size) => {
-                const buf = Buffer.allocUnsafe(size);
-                fs.readSync(inputFd, buf, 0, size, offset);
-                return buf;
-            },
-            write: (offset, data) => fs.writeSync(outputFd, data, 0, data.byteLength, offset),
+        const read = (offset, size) => {
+            const buf = Buffer.allocUnsafe(size);
+            fs.readSync(inputFd, buf, 0, size, offset);
+            return buf;
+        };
+        const adapter = createStreamingAdapter(read, (offset, data) => fs.writeSync(outputFd, data, 0, data.byteLength, offset), {
             log: (level, msg) => console.log(msg),
             progress: () => {},
-        };
+            createHash: () => {
+                const h = crypto.createHash('sha256');
+                return { update: (d) => h.update(d), digest: () => h.digest('hex') };
+            },
+        });
 
         const extractCnmtHashes = async (cnmtData) => {
             const { NSZConverter } = await import('./converter.js');

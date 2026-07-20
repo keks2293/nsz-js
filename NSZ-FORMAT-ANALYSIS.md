@@ -100,8 +100,8 @@ nsz-js instead **encapsulates** the branch once inside `PFS0Writer.buildHeader()
 
 **nsz-js XCZ→XCI implementation (2026-05-30):
 - `fs/xci.js` — `XCIReader` now properly reads nested partitions: root HFS0 at `hfs0Offset`, then each partition entry's data parsed as a nested HFS0
-- `fs/xci.js` — `HFS0Writer` supports `headerSize` padding (0x8000) matching Python's `Hfs0Stream`
-- `fs/xci.js` — `XCIWriter` builds full nested XCI: root HFS0 at `0xF000` + partition entries + per-partition nested HFS0
+- `fs/hfs0.js` — `HFS0Writer` supports `headerSize` padding (0x8000) matching Python's `Hfs0Stream`
+- `fs/xcz-convert.js` — `convertXCZStreaming` builds full nested XCI: root HFS0 at `0xF000` + partition entries + per-partition nested HFS0 (single writer-driven path, memory fallback via chunks-adapter like NSZ)
 - `converter.js` — `decompressXCZtoXCI` iterates partitions, decompresses NCZ→NCA within each
 - `nsz-cli.js` — `convertXCZ` uses same nested partition structure with proper 0x8000 header padding
 
