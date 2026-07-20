@@ -1,6 +1,5 @@
 import { NCZDecompressor, AdapterNCZReader } from './ncz.js';
 import { HFS0Writer } from './hfs0.js';
-import { XCIWriter } from './xci.js';
 import { sha256 } from '../crypto/sha256.js';
 
 function verifyHash(hash, name, fileHashes, onLog) {
@@ -209,70 +208,4 @@ export async function convertXCZStreaming(xci, keys, adapter, options, extractCn
     return layout.totalSize;
 }
 
-export async function convertXCZMemory(xci, keys, adapter, options, extractCnmtHashes) {
-    const { verify = false } = options;
-    const { log = () => {}, progress = () => {} } = options;
 
-    const partitionMetas = await buildPartitionMetas(xci, keys, verify, adapter, extractCnmtHashes);
-    const xciHeaderBytes = await adapter.read(0, 0x200);
-    const xciWriter = new XCIWriter(xciHeaderBytes);
-
-    const totalDataSize = partitionMetas.reduce((s, m) => s + m.totalSize, 0);
-    let dataOverall = 0;
-    const pct = (bytes) => bytes / totalDataSize;
-
-    for (const pm of partitionMetas) {
-        const hfs0Writer = new HFS0Writer(PARTITION_HEADER_SIZE);
-
-        for (const meta of pm.files) {
-            log('info', `${meta.isNcz ? 'Decompressing' : 'Copying'}: ${meta.inputName} -> ${meta.name}`);
-
-            let fileData;
-            if (meta.isNcz) {
-                const nczReader = new AdapterNCZReader(adapter, meta.offset, meta.nczLen);
-                const decomp = new NCZDecompressor(nczReader, keys);
-                fileData = await decomp.decompress(
-                    (p) => progress(pct(dataOverall + meta.size * p), `Decompressing ${meta.inputName}...`));
-                if (verify) {
-                    const hash = await sha256(fileData);
-                    log('info', `  [NCA HASH]   ${hash}`);
-                    if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                        if (pm.cnmtHashes.size > 0) {
-                            verifyHash(hash, meta.name, pm.cnmtHashes, log);
-                        } else {
-                            verifyFileNameHash(hash, meta.inputName, meta.name, log);
-                        }
-                    }
-                }
-            } else {
-                progress(pct(dataOverall), `Copying ${meta.inputName}...`);
-                fileData = new Uint8Array(await adapter.read(meta.offset, meta.size));
-                if (verify && meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                    const hash = await sha256(fileData);
-                    log('info', `  [NCA HASH]   ${hash}`);
-                    if (pm.cnmtHashes.size > 0) {
-                        verifyHash(hash, meta.name, pm.cnmtHashes, log);
-                    } else {
-                        verifyFileNameHash(hash, meta.inputName, meta.name, log);
-                    }
-                }
-            }
-
-            hfs0Writer.addFile(meta.name, fileData);
-            dataOverall += meta.size;
-            progress(pct(dataOverall), `${pm.name}/${meta.inputName} done`);
-        }
-
-        const hfs0Data = hfs0Writer.build();
-        xciWriter.addPartition(pm.name, hfs0Data);
-        log('info', `  HFS0 partition ${pm.name} built: ${hfs0Data.length} bytes`);
-    }
-
-    log('info', 'Building XCI...');
-    const xciData = xciWriter.build();
-    log('info', `XCI built: ${xciData.length} bytes`);
-
-    progress(1.0, 'Done!');
-    const blob = new Blob([xciData], { type: 'application/octet-stream' });
-    return { blob, size: xciData.length };
-}

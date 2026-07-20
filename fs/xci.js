@@ -1,7 +1,7 @@
 import { DataReader, BufferReader } from './ncz.js';
-import { HFS0Reader, HFS0Writer } from './hfs0.js';
+import { HFS0Reader } from './hfs0.js';
 
-export { HFS0Reader, HFS0Writer };
+export { HFS0Reader };
 
 const XCI_PARTITION_NAMES = new Set(['secure', 'normal', 'update', 'logo']);
 
@@ -73,80 +73,5 @@ export class XCIReader {
             }
         }
         return result;
-    }
-}
-
-export class XCIWriter {
-    constructor(headerBytes) {
-        this.header = new Uint8Array(0x200);
-        if (headerBytes && headerBytes.length >= 0x200) {
-            this.header.set(headerBytes.slice(0, 0x200));
-        } else {
-            this.header[0x100] = 0x48; this.header[0x101] = 0x45; this.header[0x102] = 0x46; this.header[0x103] = 0x41;
-        }
-        this.partitions = [];
-    }
-
-    addPartition(name, hfs0Data) {
-        this.partitions.push({ name, data: hfs0Data });
-    }
-
-    build() {
-        const ROOT_HFS0_OFFSET = 0xF000;
-        const PARTITION_HEADER_SIZE = 0x8000;
-
-        const rootWriter = new HFS0Writer(PARTITION_HEADER_SIZE);
-        for (const p of this.partitions) rootWriter.addEntry(p.name, p.data.length);
-        const rootHfs0 = rootWriter.buildHeader();
-        const rootHeader = rootHfs0.buffer;
-        const rootActualHeader = rootHfs0.actualHeader;
-        const rootHeaderSize = rootHfs0.headerSize;
-
-        let partitionFilePos = 0;
-        let currentDataOffset = ROOT_HFS0_OFFSET + rootHeaderSize;
-        const partitionEntries = [];
-        for (const p of this.partitions) {
-            const paddedSize = Math.max(PARTITION_HEADER_SIZE, p.data.length);
-            partitionEntries.push({ name: p.name, dataOffset: currentDataOffset, dataSize: p.data.length });
-            currentDataOffset += paddedSize;
-            partitionFilePos += p.data.length;
-        }
-
-        const totalPaddedSize = currentDataOffset - (ROOT_HFS0_OFFSET + rootHeaderSize);
-        const totalSize = ROOT_HFS0_OFFSET + rootHeaderSize + totalPaddedSize;
-        const output = new Uint8Array(totalSize);
-        const view = new DataView(output.buffer);
-
-        output.set(rootHeader.buffer, ROOT_HFS0_OFFSET);
-
-        for (let i = 0; i < this.partitions.length; i++) {
-            const p = this.partitions[i];
-            const paddedHfs0Size = Math.max(PARTITION_HEADER_SIZE, p.data.length);
-            if (paddedHfs0Size > p.data.length) {
-                const realloc = new Uint8Array(paddedHfs0Size);
-                realloc.set(p.data, 0);
-                const partView = new DataView(realloc.buffer);
-                const fileCount = partView.getUint32(4, true);
-                const stringTableSize = partView.getUint32(8, true);
-                const actualHfs0Header = 0x10 + fileCount * 0x40 + stringTableSize;
-                if (actualHfs0Header < paddedHfs0Size) {
-                    for (let j = 0; j < fileCount; j++) {
-                        const epos = 0x10 + j * 0x40;
-                        const stored = Number(partView.getBigUint64(epos, true));
-                        partView.setBigUint64(epos, BigInt(stored + (paddedHfs0Size - p.data.length)), true);
-                    }
-                }
-                output.set(realloc, partitionEntries[i].dataOffset);
-            } else {
-                output.set(p.data, partitionEntries[i].dataOffset);
-            }
-        }
-
-        output.set(this.header, 0);
-        view.setBigUint64(0x118, BigInt(totalSize), true);
-        view.setBigUint64(0x130, BigInt(ROOT_HFS0_OFFSET), true);
-        view.setBigUint64(0x138, BigInt(rootActualHeader), true);
-
-        return output;
     }
 }

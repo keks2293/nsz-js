@@ -73,8 +73,8 @@ nsz-js/
 │   ├── pfs0.js             # PFS0 container parsing and writing
 │   ├── ncz.js              # NCZ decompression, DataReader hierarchy, AsyncBlockDecompressorReader
 │   ├── nsz-convert.js      # NSZ→NSP streaming/memory conversion (adapter pattern)
-│   ├── xcz-convert.js      # XCZ→XCI streaming/memory conversion (adapter pattern)
-│   ├── xci.js              # XCI/HFS0 container support (XCIReader, XCIWriter)
+│   ├── xcz-convert.js      # XCZ→XCI streaming conversion (adapter pattern)
+│   ├── xci.js              # XCI/HFS0 container support (XCIReader)
 │   ├── hfs0.js             # HFS0 container parsing and writing
 │   ├── ticket.js           # Ticket parsing
 │   ├── cnmt.js             # CNMT (Content Metadata) parsing
@@ -104,7 +104,7 @@ nsz-js/
 - **converter.js** - Core converter class `NSZConverter` that orchestrates NCZ decompression, PFS0 rebuilding, and hash verification
 - **fs/pfs0.js** - `PFS0Reader` and `PFS0Writer` classes for parsing and building PFS0 containers
 - **fs/ncz.js** - `NCZDecompressor` class for decompressing NCZ files with section-based, block-based (NCZBLOCK), and streaming compression. Contains DataReader hierarchy (`DataReader`, `BufferReader`, `ChunkedBufferReader`, `FileDescriptorReader`) and `AsyncBlockDecompressorReader`
-- **fs/xci.js** - `XCIReader` and `XCIWriter` for XCI container support
+- **fs/xci.js** - `XCIReader` for XCI container support
 - **fs/hfs0.js** - `HFS0Reader` and `HFS0Writer` for HFS0 container support
 - **fs/ticket.js** - `Ticket` class for parsing ticket files
 - **fs/cnmt.js** - `Cnmt` and `ContentEntry` classes for parsing Content Metadata
@@ -112,7 +112,7 @@ nsz-js/
 - **keys.js** - `KeysParser` class for parsing prod.keys files and deriving title KEKs and key area keys
 - **build.js** - esbuild bundler script, builds `out/app.mjs` and copies runtime assets
 - **fs/nsz-convert.js** - NSZ→NSP streaming/memory conversion (adapter pattern, shared with CLI)
-- **fs/xcz-convert.js** - XCZ→XCI streaming/memory conversion (adapter pattern, shared with CLI)
+- **fs/xcz-convert.js** - XCZ→XCI streaming conversion (adapter pattern, shared with CLI)
 
 ### Crypto Files
 
