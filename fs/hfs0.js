@@ -63,13 +63,8 @@ export class HFS0Writer {
         this._paddingSize = paddingSize;
     }
 
-    addFile(name, data) {
-        const size = data instanceof ArrayBuffer ? data.byteLength : data.length;
-        this.entries.push({ name, data, size });
-    }
-
     addEntry(name, size) {
-        this.entries.push({ name, data: null, size });
+        this.entries.push({ name, size });
     }
 
     _writeHeader(output, stringBytes, dataStart, actualHeader) {
@@ -118,24 +113,4 @@ export class HFS0Writer {
         return { buffer: output, actualHeader, headerSize };
     }
 
-    build() {
-        const { buffer: header, actualHeader, headerSize } = this.buildHeader();
-
-        let totalDataSize = 0;
-        for (const e of this.entries) totalDataSize += e.size;
-
-        const output = new Uint8Array(headerSize + totalDataSize);
-        output.set(header, 0);
-
-        let dataPos = headerSize;
-        for (const e of this.entries) {
-            if (e.data) {
-                const arr = e.data instanceof ArrayBuffer ? new Uint8Array(e.data) : e.data;
-                output.set(arr, dataPos);
-            }
-            dataPos += e.size;
-        }
-
-        return output;
-    }
 }

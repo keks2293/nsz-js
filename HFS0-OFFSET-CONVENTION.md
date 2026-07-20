@@ -60,15 +60,18 @@ offset: this.baseOffset + this._headerSize + e.offset,
 
 `this._headerSize` is computed during `parse()` as `0x10 + fileCount * 0x40 + stringTableSize`.
 
-### 3. XCIWriter.build() — `fs/xci.js:99`
+### 3. convertXCZStreaming `computeLayout()` — `fs/xcz-convert.js:95`
 
-Root HFS0 partition entries use `HFS0Writer`:
+Root HFS0 partition entries use `HFS0Writer` (reserves 0x8000 like nsz `Hfs0Stream`):
 ```js
-const rootWriter = new HFS0Writer(0);
-for (const p of this.partitions) rootWriter.addEntry(p.name, p.data.length);
+const rootWriter = new HFS0Writer(ROOT_HFS0_PADDED_SIZE);
+for (const pm of partitionMetas) {
+    const partSize = pm.hfs0BufferSize + pm.totalSize;
+    rootWriter.addEntry(pm.name, partSize);
+}
 ```
 
-`p.data.length` = full partition size (HFS0 header + file data).
+`partSize` = full partition size (HFS0 header + file data).
 
 ### 4. converter.js streaming path — `converter.js:356-370`
 
@@ -109,7 +112,7 @@ const pHeader = Buffer.from(pWriter.buildHeader());
 
 ## Verification
 
-### Proof by example (XCIWriter root HFS0)
+### Proof by example (convertXCZStreaming root HFS0)
 
 For the first partition (e.g., `secure`):
 - `entry.dataOffset = ROOT_HFS0_OFFSET + rootActualHeader`
