@@ -10,24 +10,24 @@ function toBytes(key) {
     return key instanceof Uint8Array ? key : new Uint8Array(key);
 }
 
-export async function extractContentHashes(ncaData, keys) {
-    const hashes = new Set();
+export async function extractContentHashMap(ncaData, keys) {
+    const map = new Map();
+    const arr = ncaData instanceof Uint8Array ? ncaData : new Uint8Array(ncaData);
+
+    if (!keys || !keys.header_key) {
+        console.error('Cannot decrypt CNMT: missing keys (header_key)');
+        return map;
+    }
+
+    const headerKeyBytes = toBytes(keys.header_key);
+    if (headerKeyBytes.length !== 32) {
+        console.error('Invalid header_key length:', headerKeyBytes.length);
+        return map;
+    }
+
+    const xts = new AesXts(headerKeyBytes);
+
     try {
-        const arr = ncaData instanceof Uint8Array ? ncaData : new Uint8Array(ncaData);
-
-        if (!keys || !keys.header_key) {
-            console.error('Cannot decrypt CNMT: missing keys (header_key)');
-            return hashes;
-        }
-
-        const headerKeyBytes = toBytes(keys.header_key);
-        if (headerKeyBytes.length !== 32) {
-            console.error('Invalid header_key length:', headerKeyBytes.length);
-            return hashes;
-        }
-
-        const xts = new AesXts(headerKeyBytes);
-
         const hdrLen = Math.min(0xC00, arr.length);
         const hdrEncrypted = arr.subarray(0, hdrLen);
         const hdrDecrypted = xts.decrypt(hdrEncrypted, 0);
@@ -44,7 +44,7 @@ export async function extractContentHashes(ncaData, keys) {
 
                 if (!section.cryptoKey) {
                     console.error('No titleKeyDec for masterKey:', header.masterKey);
-                    return hashes;
+                    return map;
                 }
 
                 const aesCtr = new AesCtr(section.cryptoKey, section.cryptoCounter);
@@ -79,14 +79,14 @@ export async function extractContentHashes(ncaData, keys) {
                     const cnmt = Cnmt.parse(cnmtRaw);
                     if (cnmt && cnmt.contentEntries) {
                         for (const entry of cnmt.contentEntries) {
-                            hashes.add(entry.hash);
+                            map.set(entry.ncaId, entry.hash);
                         }
                     }
                 }
             }
         }
     } catch (e) {
-        console.error('Error extracting CNMT hashes:', e);
+        console.error('Error extracting CNMT hash map:', e);
     }
-    return hashes;
+    return map;
 }

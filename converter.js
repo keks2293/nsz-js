@@ -1,12 +1,10 @@
-import { ZstdDecompressor } from './crypto/zstd.js';
 import { DataReader } from './fs/ncz.js';
-import { KeysParser } from './keys.js';
 import { SHA256 } from './crypto/sha256.js';
-import { extractContentHashes } from './fs/cnmt-hashes.js';
-import { PFS0 } from './fs/pfs0.js';
-import { XCIReader } from './fs/xci.js';
-import { convertNSZStreaming } from './fs/nsz-convert.js';
-import { convertXCZStreaming } from './fs/xcz-convert.js';
+import { KeysParser } from './keys.js';
+import { ZstdDecompressor } from './crypto/zstd.js';
+import { extractContentHashMap } from './fs/cnmt-hashes.js';
+import { convertNSZ } from './fs/nsz-convert.js';
+import { convertXCZ } from './fs/xcz-convert.js';
 
 class FileSliceReader extends DataReader {
     constructor(file, baseOffset = 0, totalLength = null) {
@@ -73,7 +71,7 @@ class NSZConverter {
             log: onLog,
             progress: onProgress,
             createHash,
-            extractCnmtHashes: (d) => extractContentHashes(d, this.keys),
+            extractCnmtHashMap: (d) => extractContentHashMap(d, this.keys),
         });
 
         onProgress(1.0, 'Done!');
@@ -96,7 +94,7 @@ class NSZConverter {
             log: onLog,
             progress: onProgress,
             createHash,
-            extractCnmtHashes: (d) => extractContentHashes(d, this.keys),
+            extractCnmtHashMap: (d) => extractContentHashMap(d, this.keys),
         });
 
         onProgress(1.0, 'Done!');
@@ -105,86 +103,6 @@ class NSZConverter {
         return { blob: result.blob || null, name: outputName, size: result.size, writable: !!writable };
     }
 
-}
-
-async function buildAdapter(output, read, callbacks) {
-    const { log = () => {}, progress = () => {}, createHash } = callbacks;
-
-    if (output.fd !== undefined) {
-        const fs = await import('node:fs');
-        return {
-            read,
-            write: (offset, data) => fs.writeSync(output.fd, data, 0, data.byteLength, offset),
-            log, progress, createHash,
-        };
-    }
-    if (output.writable) {
-        return {
-            read,
-            write: (offset, data) => output.writable.write({ type: 'write', position: offset, data }),
-            log, progress, createHash,
-        };
-    }
-    if (output.memory) {
-        const chunks = [];
-        return {
-            read,
-            write: (offset, data) => { chunks.push({ offset, data }); },
-            log, progress, createHash,
-            _chunks: chunks,
-        };
-    }
-    throw new Error('convert: output must be { fd }, { writable }, or { memory: true }');
-}
-
-function collectBlob(adapter, totalSize) {
-    const chunks = adapter._chunks.sort((a, b) => a.offset - b.offset);
-    const buf = new Uint8Array(totalSize);
-    for (const c of chunks) buf.set(c.data, c.offset);
-    return new Blob([buf], { type: 'application/octet-stream' });
-}
-
-export async function convertNSZ(reader, keys, output, options = {}) {
-    const { verify = false, fixPadding = false, log = () => {}, progress = () => {}, createHash, extractCnmtHashes } = options;
-
-    const pfs0 = await PFS0.open(reader);
-
-    const cnmtHashes = new Set();
-    if (extractCnmtHashes) {
-        for (const f of pfs0.getFiles()) {
-            if (f.name.toLowerCase().endsWith('.cnmt.nca')) {
-                const data = await reader.read(f.offset, f.size);
-                const hashes = await extractCnmtHashes(data);
-                hashes.forEach(h => cnmtHashes.add(h));
-            }
-        }
-    }
-
-    const read = (offset, size) => reader.read(offset, size);
-    const adapter = await buildAdapter(output, read, { log, progress, createHash });
-    const result = await convertNSZStreaming(pfs0, keys, adapter, {
-        verify, fixPadding, log, progress, createHash,
-    }, cnmtHashes);
-
-    const totalSize = result.headerSize + result.totalDataSize;
-    if (output.memory) return { size: totalSize, blob: collectBlob(adapter, totalSize) };
-    return { size: totalSize };
-}
-
-export async function convertXCZ(reader, keys, output, options = {}) {
-    const { verify = false, log = () => {}, progress = () => {}, createHash, extractCnmtHashes } = options;
-
-    const xci = new XCIReader(reader);
-    await xci.parse();
-
-    const read = (offset, size) => reader.read(offset, size);
-    const adapter = await buildAdapter(output, read, { log, progress, createHash });
-    const totalSize = await convertXCZStreaming(xci, keys, adapter, {
-        verify, log, progress, createHash,
-    }, extractCnmtHashes);
-
-    if (output.memory) return { size: totalSize, blob: collectBlob(adapter, totalSize) };
-    return { size: totalSize };
 }
 
 export { NSZConverter };

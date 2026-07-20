@@ -5,8 +5,9 @@ import path from 'path';
 import crypto from 'crypto';
 import { DataReader } from './fs/ncz.js';
 import { KeysParser } from './keys.js';
-import { convertNSZ as convertNSZFile, convertXCZ as convertXCZFile } from './converter.js';
-import { extractContentHashes } from './fs/cnmt-hashes.js';
+import { convertNSZ as convertNSZFile } from './fs/nsz-convert.js';
+import { convertXCZ as convertXCZFile } from './fs/xcz-convert.js';
+import { extractContentHashMap } from './fs/cnmt-hashes.js';
 
 class FileDescriptorReader extends DataReader {
     constructor(fd, baseOffset = 0, totalLength = null) {
@@ -30,8 +31,8 @@ class FileDescriptorReader extends DataReader {
     }
 }
 
-function makeExtractCnmtHashes(keys) {
-    return (cnmtData) => extractContentHashes(cnmtData, keys);
+function makeExtractCnmtHashMap(keys) {
+    return (cnmtData) => extractContentHashMap(cnmtData, keys);
 }
 
 function formatBytes(bytes) {
@@ -158,7 +159,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputDir, keys, verify,
                 const h = crypto.createHash('sha256');
                 return { update: (d) => h.update(d), digest: () => h.digest('hex') };
             },
-            extractCnmtHashes: makeExtractCnmtHashes(keys),
+            extractCnmtHashMap: makeExtractCnmtHashMap(keys),
         });
     } catch (e) {
         fs.closeSync(outputFd);
@@ -198,7 +199,7 @@ async function convertNSZ(inReader, inputFd, inputPath, outputDir, keys, fixPadd
                 const h = crypto.createHash('sha256');
                 return { update: (d) => h.update(d), digest: () => h.digest('hex') };
             },
-            extractCnmtHashes: makeExtractCnmtHashes(keys),
+            extractCnmtHashMap: makeExtractCnmtHashMap(keys),
         });
     } catch (e) {
         fs.closeSync(outputFd);

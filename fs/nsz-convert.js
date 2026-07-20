@@ -1,15 +1,18 @@
 import { PFS0Writer } from './pfs0.js';
 import { NCZDecompressor, AdapterNCZReader } from './ncz.js';
+import { PFS0 } from './pfs0.js';
 import { sha256 } from '../crypto/sha256.js';
+import { extractContentHashMap } from './cnmt-hashes.js';
 
-function verifyHash(hash, name, fileHashes, onLog) {
+function verifyHashByNcaId(hash, ncaId, cnmtHashMap, onLog) {
     const log = onLog || ((level, msg) => console.log(`  ${msg}`));
-    if (fileHashes.size > 0) {
-        if (fileHashes.has(hash)) {
-            log('success', `[VERIFIED]   ${name} ${hash}`);
+    if (cnmtHashMap.size > 0) {
+        const expected = cnmtHashMap.get(ncaId);
+        if (expected && expected === hash) {
+            log('success', `[VERIFIED]   ${ncaId} ${hash}`);
         } else {
-            log('error', `[CORRUPTED]  ${name} ${hash}`);
-            throw new Error(`Verification detected hash mismatch: ${name}`);
+            log('error', `[CORRUPTED]  ${ncaId} expected ${expected || 'none'}, got ${hash}`);
+            throw new Error(`Verification detected hash mismatch: ${ncaId}`);
         }
     }
 }
@@ -25,7 +28,7 @@ function verifyFileNameHash(hash, nczName, ncaName, onLog) {
     }
 }
 
-export async function convertNSZStreaming(pfs0, keys, adapter, options, cnmtHashes = new Set()) {
+async function convertNSZStreaming(pfs0, keys, adapter, options, cnmtHashes = new Set()) {
     const { verify = false, fixPadding = false } = options;
     const files = pfs0.getFiles();
 
@@ -64,8 +67,9 @@ export async function convertNSZStreaming(pfs0, keys, adapter, options, cnmtHash
                 const hash = hasher.digest();
                 options.log('info', `[NCA HASH]   ${hash}`);
                 if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
+                    const ncaId = meta.name.replace(/\.nca$/i, '');
                     if (cnmtHashes.size > 0) {
-                        verifyHash(hash, meta.name, cnmtHashes, options.log);
+                        verifyHashByNcaId(hash, ncaId, cnmtHashes, options.log);
                     } else {
                         verifyFileNameHash(hash, f.name, meta.name, options.log);
                     }
@@ -78,8 +82,9 @@ export async function convertNSZStreaming(pfs0, keys, adapter, options, cnmtHash
             if (verify && meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
                 const hash = await sha256(data);
                 options.log('info', `[NCA HASH]   ${hash}`);
+                const ncaId = meta.name.replace(/\.nca$/i, '');
                 if (cnmtHashes.size > 0) {
-                    verifyHash(hash, meta.name, cnmtHashes, options.log);
+                    verifyHashByNcaId(hash, ncaId, cnmtHashes, options.log);
                 } else {
                     verifyFileNameHash(hash, f.name, meta.name, options.log);
                 }
@@ -110,4 +115,69 @@ async function collectOutputMeta(files, adapter, keys) {
     }
     return outputMeta;
 }
+
+async function buildAdapter(output, read, callbacks) {
+    const { log = () => {}, progress = () => {}, createHash } = callbacks;
+
+    if (output.fd !== undefined) {
+        const fs = await import('node:fs');
+        return {
+            read,
+            write: (offset, data) => fs.writeSync(output.fd, data, 0, data.byteLength, offset),
+            log, progress, createHash,
+        };
+    }
+    if (output.writable) {
+        return {
+            read,
+            write: (offset, data) => output.writable.write({ type: 'write', position: offset, data }),
+            log, progress, createHash,
+        };
+    }
+    if (output.memory) {
+        const chunks = [];
+        return {
+            read,
+            write: (offset, data) => { chunks.push({ offset, data }); },
+            log, progress, createHash,
+            _chunks: chunks,
+        };
+    }
+    throw new Error('convert: output must be { fd }, { writable }, or { memory: true }');
+}
+
+function collectBlob(adapter, totalSize) {
+    const chunks = adapter._chunks.sort((a, b) => a.offset - b.offset);
+    const buf = new Uint8Array(totalSize);
+    for (const c of chunks) buf.set(c.data, c.offset);
+    return new Blob([buf], { type: 'application/octet-stream' });
+}
+
+export async function convertNSZ(reader, keys, output, options = {}) {
+    const { verify = false, fixPadding = false, log = () => {}, progress = () => {}, createHash, extractCnmtHashMap } = options;
+
+    const pfs0 = await PFS0.open(reader);
+
+    const cnmtHashMap = new Map();
+    if (extractCnmtHashMap) {
+        for (const f of pfs0.getFiles()) {
+            if (f.name.toLowerCase().endsWith('.cnmt.nca')) {
+                const data = await reader.read(f.offset, f.size);
+                const m = await extractCnmtHashMap(data);
+                for (const [ncaId, hash] of m) cnmtHashMap.set(ncaId, hash);
+            }
+        }
+    }
+
+    const read = (offset, size) => reader.read(offset, size);
+    const adapter = await buildAdapter(output, read, { log, progress, createHash });
+    const result = await convertNSZStreaming(pfs0, keys, adapter, {
+        verify, fixPadding, log, progress, createHash,
+    }, cnmtHashMap);
+
+    const totalSize = result.headerSize + result.totalDataSize;
+    if (output.memory) return { size: totalSize, blob: collectBlob(adapter, totalSize) };
+    return { size: totalSize };
+}
+
 
