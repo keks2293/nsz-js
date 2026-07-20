@@ -60,6 +60,8 @@ Prioritized areas for improvement identified 2026-05-30.
 
 - ❌ **verifyHash/verifyFileNameHash дублирование** — `fs/nsz-convert.js:5-26`, `fs/xcz-convert.js:6-27`. Функции идентичны в обоих файлах. Python nsz делает то же самое — verification inline в `__decompressContainer()` и `decompress()`. Не будем выносить в общий модуль — это соответствует паттерну Python nsz.
 
+- ✅ **CNMT ContentEntry size — строго 48-bit** — `fs/cnmt.js:20-22`. Поле size в CNMT занимает 6 байт (offset 48-53), nsz читает `readInt48()`. Нельзя использовать `getBigUint64(48)` — он читает 8 байт (48-55) и захватывает `type` (offset 53) + junk в старшие биты размера. Реализация: `sizeLow = getUint32(48)`, `sizeHigh = getUint16(52)`, `size = sizeLow + sizeHigh * 0x100000000`. **Регрессия**: коммит `72b24dc` («matches rest of codebase») заменил 48-bit на `getBigUint64` — баг прожил с 1 июля по 2026-07-20, исправлен в `6c6ce11`. `ContentEntry.size` не используется в логике конвертации (hash берётся из `section.size` NCA), так что на байтовую идентичность выхода не влияло, но расходилось с nsz. Правило: НЕ менять на `getBigUint64`.
+
 ## Speed Optimization
 
 - ✅ **Optimize SW slice(0) copy** — `SWDownloader.write()` now checks if data is a WASM memory view via `view.buffer === wasmInstance.exports.memory.buffer`. WASM views still get `slice(0)`, standalone buffers (e.g. WebCrypto output) are transferred directly. Added `ZstdDecompressor.wasmBuffer` getter. No copy for ~90%+ of data (encrypted sections).
