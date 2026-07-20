@@ -3,12 +3,10 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { PFS0 } from './fs/pfs0.js';
 import { DataReader } from './fs/ncz.js';
 import { KeysParser } from './keys.js';
-import { convertXCZStreaming } from './fs/xcz-convert.js';
-import { createStreamingAdapter } from './converter.js';
-import { convertNSZStreaming } from './fs/nsz-convert.js';
+import { convertNSZ as convertNSZFile, convertXCZ as convertXCZFile } from './converter.js';
+import { extractContentHashes } from './fs/cnmt-hashes.js';
 
 class FileDescriptorReader extends DataReader {
     constructor(fd, baseOffset = 0, totalLength = null) {
@@ -30,6 +28,10 @@ class FileDescriptorReader extends DataReader {
         }
         return new Uint8Array(buf.buffer, buf.byteOffset, size);
     }
+}
+
+function makeExtractCnmtHashes(keys) {
+    return (cnmtData) => extractContentHashes(cnmtData, keys);
 }
 
 function formatBytes(bytes) {
@@ -138,7 +140,6 @@ async function main() {
 async function convertXCZ(inReader, inputFd, inputPath, outputDir, keys, verify, overwrite, rmSource) {
     console.log(`[VERIFY NSZ] ${inputPath}`);
     console.log('Detected XCZ file');
-    const { XCIReader } = await import('./fs/xci.js');
     const outPath = outputDir ? path.join(outputDir, path.basename(inputPath).replace(/\.xcz$/i, '.xci')) : inputPath.replace(/\.xcz$/i, '.xci');
     console.log(`Output: ${outPath}`);
 
@@ -147,33 +148,9 @@ async function convertXCZ(inReader, inputFd, inputPath, outputDir, keys, verify,
         process.exit(1);
     }
 
-    const xci = new XCIReader(inReader);
-    await xci.parse();
-    console.log(`Partitions: ${xci.getPartitions().map(p => p.name).join(', ')}`);
-
     const outputFd = fs.openSync(outPath, 'w');
     try {
-        const read = (offset, size) => {
-            const buf = Buffer.allocUnsafe(size);
-            fs.readSync(inputFd, buf, 0, size, offset);
-            return buf;
-        };
-        const adapter = createStreamingAdapter(read, (offset, data) => fs.writeSync(outputFd, data, 0, data.byteLength, offset), {
-            log: (level, msg) => console.log(msg),
-            progress: () => {},
-            createHash: () => {
-                const h = crypto.createHash('sha256');
-                return { update: (d) => h.update(d), digest: () => h.digest('hex') };
-            },
-        });
-
-        const extractCnmtHashes = async (cnmtData) => {
-            const { NSZConverter } = await import('./converter.js');
-            const converter = new NSZConverter(keys);
-            return converter.extractCnmtHashes(cnmtData);
-        };
-
-        await convertXCZStreaming(xci, keys, adapter, {
+        await convertXCZFile(inReader, keys, { fd: outputFd }, {
             verify,
             log: (level, msg) => console.log(msg),
             progress: () => {},
@@ -181,7 +158,8 @@ async function convertXCZ(inReader, inputFd, inputPath, outputDir, keys, verify,
                 const h = crypto.createHash('sha256');
                 return { update: (d) => h.update(d), digest: () => h.digest('hex') };
             },
-        }, extractCnmtHashes);
+            extractCnmtHashes: makeExtractCnmtHashes(keys),
+        });
     } catch (e) {
         fs.closeSync(outputFd);
         try { fs.unlinkSync(outPath); } catch {}
@@ -210,38 +188,9 @@ async function convertNSZ(inReader, inputFd, inputPath, outputDir, keys, fixPadd
         process.exit(1);
     }
 
-    const pfs0Reader = await PFS0.open(inReader);
-    for (const f of pfs0Reader.getFiles()) {
-        console.log(`[OPEN  ]     ${f.name} 0x${f.size.toString(16)} bytes at 0x${f.offset.toString(16)}`);
-    }
-
     const outputFd = fs.openSync(outPath, 'w');
     try {
-        const adapter = {
-            read: (offset, size) => {
-                const buf = Buffer.allocUnsafe(size);
-                fs.readSync(inputFd, buf, 0, size, offset);
-                return buf;
-            },
-            write: (offset, data) => fs.writeSync(outputFd, data, 0, data.byteLength, offset),
-            log: (level, msg) => console.log(msg),
-            progress: () => {},
-        };
-
-        let cnmtHashes = new Set();
-        if (verify) {
-            const { NSZConverter } = await import('./converter.js');
-            const converter = new NSZConverter(keys);
-            const files = pfs0Reader.getFiles();
-            for (const f of files.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'))) {
-                const cnmtData = await adapter.read(f.offset, f.size);
-                const hashes = await converter.extractCnmtHashes(cnmtData);
-                hashes.forEach(h => cnmtHashes.add(h));
-            }
-            console.log(`Found ${cnmtHashes.size} expected NCA hashes from CNMT`);
-        }
-
-        await convertNSZStreaming(pfs0Reader, keys, adapter, {
+        await convertNSZFile(inReader, keys, { fd: outputFd }, {
             verify, fixPadding,
             log: (level, msg) => console.log(msg),
             progress: () => {},
@@ -249,7 +198,8 @@ async function convertNSZ(inReader, inputFd, inputPath, outputDir, keys, fixPadd
                 const h = crypto.createHash('sha256');
                 return { update: (d) => h.update(d), digest: () => h.digest('hex') };
             },
-        }, cnmtHashes);
+            extractCnmtHashes: makeExtractCnmtHashes(keys),
+        });
     } catch (e) {
         fs.closeSync(outputFd);
         try { fs.unlinkSync(outPath); } catch {}
