@@ -6,7 +6,7 @@ const OUT = 'app.mjs';
 const ASSETS = ['favicon.svg', 'download-worker.js'];
 
 mkdirSync('out', { recursive: true });
-execSync(`npx esbuild ${ENTRY} --bundle --minify --format=esm --outfile=out/${OUT} --external:fs --external:node:child_process --external:crypto`, { stdio: 'inherit' });
+execSync(`npx esbuild ${ENTRY} --bundle --minify --format=esm --outfile=out/${OUT} --external:node:fs --external:node:child_process --external:node:crypto --external:crypto`, { stdio: 'inherit' });
 
 let html = readFileSync('index.html', 'utf8');
 html = html.replace(`import('./${ENTRY}')`, `import('./${OUT}')`);
