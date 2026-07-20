@@ -17,7 +17,9 @@ export class ContentEntry {
         this.hash = hex(data.subarray(0, 32));
         this.ncaId = hex(data.subarray(32, 48));
 
-        this.size = Number(view.getBigUint64(48, true));
+        const sizeLow = view.getUint32(48, true);
+        const sizeHigh = view.getUint16(52, true);
+        this.size = sizeLow + sizeHigh * 0x100000000;
 
         this.type = view.getUint8(53);
     }
