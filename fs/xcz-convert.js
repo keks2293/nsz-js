@@ -1,15 +1,17 @@
 import { NCZDecompressor, AdapterNCZReader } from './ncz.js';
 import { HFS0Writer } from './hfs0.js';
+import { XCIReader } from './xci.js';
 import { sha256 } from '../crypto/sha256.js';
 
-function verifyHash(hash, name, fileHashes, onLog) {
+function verifyHashByNcaId(hash, ncaId, cnmtHashMap, onLog) {
     const log = onLog || ((level, msg) => console.log(`  ${msg}`));
-    if (fileHashes.size > 0) {
-        if (fileHashes.has(hash)) {
-            log('success', `[VERIFIED]   ${name} ${hash}`);
+    if (cnmtHashMap.size > 0) {
+        const expected = cnmtHashMap.get(ncaId);
+        if (expected && expected === hash) {
+            log('success', `[VERIFIED]   ${ncaId} ${hash}`);
         } else {
-            log('error', `[CORRUPTED]  ${name} ${hash}`);
-            throw new Error(`Verification detected hash mismatch: ${name}`);
+            log('error', `[CORRUPTED]  ${ncaId} expected ${expected || 'none'}, got ${hash}`);
+            throw new Error(`Verification detected hash mismatch: ${ncaId}`);
         }
     }
 }
@@ -29,13 +31,13 @@ const PARTITION_HEADER_SIZE = 0x8000;
 const ROOT_HFS0_PADDED_SIZE = 0x8000;
 const ROOT_HFS0_OFFSET = 0xF000;
 
-async function buildPartitionMetas(xci, keys, verify, adapter, extractCnmtHashes) {
+async function buildPartitionMetas(xci, keys, verify, adapter, extractCnmtHashMap) {
     const partitions = xci.getPartitions();
     const partitionMetas = [];
 
     for (const partition of partitions) {
         if (partition.size === 0) {
-            partitionMetas.push({ name: partition.name, files: [], totalSize: 0, hfs0BufferSize: 0, raw: false, cnmtHashes: new Set() });
+            partitionMetas.push({ name: partition.name, files: [], totalSize: 0, hfs0BufferSize: 0, raw: false, cnmtHashMap: new Map() });
             continue;
         }
 
@@ -48,13 +50,13 @@ async function buildPartitionMetas(xci, keys, verify, adapter, extractCnmtHashes
 
         const partitionFiles = hfs0.getFiles();
 
-        const cnmtHashes = new Set();
-        if (verify && extractCnmtHashes) {
+        const cnmtHashMap = new Map();
+        if (verify && extractCnmtHashMap) {
             const cnmtFiles = partitionFiles.filter(f => f.name.toLowerCase().endsWith('.cnmt.nca'));
             for (const cnmtFile of cnmtFiles) {
                 const cnmtData = await adapter.read(cnmtFile.offset, cnmtFile.size);
-                const hashes = await extractCnmtHashes(cnmtData);
-                hashes.forEach(h => cnmtHashes.add(h));
+                const m = await extractCnmtHashMap(cnmtData);
+                for (const [ncaId, hash] of m) cnmtHashMap.set(ncaId, hash);
             }
         }
 
@@ -83,7 +85,7 @@ async function buildPartitionMetas(xci, keys, verify, adapter, extractCnmtHashes
             totalSize: fileTotalSize,
             hfs0BufferSize,
             raw: false,
-            cnmtHashes
+            cnmtHashMap
         });
     }
 
@@ -160,8 +162,9 @@ async function writePartitions(adapter, partitionMetas, layout, keys, verify, op
                     const hash = hasher.digest();
                     log('info', `  [NCA HASH]   ${hash}`);
                     if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                        if (pm.cnmtHashes.size > 0) {
-                            verifyHash(hash, meta.name, pm.cnmtHashes, log);
+                        const ncaId = meta.name.replace(/\.nca$/i, '');
+                        if (pm.cnmtHashMap.size > 0) {
+                            verifyHashByNcaId(hash, ncaId, pm.cnmtHashMap, log);
                         } else {
                             verifyFileNameHash(hash, meta.inputName, meta.name, log);
                         }
@@ -173,8 +176,9 @@ async function writePartitions(adapter, partitionMetas, layout, keys, verify, op
                 if (verify && meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
                     const hash = await sha256(data);
                     log('info', `  [NCA HASH]   ${hash}`);
-                    if (pm.cnmtHashes.size > 0) {
-                        verifyHash(hash, meta.name, pm.cnmtHashes, log);
+                    const ncaId = meta.name.replace(/\.nca$/i, '');
+                    if (pm.cnmtHashMap.size > 0) {
+                        verifyHashByNcaId(hash, ncaId, pm.cnmtHashMap, log);
                     } else {
                         verifyFileNameHash(hash, meta.inputName, meta.name, log);
                     }
@@ -194,10 +198,12 @@ async function writePartitions(adapter, partitionMetas, layout, keys, verify, op
     }
 }
 
-export async function convertXCZStreaming(xci, keys, adapter, options, extractCnmtHashes) {
+async function convertXCZStreaming(xci, keys, adapter, options, partitionMetas) {
     const { verify = false, log = () => {}, progress = () => {} } = options;
 
-    const partitionMetas = await buildPartitionMetas(xci, keys, verify, adapter, extractCnmtHashes);
+    if (!partitionMetas) {
+        partitionMetas = await buildPartitionMetas(xci, keys, verify, adapter, options.extractCnmtHashMap);
+    }
     const layout = computeLayout(partitionMetas);
 
     const xciHeaderBytes = await adapter.read(0, 0x200);
@@ -206,6 +212,62 @@ export async function convertXCZStreaming(xci, keys, adapter, options, extractCn
     await writePartitions(adapter, partitionMetas, layout, keys, verify, { log, progress, createHash: options.createHash });
 
     return layout.totalSize;
+}
+
+async function buildAdapter(output, read, callbacks) {
+    const { log = () => {}, progress = () => {}, createHash } = callbacks;
+
+    if (output.fd !== undefined) {
+        const fs = await import('node:fs');
+        return {
+            read,
+            write: (offset, data) => fs.writeSync(output.fd, data, 0, data.byteLength, offset),
+            log, progress, createHash,
+        };
+    }
+    if (output.writable) {
+        return {
+            read,
+            write: (offset, data) => output.writable.write({ type: 'write', position: offset, data }),
+            log, progress, createHash,
+        };
+    }
+    if (output.memory) {
+        const chunks = [];
+        return {
+            read,
+            write: (offset, data) => { chunks.push({ offset, data }); },
+            log, progress, createHash,
+            _chunks: chunks,
+        };
+    }
+    throw new Error('convert: output must be { fd }, { writable }, or { memory: true }');
+}
+
+function collectBlob(adapter, totalSize) {
+    const chunks = adapter._chunks.sort((a, b) => a.offset - b.offset);
+    const buf = new Uint8Array(totalSize);
+    for (const c of chunks) buf.set(c.data, c.offset);
+    return new Blob([buf], { type: 'application/octet-stream' });
+}
+
+export async function convertXCZ(reader, keys, output, options = {}) {
+    const { verify = false, log = () => {}, progress = () => {}, createHash, extractCnmtHashMap } = options;
+
+    const xci = new XCIReader(reader);
+    await xci.parse();
+
+    const read = (offset, size) => reader.read(offset, size);
+    const adapter = await buildAdapter(output, read, { log, progress, createHash });
+
+    const partitionMetas = await buildPartitionMetas(xci, keys, verify, adapter, extractCnmtHashMap);
+
+    const totalSize = await convertXCZStreaming(xci, keys, adapter, {
+        verify, log, progress, createHash,
+    }, partitionMetas);
+
+    if (output.memory) return { size: totalSize, blob: collectBlob(adapter, totalSize) };
+    return { size: totalSize };
 }
 
 
