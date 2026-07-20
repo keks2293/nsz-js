@@ -1,5 +1,9 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-07-20)
+
+1. **Refactor: unify converter.js as single orchestrator + extract CNMT hashing** — `converter.js`, `fs/cnmt-hashes.js`, `nsz-cli.js`. Folded `convertNSZ`/`convertXCZ` facade (`buildAdapter`/`collectBlob`) into `converter.js`, making it the single thick orchestrator (mirrors nsz `NszDecompressor.py`). Extracted CNMT content-hash extraction into neutral `fs/cnmt-hashes.js` (`extractContentHashes`), removing the logic from `NSZConverter`. This avoids the adapter/CNMT circular-dependency risk — `fs/*` do not import `converter.js`. `nsz-cli.js` import repointed to `converter.js`. Trackline `.nsz`→`.nsp` still 223285520 bytes (byte-identical to nsz).
+
 ## ✅ Recent Changes (2026-07-19)
 
 1. **Perf: module-level `fs` import + sync read in FileDescriptorReader** — `nsz-cli.js`. `FileDescriptorReader.read()` previously called `await import('fs')` on every invocation — 100K+ times on block-mode NCZ. Replaced with a top-level `import fs from 'fs'` and sync `fs.readSync()`, eliminating the dynamic import + Promise + microtask yield per read.
