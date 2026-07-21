@@ -62,6 +62,10 @@ Prioritized areas for improvement identified 2026-05-30.
 
 - ✅ **CNMT ContentEntry size — строго 48-bit** — `fs/cnmt.js:20-22`. Поле size в CNMT занимает 6 байт (offset 48-53), nsz читает `readInt48()`. Нельзя использовать `getBigUint64(48)` — он читает 8 байт (48-55) и захватывает `type` (offset 53) + junk в старшие биты размера. Реализация: `sizeLow = getUint32(48)`, `sizeHigh = getUint16(52)`, `size = sizeLow + sizeHigh * 0x100000000`. **Регрессия**: коммит `72b24dc` («matches rest of codebase») заменил 48-bit на `getBigUint64` — баг прожил с 1 июля по 2026-07-20, исправлен в `6c6ce11`. `ContentEntry.size` не используется в логике конвертации (hash берётся из `section.size` NCA), так что на байтовую идентичность выхода не влияло, но расходилось с nsz. Правило: НЕ менять на `getBigUint64`.
 
+## SHA256 Optimization
+
+- ✅ **W schedule: Array vs Uint32Array** — `crypto/sha256.js`. SHA-256 message schedule `w[64]` хранит промежуточные 32-bit слова. `Uint32Array` создаёт C-backed typed array с автоматическим `>>> 0` при записи, но `Array` в V8 (TurboFan) оптимизируется так же хорошо — оба типа попадают в fast path для целочисленных операций. Benchmark (300MB): до 10% быстрее с `Array`. **Array предпочтительнее**: (1) не требует приведения типов при вычислении `w[i] = (w[i-16] + s0 + w[i-7] + s1) >>> 0` — `Uint32Array` автоматически обрезает, но `Array` делает то же через `>>> 0`; (2) совпадает с emn178/js-sha256 (самая быстрая pure-JS SHA-256 библиотека); (3) проще для JIT — V8 не создаёт отдельный backing store.
+
 ## Speed Optimization
 
 - ✅ **Optimize SW slice(0) copy** — `SWDownloader.write()` now checks if data is a WASM memory view via `view.buffer === wasmInstance.exports.memory.buffer`. WASM views still get `slice(0)`, standalone buffers (e.g. WebCrypto output) are transferred directly. Added `ZstdDecompressor.wasmBuffer` getter. No copy for ~90%+ of data (encrypted sections).
