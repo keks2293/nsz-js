@@ -66,6 +66,14 @@ Prioritized areas for improvement identified 2026-05-30.
 
 - ✅ **W schedule: Array vs Uint32Array** — `crypto/sha256.js`. SHA-256 message schedule `w[64]` хранит промежуточные 32-bit слова. `Uint32Array` создаёт C-backed typed array с автоматическим `>>> 0` при записи, но `Array` в V8 (TurboFan) оптимизируется так же хорошо — оба типа попадают в fast path для целочисленных операций. Benchmark (300MB): до 10% быстрее с `Array`. **Array предпочтительнее**: (1) не требует приведения типов при вычислении `w[i] = (w[i-16] + s0 + w[i-7] + s1) >>> 0` — `Uint32Array` автоматически обрезает, но `Array` делает то же через `>>> 0`; (2) совпадает с emn178/js-sha256 (самая быстрая pure-JS SHA-256 библиотека); (3) проще для JIT — V8 не создаёт отдельный backing store.
 
+- ✅ **js-sha256 optimizations: h0-h7, 4x unrolling, HEXES, lastByteIndex** — `crypto/sha256.js`. Step 2 ported from emn178/js-sha256:
+  - Individual h0-h7 properties (was `h[8]` array) — avoids bounds-checked array access
+  - 4x loop unrolling in compression rounds — 16 iterations instead of 64, fewer branch predictions
+  - HEXES lookup table — precomputed `['00'..'ff']` for hex output
+  - `lastByteIndex` tracking — correctly handles exact-block-boundary inputs in hexdigest padding
+  - **Bug fixed**: hexdigest was using `this.start` for padding position, but after full-block compress `this.start` resets to 0 while the last byte was at position 64. Original js-sha256 tracks `lastByteIndex = i` separately. This caused stale message data in `blocks[0]` to be OR'd with padding bit, producing wrong hashes for exact-multiple-of-64 inputs (64, 128, 512, 1024, 1048576... bytes).
+  - **Benchmark**: 3000ms → 2063ms for 300MB (31% faster). Node native: 114ms. hash-wasm pool: 1240ms.
+
 ## Speed Optimization
 
 - ✅ **Optimize SW slice(0) copy** — `SWDownloader.write()` now checks if data is a WASM memory view via `view.buffer === wasmInstance.exports.memory.buffer`. WASM views still get `slice(0)`, standalone buffers (e.g. WebCrypto output) are transferred directly. Added `ZstdDecompressor.wasmBuffer` getter. No copy for ~90%+ of data (encrypted sections).

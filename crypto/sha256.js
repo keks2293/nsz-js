@@ -19,120 +19,180 @@ const K = [
     0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
 ];
 
-function rotr(x, n) {
-    return (x >>> n) | (x << (32 - n));
-}
-
-function transform(h, block) {
-    const w = new Array(64);
-    for (let i = 0; i < 16; i++) {
-        const off = i * 4;
-        w[i] = (block[off] << 24) | (block[off + 1] << 16) |
-               (block[off + 2] << 8) | block[off + 3];
-    }
-    for (let i = 16; i < 64; i++) {
-        const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
-        const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
-        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
-    }
-
-    let a = h[0], b = h[1], c = h[2], d = h[3];
-    let e = h[4], f = h[5], g = h[6], hh = h[7];
-
-    for (let i = 0; i < 64; i++) {
-        const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
-        const ch = (e & f) ^ ((~e) & g);
-        const temp1 = (hh + S1 + ch + K[i] + w[i]) >>> 0;
-        const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
-        const maj = (a & b) ^ (a & c) ^ (b & c);
-        const temp2 = (S0 + maj) >>> 0;
-        hh = g; g = f; f = e;
-        e = (d + temp1) >>> 0;
-        d = c; c = b; b = a;
-        a = (temp1 + temp2) >>> 0;
-    }
-
-    h[0] = (h[0] + a) >>> 0; h[1] = (h[1] + b) >>> 0;
-    h[2] = (h[2] + c) >>> 0; h[3] = (h[3] + d) >>> 0;
-    h[4] = (h[4] + e) >>> 0; h[5] = (h[5] + f) >>> 0;
-    h[6] = (h[6] + g) >>> 0; h[7] = (h[7] + hh) >>> 0;
-}
+const EXTRA = [-2147483648, 8388608, 32768, 128];
+const SHIFT = [24, 16, 8, 0];
 
 export class SHA256 {
     constructor() {
-        this.h = [
-            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-            0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-        ];
-        this.buf = [];
-        this.len = 0;
+        this.h0 = 0x6a09e667;
+        this.h1 = 0xbb67ae85;
+        this.h2 = 0x3c6ef372;
+        this.h3 = 0xa54ff53a;
+        this.h4 = 0x510e527f;
+        this.h5 = 0x9b05688c;
+        this.h6 = 0x1f83d9ab;
+        this.h7 = 0x5be0cd19;
+        this.blocks = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        this.block = 0;
+        this.start = 0;
+        this.bytes = 0;
+        this.hBytes = 0;
+        this.lastByteIndex = 0;
+        this.finalized = false;
+        this.hashed = false;
+    }
+
+    _compress() {
+        const blocks = this.blocks;
+        let a = this.h0, b = this.h1, c = this.h2, d = this.h3;
+        let e = this.h4, f = this.h5, g = this.h6, h = this.h7;
+        let j, s0, s1, maj, t1, t2, ch, ab, da, cd, bc;
+
+        for (j = 16; j < 64; ++j) {
+            t1 = blocks[j - 15];
+            s0 = ((t1 >>> 7) | (t1 << 25)) ^ ((t1 >>> 18) | (t1 << 14)) ^ (t1 >>> 3);
+            t1 = blocks[j - 2];
+            s1 = ((t1 >>> 17) | (t1 << 15)) ^ ((t1 >>> 19) | (t1 << 13)) ^ (t1 >>> 10);
+            blocks[j] = blocks[j - 16] + s0 + blocks[j - 7] + s1 | 0;
+        }
+
+        bc = b & c;
+        for (j = 0; j < 64; j += 4) {
+            s0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+            s1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+            ab = a & b;
+            maj = ab ^ (a & c) ^ bc;
+            ch = (e & f) ^ (~e & g);
+            t1 = h + s1 + ch + K[j] + blocks[j];
+            t2 = s0 + maj;
+            h = d + t1 | 0;
+            d = t1 + t2 | 0;
+            s0 = ((d >>> 2) | (d << 30)) ^ ((d >>> 13) | (d << 19)) ^ ((d >>> 22) | (d << 10));
+            s1 = ((h >>> 6) | (h << 26)) ^ ((h >>> 11) | (h << 21)) ^ ((h >>> 25) | (h << 7));
+            da = d & a;
+            maj = da ^ (d & b) ^ ab;
+            ch = (h & e) ^ (~h & f);
+            t1 = g + s1 + ch + K[j + 1] + blocks[j + 1];
+            t2 = s0 + maj;
+            g = c + t1 | 0;
+            c = t1 + t2 | 0;
+
+            s0 = ((c >>> 2) | (c << 30)) ^ ((c >>> 13) | (c << 19)) ^ ((c >>> 22) | (c << 10));
+            s1 = ((g >>> 6) | (g << 26)) ^ ((g >>> 11) | (g << 21)) ^ ((g >>> 25) | (g << 7));
+            cd = c & d;
+            maj = cd ^ (c & a) ^ da;
+            ch = (g & h) ^ (~g & e);
+            t1 = f + s1 + ch + K[j + 2] + blocks[j + 2];
+            t2 = s0 + maj;
+            f = b + t1 | 0;
+            b = t1 + t2 | 0;
+
+            s0 = ((b >>> 2) | (b << 30)) ^ ((b >>> 13) | (b << 19)) ^ ((b >>> 22) | (b << 10));
+            s1 = ((f >>> 6) | (f << 26)) ^ ((f >>> 11) | (f << 21)) ^ ((f >>> 25) | (f << 7));
+            bc = b & c;
+            maj = bc ^ (b & d) ^ cd;
+            ch = (f & g) ^ (~f & h);
+            t1 = e + s1 + ch + K[j + 3] + blocks[j + 3];
+            t2 = s0 + maj;
+            e = a + t1 | 0;
+            a = t1 + t2 | 0;
+        }
+
+        this.h0 = this.h0 + a | 0;
+        this.h1 = this.h1 + b | 0;
+        this.h2 = this.h2 + c | 0;
+        this.h3 = this.h3 + d | 0;
+        this.h4 = this.h4 + e | 0;
+        this.h5 = this.h5 + f | 0;
+        this.h6 = this.h6 + g | 0;
+        this.h7 = this.h7 + h | 0;
     }
 
     update(data) {
-        if (data instanceof ArrayBuffer) data = new Uint8Array(data);
+        if (this.finalized) return this;
         if (typeof data === 'string') data = new TextEncoder().encode(data);
+        else if (data instanceof ArrayBuffer) data = new Uint8Array(data);
 
-        if (this.buf.length > 0) {
-            const need = 64 - this.buf.length;
-            const take = Math.min(need, data.length);
-            for (let i = 0; i < take; i++) this.buf.push(data[i]);
-            this.len += take;
-            if (this.buf.length === 64) {
-                transform(this.h, this.buf);
-                this.buf = [];
+        const blocks = this.blocks;
+        let index = 0;
+        const length = data.length;
+
+        while (index < length) {
+            if (this.hashed) {
+                this.hashed = false;
+                blocks[0] = this.block;
+                this.block = blocks[16] = blocks[1] = blocks[2] = blocks[3] =
+                    blocks[4] = blocks[5] = blocks[6] = blocks[7] =
+                    blocks[8] = blocks[9] = blocks[10] = blocks[11] =
+                    blocks[12] = blocks[13] = blocks[14] = blocks[15] = 0;
             }
-            data = data.subarray(take);
+
+            let i = this.start;
+            while (index < length && i < 64) {
+                blocks[i >>> 2] |= data[index] << SHIFT[i++ & 3];
+                index++;
+            }
+
+            this.lastByteIndex = i;
+            this.bytes += i - this.start;
+            if (i >= 64) {
+                this.block = blocks[16];
+                this.start = i - 64;
+                this._compress();
+                this.hashed = true;
+            } else {
+                this.start = i;
+            }
         }
 
-        let off = 0;
-        while (off + 64 <= data.length) {
-            transform(this.h, data.subarray(off, off + 64));
-            off += 64;
-            this.len += 64;
-        }
-
-        if (off < data.length) {
-            for (let i = off; i < data.length; i++) this.buf.push(data[i]);
-            this.len += data.length - off;
+        if (this.bytes > 4294967295) {
+            this.hBytes += this.bytes / 4294967296 | 0;
+            this.bytes = this.bytes % 4294967296;
         }
 
         return this;
     }
 
     hexdigest() {
-        const savedLen = this.len;
-
-        const zerosNeeded = (56 - (this.len + 1) % 64 + 64) % 64;
-
-        this.buf.push(0x80);
-        for (let i = 0; i < zerosNeeded; i++) this.buf.push(0);
-
-        const bitLen = savedLen * 8;
-        const bitLenHi = Math.floor(bitLen / 0x100000000) >>> 0;
-        const bitLenLo = bitLen >>> 0;
-        this.buf.push((bitLenHi >>> 24) & 0xff);
-        this.buf.push((bitLenHi >>> 16) & 0xff);
-        this.buf.push((bitLenHi >>> 8) & 0xff);
-        this.buf.push(bitLenHi & 0xff);
-        this.buf.push((bitLenLo >>> 24) & 0xff);
-        this.buf.push((bitLenLo >>> 16) & 0xff);
-        this.buf.push((bitLenLo >>> 8) & 0xff);
-        this.buf.push(bitLenLo & 0xff);
-
-        while (this.buf.length >= 64) {
-            transform(this.h, this.buf);
-            this.buf = this.buf.slice(64);
+        if (!this.finalized) {
+            this.finalized = true;
+            const blocks = this.blocks;
+            const i = this.lastByteIndex;
+            blocks[16] = this.block;
+            blocks[i >>> 2] |= EXTRA[i & 3];
+            this.block = blocks[16];
+            if (i >= 56) {
+                if (!this.hashed) this._compress();
+                blocks[0] = this.block;
+                blocks[16] = blocks[1] = blocks[2] = blocks[3] =
+                    blocks[4] = blocks[5] = blocks[6] = blocks[7] =
+                    blocks[8] = blocks[9] = blocks[10] = blocks[11] =
+                    blocks[12] = blocks[13] = blocks[14] = blocks[15] = 0;
+            }
+            blocks[14] = this.hBytes << 3 | this.bytes >>> 29;
+            blocks[15] = this.bytes << 3;
+            this._compress();
         }
 
-        let hex = '';
-        for (let i = 0; i < 8; i++) {
-            hex += ((this.h[i] >>> 24) & 0xff).toString(16).padStart(2, '0');
-            hex += ((this.h[i] >>> 16) & 0xff).toString(16).padStart(2, '0');
-            hex += ((this.h[i] >>> 8) & 0xff).toString(16).padStart(2, '0');
-            hex += (this.h[i] & 0xff).toString(16).padStart(2, '0');
-        }
+        const h0 = this.h0, h1 = this.h1, h2 = this.h2, h3 = this.h3;
+        const h4 = this.h4, h5 = this.h5, h6 = this.h6, h7 = this.h7;
 
-        return hex;
+        return HEXES[(h0 >>> 24) & 0xff] + HEXES[(h0 >>> 16) & 0xff] +
+            HEXES[(h0 >>> 8) & 0xff] + HEXES[h0 & 0xff] +
+            HEXES[(h1 >>> 24) & 0xff] + HEXES[(h1 >>> 16) & 0xff] +
+            HEXES[(h1 >>> 8) & 0xff] + HEXES[h1 & 0xff] +
+            HEXES[(h2 >>> 24) & 0xff] + HEXES[(h2 >>> 16) & 0xff] +
+            HEXES[(h2 >>> 8) & 0xff] + HEXES[h2 & 0xff] +
+            HEXES[(h3 >>> 24) & 0xff] + HEXES[(h3 >>> 16) & 0xff] +
+            HEXES[(h3 >>> 8) & 0xff] + HEXES[h3 & 0xff] +
+            HEXES[(h4 >>> 24) & 0xff] + HEXES[(h4 >>> 16) & 0xff] +
+            HEXES[(h4 >>> 8) & 0xff] + HEXES[h4 & 0xff] +
+            HEXES[(h5 >>> 24) & 0xff] + HEXES[(h5 >>> 16) & 0xff] +
+            HEXES[(h5 >>> 8) & 0xff] + HEXES[h5 & 0xff] +
+            HEXES[(h6 >>> 24) & 0xff] + HEXES[(h6 >>> 16) & 0xff] +
+            HEXES[(h6 >>> 8) & 0xff] + HEXES[h6 & 0xff] +
+            HEXES[(h7 >>> 24) & 0xff] + HEXES[(h7 >>> 16) & 0xff] +
+            HEXES[(h7 >>> 8) & 0xff] + HEXES[h7 & 0xff];
     }
 
     digest() {
