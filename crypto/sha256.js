@@ -24,7 +24,7 @@ function rotr(x, n) {
 }
 
 function transform(h, block) {
-    const w = new Uint32Array(64);
+    const w = new Array(64);
     for (let i = 0; i < 16; i++) {
         const off = i * 4;
         w[i] = (block[off] << 24) | (block[off + 1] << 16) |
@@ -52,20 +52,19 @@ function transform(h, block) {
         a = (temp1 + temp2) >>> 0;
     }
 
-    h[0] = (h[0] + a); h[1] = (h[1] + b);
-    h[2] = (h[2] + c); h[3] = (h[3] + d);
-    h[4] = (h[4] + e); h[5] = (h[5] + f);
-    h[6] = (h[6] + g); h[7] = (h[7] + hh);
+    h[0] = (h[0] + a) >>> 0; h[1] = (h[1] + b) >>> 0;
+    h[2] = (h[2] + c) >>> 0; h[3] = (h[3] + d) >>> 0;
+    h[4] = (h[4] + e) >>> 0; h[5] = (h[5] + f) >>> 0;
+    h[6] = (h[6] + g) >>> 0; h[7] = (h[7] + hh) >>> 0;
 }
 
 export class SHA256 {
     constructor() {
-        this.h = new Uint32Array([
+        this.h = [
             0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
             0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-        ]);
-        this.buf = new Uint8Array(256);
-        this.bufLen = 0;
+        ];
+        this.buf = [];
         this.len = 0;
     }
 
@@ -73,15 +72,14 @@ export class SHA256 {
         if (data instanceof ArrayBuffer) data = new Uint8Array(data);
         if (typeof data === 'string') data = new TextEncoder().encode(data);
 
-        if (this.bufLen > 0) {
-            const need = 64 - this.bufLen;
+        if (this.buf.length > 0) {
+            const need = 64 - this.buf.length;
             const take = Math.min(need, data.length);
-            this.buf.set(data.subarray(0, take), this.bufLen);
-            this.bufLen += take;
+            for (let i = 0; i < take; i++) this.buf.push(data[i]);
             this.len += take;
-            if (this.bufLen === 64) {
+            if (this.buf.length === 64) {
                 transform(this.h, this.buf);
-                this.bufLen = 0;
+                this.buf = [];
             }
             data = data.subarray(take);
         }
@@ -94,10 +92,8 @@ export class SHA256 {
         }
 
         if (off < data.length) {
-            const remaining = data.length - off;
-            this.buf.set(data.subarray(off), 0);
-            this.bufLen = remaining;
-            this.len += remaining;
+            for (let i = off; i < data.length; i++) this.buf.push(data[i]);
+            this.len += data.length - off;
         }
 
         return this;
@@ -105,35 +101,35 @@ export class SHA256 {
 
     hexdigest() {
         const savedLen = this.len;
+
         const zerosNeeded = (56 - (this.len + 1) % 64 + 64) % 64;
 
-        this.buf[this.bufLen++] = 0x80;
-        const padEnd = this.bufLen + zerosNeeded;
-        this.buf.fill(0, this.bufLen, padEnd);
-        this.bufLen = padEnd;
+        this.buf.push(0x80);
+        for (let i = 0; i < zerosNeeded; i++) this.buf.push(0);
 
         const bitLen = savedLen * 8;
         const bitLenHi = Math.floor(bitLen / 0x100000000) >>> 0;
         const bitLenLo = bitLen >>> 0;
-        this.buf[this.bufLen++] = (bitLenHi >>> 24) & 0xff;
-        this.buf[this.bufLen++] = (bitLenHi >>> 16) & 0xff;
-        this.buf[this.bufLen++] = (bitLenHi >>> 8) & 0xff;
-        this.buf[this.bufLen++] = bitLenHi & 0xff;
-        this.buf[this.bufLen++] = (bitLenLo >>> 24) & 0xff;
-        this.buf[this.bufLen++] = (bitLenLo >>> 16) & 0xff;
-        this.buf[this.bufLen++] = (bitLenLo >>> 8) & 0xff;
-        this.buf[this.bufLen++] = bitLenLo & 0xff;
+        this.buf.push((bitLenHi >>> 24) & 0xff);
+        this.buf.push((bitLenHi >>> 16) & 0xff);
+        this.buf.push((bitLenHi >>> 8) & 0xff);
+        this.buf.push(bitLenHi & 0xff);
+        this.buf.push((bitLenLo >>> 24) & 0xff);
+        this.buf.push((bitLenLo >>> 16) & 0xff);
+        this.buf.push((bitLenLo >>> 8) & 0xff);
+        this.buf.push(bitLenLo & 0xff);
 
-        while (this.bufLen >= 64) {
+        while (this.buf.length >= 64) {
             transform(this.h, this.buf);
-            this.buf.copyWithin(0, 64, this.bufLen);
-            this.bufLen -= 64;
+            this.buf = this.buf.slice(64);
         }
 
         let hex = '';
         for (let i = 0; i < 8; i++) {
-            const w = this.h[i];
-            hex += HEXES[(w >>> 24) & 0xff] + HEXES[(w >>> 16) & 0xff] + HEXES[(w >>> 8) & 0xff] + HEXES[w & 0xff];
+            hex += ((this.h[i] >>> 24) & 0xff).toString(16).padStart(2, '0');
+            hex += ((this.h[i] >>> 16) & 0xff).toString(16).padStart(2, '0');
+            hex += ((this.h[i] >>> 8) & 0xff).toString(16).padStart(2, '0');
+            hex += (this.h[i] & 0xff).toString(16).padStart(2, '0');
         }
 
         return hex;
@@ -149,9 +145,8 @@ export class SHA256 {
     }
 }
 
-export async function sha256(data) {
-    if (data instanceof ArrayBuffer) data = new Uint8Array(data);
-    const hash = new SHA256();
-    hash.update(data);
-    return hash.hexdigest();
+export function sha256(data) {
+    const h = new SHA256();
+    h.update(data);
+    return h.hexdigest();
 }
