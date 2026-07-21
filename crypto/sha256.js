@@ -205,8 +205,33 @@ export class SHA256 {
     }
 }
 
-export function sha256(data) {
+let wasmHasher = null;
+let wasmHasherReady = null;
+
+function initWasmHasher() {
+    if (wasmHasherReady) return wasmHasherReady;
+    wasmHasherReady = (async () => {
+        try {
+            const { createSHA256 } = await import('../static/hash-wasm.mjs');
+            wasmHasher = await createSHA256();
+        } catch {
+            wasmHasher = null;
+        }
+    })();
+    return wasmHasherReady;
+}
+
+export async function sha256(data) {
+    if (!wasmHasher) await initWasmHasher();
+    if (wasmHasher) {
+        wasmHasher.update(data);
+        const hex = wasmHasher.digest('hex');
+        await wasmHasher.init();
+        return hex;
+    }
     const h = new SHA256();
     h.update(data);
     return h.hexdigest();
 }
+
+export { initWasmHasher };
