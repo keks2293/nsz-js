@@ -83,6 +83,17 @@ Prioritized areas for improvement identified 2026-05-30.
 
 ## Speed Optimization
 
+- ✅ **Use node:zlib for block decompression on Node.js** — `fs/ncz.js:443-445`. Block decompression now uses `node:zlib` (`zstdDecompressSync`) on Node.js instead of WASM (`ZstdDecompressor.decompressBuffer`). Streaming already used zstd CLI (spawn). Benchmark on Trackline Express (109 MB) and Little Nightmares II (580 MB):
+
+    **Block mode** (1MB blocks, sequential):
+    | Method | Trackline 109MB | LN2 580MB |
+    |---|---|---|
+    | node:zlib sync | **196ms** | **1715ms** |
+    | zstddec WASM | 249ms (+27%) | 2264ms (+32%) |
+    | zstd CLI | 1121ms (5.7x) | 10611ms (6.2x) |
+
+    Browser fallback remains WASM.
+
 - ❌ **`_safeView()` method for WASM memory copy safety** — `crypto/zstd.js`. Добавляли статический метод `_safeView(data)` который проверял `data.buffer === wasmBuffer` и делал `slice(0)` только для WASM views. Применяли в `decompressBuffer` и `decodeStream`. **Что проверили**:
     - **Memory grow**: бенчмарк показал 0 grows за 1600 yields (200MB файл). WASM memory не растёт при декомпрессии — начальный аллокации достаточно.
     - **Speedup от removes slice(0)**: 101.6ms vs 129.7ms (22% экономия) на 200MB.
