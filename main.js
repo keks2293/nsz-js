@@ -2,6 +2,9 @@ import { NSZConverter } from './converter.js';
 import { ZstdDecompressor } from './crypto/zstd.js';
 
 class SWDownloader {
+    #streamError = '';
+    #swMsgHandler = null;
+
     constructor(outputName, iframe) {
         const base = location.pathname.substring(0, location.pathname.lastIndexOf('/') + 1) || '/';
         this.streamUrl = (base + 'download/' + crypto.randomUUID()).replace(/\/+/g, '/');
@@ -14,6 +17,9 @@ class SWDownloader {
         const reg = await navigator.serviceWorker.ready;
         this.sw = reg.active;
         if (!this.sw) throw new Error('No active service worker');
+
+        this.#swMsgHandler = e => this.#onSWMsg(e);
+        navigator.serviceWorker.addEventListener('message', this.#swMsgHandler);
 
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
@@ -34,6 +40,12 @@ class SWDownloader {
         });
     }
 
+    #onSWMsg(e) {
+        if (e.data.type === 'error' && e.data.url === this.streamUrl) {
+            this.#streamError = e.data.message;
+        }
+    }
+
     triggerDownload() {
         const url = this.streamUrl + '?name=' + encodeURIComponent(this.outputName);
         if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
@@ -45,6 +57,7 @@ class SWDownloader {
 
     async write({ type, position, data }) {
         if (type !== 'write' || !this.sw) return;
+        if (this.#streamError) throw new Error('SW stream lost (' + this.#streamError + ')');
         const view = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
         const wasmMem = ZstdDecompressor.wasmBuffer;
         const chunk = (wasmMem && view.buffer === wasmMem) ? view.slice(0) : view;
@@ -52,6 +65,10 @@ class SWDownloader {
     }
 
     async close() {
+        if (this.#swMsgHandler) {
+            navigator.serviceWorker.removeEventListener('message', this.#swMsgHandler);
+            this.#swMsgHandler = null;
+        }
         if (this.sw) this.sw.postMessage({ type: 'end', url: this.streamUrl });
     }
 }
@@ -431,6 +448,9 @@ async function main() {
                             await navigator.serviceWorker.register('download-worker.js');
                             await navigator.serviceWorker.ready;
                             window._swRegistered = true;
+                            navigator.serviceWorker.addEventListener('message', e => {
+                                if (e.data.type === 'error') addLog('error', '[SW] ' + e.data.message);
+                            });
                             addLog('info', 'SW ready');
                         }
                         const dl = new SWDownloader(outputName, fileIframes[i]);

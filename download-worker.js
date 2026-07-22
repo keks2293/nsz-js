@@ -1,4 +1,5 @@
 const streams = new Map();
+const reasons = new Map();
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
@@ -15,11 +16,13 @@ self.addEventListener('message', e => {
                 resolveController(controller);
             },
             cancel() {
+                reasons.set(url, 'cancelled');
                 streams.delete(url);
             }
         });
 
         streams.set(url, { stream, controllerReady, fileName: e.data.fileName });
+        reasons.delete(url);
         console.log('[SW] registered stream for', url);
         e.source.postMessage({ type: 'ready', url });
         return;
@@ -27,19 +30,22 @@ self.addEventListener('message', e => {
 
     const entry = streams.get(url);
     if (!entry) {
-        console.warn('[SW] no stream for', url);
+        const reason = reasons.get(url) || 'not-registered';
+        console.warn('[SW] no stream for', url, 'reason:', reason);
+        e.source.postMessage({ type: 'error', url, message: reason });
         return;
     }
 
     if (type === 'data') {
         entry.controllerReady.then(c => {
-            console.log('[SW] enqueue', e.data.chunk.byteLength, 'bytes to', url);
             c.enqueue(new Uint8Array(e.data.chunk));
         });
     } else if (type === 'end') {
         console.log('[SW] close stream for', url);
+        reasons.set(url, 'closed');
         entry.controllerReady.then(c => { c.close(); streams.delete(url); });
     } else if (type === 'error') {
+        reasons.set(url, 'error');
         entry.controllerReady.then(c => { c.error(new Error(e.data.message)); streams.delete(url); });
     }
 });
