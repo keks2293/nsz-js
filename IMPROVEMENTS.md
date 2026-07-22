@@ -83,6 +83,12 @@ Prioritized areas for improvement identified 2026-05-30.
 
 ## Speed Optimization
 
+- ❌ **`_safeView()` method for WASM memory copy safety** — `crypto/zstd.js`. Добавляли статический метод `_safeView(data)` который проверял `data.buffer === wasmBuffer` и делал `slice(0)` только для WASM views. Применяли в `decompressBuffer` и `decodeStream`. **Что проверили**:
+    - **Memory grow**: бенчмарк показал 0 grows за 1600 yields (200MB файл). WASM memory не растёт при декомпрессии — начальный аллокации достаточно.
+    - **Speedup от removes slice(0)**: 101.6ms vs 129.7ms (22% экономия) на 200MB.
+    - **Transferable проблема**: убрали `slice(0)` из `decodeStream` — consumer (`ncz.js`) обрабатывает chunk синхронно в `for await`. Но `main.js:write()` делает `postMessage` с Transferable (`[view.buffer]`). WASM ArrayBuffer не detachable → ошибка `Failed to execute 'postMessage'`. Сломалось на unencrypted секциях (cryptoType 0/1) где `data` — view через `subarray` без AES decrypt.
+    - **Итог**: `_safeView` удалён целиком. `decompressBuffer` — возвращаем к исходному `sharedDecoder.decode(data, 0)` без копии (consumer обрабатывает до следующего `decode()`). `decodeStream` — без `slice(0)` (memory не растёт). `main.js:write()` — проверка `view.buffer === wasmMem` и копия только для WASM views перед `postMessage`.
+
 - ✅ **Optimize SW slice(0) copy** — `SWDownloader.write()` now checks if data is a WASM memory view via `view.buffer === wasmInstance.exports.memory.buffer`. WASM views still get `slice(0)`, standalone buffers (e.g. WebCrypto output) are transferred directly. Added `ZstdDecompressor.wasmBuffer` getter. No copy for ~90%+ of data (encrypted sections).
 
 - ✅ **Remove CLI Buffer.from(chunk) copies** — `nsz-cli.js` used `Buffer.from(chunk)` before `fs.writeSync`. Removed — `fs.writeSync` accepts Uint8Array directly, no copy needed.
