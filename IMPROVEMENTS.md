@@ -74,11 +74,12 @@ Prioritized areas for improvement identified 2026-05-30.
   - **Bug fixed**: hexdigest was using `this.start` for padding position, but after full-block compress `this.start` resets to 0 while the last byte was at position 64. Original js-sha256 tracks `lastByteIndex = i` separately. This caused stale message data in `blocks[0]` to be OR'd with padding bit, producing wrong hashes for exact-multiple-of-64 inputs (64, 128, 512, 1024, 1048576... bytes).
   - **Benchmark**: 3000ms → 2063ms for 300MB (31% faster). Node native: 114ms. hash-wasm pool: 1240ms.
 
-- ✅ **hash-wasm WASM** — `crypto/sha256.js`, `static/hash-wasm.mjs`. Single hash-wasm WASM instance, lazy init. `sha256()`: update+digest+reset. Falls back to pure JS if WASM unavailable. Streaming class `SHA256` remains sync/pure-JS for `converter.js` adapter pattern.
+- ❌ **hash-wasm WASM — reverted** — `crypto/sha256.js`, `static/hash-wasm.mjs`. Single hash-wasm WASM instance, lazy init. `sha256()`: update+digest+reset. Falls back to pure JS if WASM unavailable. Streaming class `SHA256` remains sync/pure-JS for `converter.js` adapter pattern.
   - **Benchmark**: WASM 893ms vs JS 2048ms for 300MB (2.3x faster). Node native: 114ms.
   - **Bundle impact**: +78KB gzipped (132KB → 210KB raw, 51KB → 129KB gzipped). WASM binary base64-embedded in hash-wasm JS.
   - **API change**: `sha256()` is now async (returns Promise). All callers already `await` it. `SHA256` class unchanged.
   - **Pool reset**: hash-wasm requires `init()` after `digest()` before reuse. Release handler calls `h.init()` before returning to pool.
+  - **Reverted**: синтетический бенчмарк (300MB one-shot) показывает 2.3x ускорение, но в реальном конвейере NSZ→NSP хеширование идёт мелкими чанками во время декомпрессии zstd — основной bottleneck. hash-wasm async API несовместим с sync streaming паттерном `SHA256` class + `createHash()` adapter. Добавляет +78KB gzipped в bundle без реального выигрыша в conversion time. Реальные замеры на Trackline Express (0.21 GB): JS 4789ms vs WASM 6362ms — **медленнее на 33%**.
 
 ## Speed Optimization
 
