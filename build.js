@@ -3,7 +3,7 @@ import { execSync } from 'child_process';
 
 const ENTRY = 'main.js';
 const OUT = 'app.mjs';
-const ASSETS = ['favicon.svg', 'download-worker.js'];
+const ASSETS = ['favicon.svg', 'download-worker.js', 'sw.js'];
 
 mkdirSync('out', { recursive: true });
 execSync(`npx esbuild ${ENTRY} --bundle --minify --format=esm --outfile=out/${OUT} --external:node:fs --external:node:child_process --external:node:crypto --external:crypto`, { stdio: 'inherit' });
