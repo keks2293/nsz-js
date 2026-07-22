@@ -1,6 +1,6 @@
-import { ZstdDecompressor } from '../crypto/zstd.js';
 import { AesCtr } from '../crypto/aes-ops.mjs';
 
+const isNode = typeof process !== 'undefined' && process.versions?.node;
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
 const SECTION_CHUNK_SIZE = 0x1000000; // 16MB
 
@@ -238,7 +238,7 @@ class NCZDecompressor {
             return decompOffset + chunk.length;
         };
 
-        if (typeof process !== 'undefined' && process.versions && process.versions.node) {
+        if (isNode) {
             console.log('[ZSTD] Using zstd CLI for Node.js streaming');
             const { spawn } = await import('node:child_process');
             const proc = spawn('zstd', ['-d', '--no-check'], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -435,7 +435,13 @@ class AsyncBlockDecompressorReader {
         const compressedData = await this.reader.read(this.baseOffset + relOffset, compressedSize);
 
         if (compressedSize < decompressedSize) {
-            this.currentBlock = await ZstdDecompressor.decompressBuffer(compressedData);
+            if (isNode) {
+                const { zstdDecompressSync } = await import('node:zlib');
+                this.currentBlock = new Uint8Array(zstdDecompressSync(compressedData));
+            } else {
+                const { ZstdDecompressor } = await import('../crypto/zstd.js');
+                this.currentBlock = await ZstdDecompressor.decompressBuffer(compressedData);
+            }
         } else {
             this.currentBlock = compressedData;
         }
