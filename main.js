@@ -21,15 +21,9 @@ class SWDownloader {
         this.#swMsgHandler = e => this.#onSWMsg(e);
         navigator.serviceWorker.addEventListener('message', this.#swMsgHandler);
 
-        return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                navigator.serviceWorker.removeEventListener('message', onMessage);
-                reject(new Error('SW download start timed out'));
-            }, 5000);
-
+        return new Promise((resolve) => {
             const onMessage = (e) => {
                 if (e.data.type === 'ready' && e.data.url === this.streamUrl) {
-                    clearTimeout(timeout);
                     navigator.serviceWorker.removeEventListener('message', onMessage);
                     resolve();
                 }
@@ -445,19 +439,24 @@ async function main() {
                 if (!writable && (downloadMode === 'sw' || downloadMode === 'fsa') && 'serviceWorker' in navigator && location.protocol !== 'file:') {
                     try {
                         if (!window._swRegistered) {
-                            await navigator.serviceWorker.register('download-worker.js');
-                            await navigator.serviceWorker.ready;
+                            addLog('info', 'Starting SW...');
+                            let reg = await navigator.serviceWorker.getRegistration();
+                            if (!reg || reg.installing || reg.waiting) {
+                                if (reg) await reg.unregister();
+                                reg = await navigator.serviceWorker.register('download-worker.js');
+                            }
+                            if (!reg.active) {
+                                await navigator.serviceWorker.ready;
+                            }
                             window._swRegistered = true;
-                            navigator.serviceWorker.addEventListener('message', e => {
-                                if (e.data.type === 'error') addLog('error', '[SW] ' + e.data.message);
-                            });
-                            addLog('info', 'SW ready');
+                            addLog('info', 'SW active');
                         }
                         const dl = new SWDownloader(outputName, fileIframes[i]);
+                        addLog('info', 'Connecting to SW...');
                         await dl.start();
                         dl.triggerDownload();
                         writable = dl;
-                        addLog('info', 'Using SW streaming');
+                        addLog('info', 'Stream ready');
                     } catch (e) {
                         addLog('info', 'SW not available: ' + e.message);
                     }
