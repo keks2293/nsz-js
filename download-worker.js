@@ -55,12 +55,12 @@ self.addEventListener('fetch', e => {
     const match = url.pathname.match(/\/download\/([^/]+)$/);
     if (match) {
         const entry = streams.get(url.pathname);
-        console.log('[SW] fetch', url.pathname, 'found:', !!entry, 'keys:', [...streams.keys()]);
+        console.log('[SW] fetch', url.pathname, 'found:', !!entry);
         if (entry) {
             e.respondWith(new Response(entry.stream, {
                 headers: {
                     'Content-Type': 'application/octet-stream',
-                    'Content-Disposition': `attachment; filename="${url.searchParams.get('name') || 'download'}"`
+                    'Content-Disposition': `attachment; filename="${(url.searchParams.get('name') || 'download').replace(/[\x00-\x1f\x7f"\\]/g, '_')}"`
                 }
             }));
         }
