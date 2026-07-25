@@ -153,27 +153,29 @@ export class SHA256 {
         return this;
     }
 
-    hexdigest() {
-        if (!this.finalized) {
-            this.finalized = true;
-            const blocks = this.blocks;
-            const i = this.lastByteIndex;
-            blocks[16] = this.block;
-            blocks[i >>> 2] |= EXTRA[i & 3];
-            this.block = blocks[16];
-            if (i >= 56) {
-                if (!this.hashed) this._compress();
-                blocks[0] = this.block;
-                blocks[16] = blocks[1] = blocks[2] = blocks[3] =
-                    blocks[4] = blocks[5] = blocks[6] = blocks[7] =
-                    blocks[8] = blocks[9] = blocks[10] = blocks[11] =
-                    blocks[12] = blocks[13] = blocks[14] = blocks[15] = 0;
-            }
-            blocks[14] = this.hBytes << 3 | this.bytes >>> 29;
-            blocks[15] = this.bytes << 3;
-            this._compress();
+    _finalize() {
+        if (this.finalized) return;
+        this.finalized = true;
+        const blocks = this.blocks;
+        const i = this.lastByteIndex;
+        blocks[16] = this.block;
+        blocks[i >>> 2] |= EXTRA[i & 3];
+        this.block = blocks[16];
+        if (i >= 56) {
+            if (!this.hashed) this._compress();
+            blocks[0] = this.block;
+            blocks[16] = blocks[1] = blocks[2] = blocks[3] =
+                blocks[4] = blocks[5] = blocks[6] = blocks[7] =
+                blocks[8] = blocks[9] = blocks[10] = blocks[11] =
+                blocks[12] = blocks[13] = blocks[14] = blocks[15] = 0;
         }
+        blocks[14] = this.hBytes << 3 | this.bytes >>> 29;
+        blocks[15] = this.bytes << 3;
+        this._compress();
+    }
 
+    hex() {
+        this._finalize();
         const h0 = this.h0, h1 = this.h1, h2 = this.h2, h3 = this.h3;
         const h4 = this.h4, h5 = this.h5, h6 = this.h6, h7 = this.h7;
 
@@ -196,17 +198,25 @@ export class SHA256 {
     }
 
     digest() {
-        const hex = this.hexdigest();
-        const result = new Uint8Array(32);
-        for (let i = 0; i < 32; i++) {
-            result[i] = parseInt(hex.substr(i * 2, 2), 16);
-        }
-        return result;
+        this._finalize();
+        const h0 = this.h0, h1 = this.h1, h2 = this.h2, h3 = this.h3;
+        const h4 = this.h4, h5 = this.h5, h6 = this.h6, h7 = this.h7;
+        return new Uint8Array([
+            (h0 >>> 24) & 0xff, (h0 >>> 16) & 0xff, (h0 >>> 8) & 0xff, h0 & 0xff,
+            (h1 >>> 24) & 0xff, (h1 >>> 16) & 0xff, (h1 >>> 8) & 0xff, h1 & 0xff,
+            (h2 >>> 24) & 0xff, (h2 >>> 16) & 0xff, (h2 >>> 8) & 0xff, h2 & 0xff,
+            (h3 >>> 24) & 0xff, (h3 >>> 16) & 0xff, (h3 >>> 8) & 0xff, h3 & 0xff,
+            (h4 >>> 24) & 0xff, (h4 >>> 16) & 0xff, (h4 >>> 8) & 0xff, h4 & 0xff,
+            (h5 >>> 24) & 0xff, (h5 >>> 16) & 0xff, (h5 >>> 8) & 0xff, h5 & 0xff,
+            (h6 >>> 24) & 0xff, (h6 >>> 16) & 0xff, (h6 >>> 8) & 0xff, h6 & 0xff,
+            (h7 >>> 24) & 0xff, (h7 >>> 16) & 0xff, (h7 >>> 8) & 0xff, h7 & 0xff
+        ]);
     }
+
 }
 
 export function sha256(data) {
     const h = new SHA256();
     h.update(data);
-    return h.hexdigest();
+    return h.hex();
 }

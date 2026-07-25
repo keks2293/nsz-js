@@ -159,7 +159,7 @@ async function writePartitions(adapter, partitionMetas, layout, keys, verify, op
                         await adapter.write(writePos + offset, chunk);
                     });
                 if (hasher) {
-                    const hash = hasher.digest();
+                    const hash = hasher.hex();
                     log('info', `  [NCA HASH]   ${hash}`);
                     if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
                         const ncaId = meta.name.replace(/\.nca$/i, '');
