@@ -64,7 +64,7 @@ async function convertNSZStreaming(pfs0, keys, adapter, options, cnmtHashes = ne
                     await adapter.write(writePos + offset, chunk);
                 });
             if (hasher) {
-                const hash = hasher.digest();
+                const hash = hasher.hex();
                 options.log('info', `[NCA HASH]   ${hash}`);
                 if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
                     const ncaId = meta.name.replace(/\.nca$/i, '');
