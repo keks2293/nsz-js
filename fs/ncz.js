@@ -202,22 +202,21 @@ class NCZDecompressor {
             }
         }
 
+        let sectionIdx = 0;
         const processChunk = async (chunk, decompOffset) => {
             let offset = 0;
             let lastAesCtr = null;
             let lastDecryptEnd = -1;
             while (offset < chunk.length) {
                 const ncaPos = decompOffset + offset;
-                let lo = 0, hi = sortedSections.length;
-                while (lo < hi) {
-                    const mid = (lo + hi) >>> 1;
-                    if (ncaPos >= sortedSections[mid].offset + sortedSections[mid].size) lo = mid + 1;
-                    else hi = mid;
+                while (sectionIdx < sortedSections.length - 1 &&
+                       ncaPos >= sortedSections[sectionIdx].offset + sortedSections[sectionIdx].size) {
+                    sectionIdx++;
                 }
                 let aesCtr = null;
                 let boundary = chunk.length;
-                if (lo < sortedSections.length) {
-                    const s = sortedSections[lo];
+                if (sectionIdx < sortedSections.length) {
+                    const s = sortedSections[sectionIdx];
                     aesCtr = sectionAesCtrs.get(s) || null;
                     boundary = Math.min(chunk.length, offset + (s.offset + s.size - ncaPos));
                 }
