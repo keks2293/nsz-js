@@ -157,7 +157,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputDir, keys, verify,
             progress: () => {},
             createHash: () => {
                 const h = crypto.createHash('sha256');
-                return { update: (d) => h.update(d), digest: () => h.digest('hex') };
+                return { update: (d) => h.update(d), hex: () => h.digest('hex') };
             },
             extractCnmtHashMap: makeExtractCnmtHashMap(keys),
         });
@@ -197,7 +197,7 @@ async function convertNSZ(inReader, inputFd, inputPath, outputDir, keys, fixPadd
             progress: () => {},
             createHash: () => {
                 const h = crypto.createHash('sha256');
-                return { update: (d) => h.update(d), digest: () => h.digest('hex') };
+                return { update: (d) => h.update(d), hex: () => h.digest('hex') };
             },
             extractCnmtHashMap: makeExtractCnmtHashMap(keys),
         });
