@@ -70,51 +70,6 @@ class BufferReader extends DataReader {
     }
 }
 
-class ChunkedBufferReader extends DataReader {
-    constructor(chunks, totalLength) {
-        super();
-        this.chunks = chunks;
-        this._length = totalLength;
-        this.chunkOffsets = [];
-        let offset = 0;
-        for (const chunk of chunks) {
-            this.chunkOffsets.push(offset);
-            offset += chunk.length;
-        }
-    }
-
-    get length() {
-        return this._length;
-    }
-
-    async read(offset, size) {
-        if (size === 0) return new Uint8Array(0);
-        // Find the chunk containing offset
-        let ci = 0;
-        for (let i = this.chunkOffsets.length - 1; i >= 0; i--) {
-            if (offset >= this.chunkOffsets[i]) {
-                ci = i;
-                break;
-            }
-        }
-        const chunkStart = this.chunkOffsets[ci];
-        const chunk = this.chunks[ci];
-        const relOffset = offset - chunkStart;
-        const available = chunk.length - relOffset;
-        if (available >= size) {
-            return chunk.subarray(relOffset, relOffset + size);
-        }
-        // Crosses chunk boundary: read both parts
-        const first = chunk.subarray(relOffset);
-        const remaining = size - first.length;
-        const second = await this.read(offset + first.length, remaining);
-        const result = new Uint8Array(size);
-        result.set(first, 0);
-        result.set(second, first.length);
-        return result;
-    }
-}
-
 class NCZSection {
     constructor(data, offset) {
         this.offset = Number(readBigUInt64LE(data, offset));
@@ -471,4 +426,4 @@ class AsyncBlockDecompressorReader {
     }
 }
 
-export { NCZDecompressor, DataReader, AdapterNCZReader, BufferReader, ChunkedBufferReader, READ_CHUNK_SIZE };
+export { NCZDecompressor, DataReader, AdapterNCZReader, BufferReader, READ_CHUNK_SIZE };
