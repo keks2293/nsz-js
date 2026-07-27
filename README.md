@@ -103,7 +103,7 @@ nsz-js/
 - **main.js** - UI controller handling file selection, drag-drop, conversion triggers, and progress updates
 - **converter.js** - Core converter class `NSZConverter` that orchestrates NCZ decompression, PFS0 rebuilding, and hash verification
 - **fs/pfs0.js** - `PFS0Reader` and `PFS0Writer` classes for parsing and building PFS0 containers
-- **fs/ncz.js** - `NCZDecompressor` class for decompressing NCZ files with section-based, block-based (NCZBLOCK), and streaming compression. Contains DataReader hierarchy (`DataReader`, `BufferReader`, `ChunkedBufferReader`, `FileDescriptorReader`) and `AsyncBlockDecompressorReader`
+- **fs/ncz.js** - `NCZDecompressor` class for decompressing NCZ files with section-based, block-based (NCZBLOCK), and streaming compression. Contains DataReader hierarchy (`DataReader`, `BufferReader`) and `AsyncBlockDecompressorReader`
 - **fs/xci.js** - `XCIReader` for XCI container support
 - **fs/hfs0.js** - `HFS0Reader` and `HFS0Writer` for HFS0 container support
 - **fs/ticket.js** - `Ticket` class for parsing ticket files
