@@ -1,4 +1,4 @@
-import { NCZDecompressor, AdapterNCZReader } from './ncz.js';
+import { NCZDecompressor, AdapterNCZReader, parseNczSections } from './ncz.js';
 import { HFS0Writer } from './hfs0.js';
 import { XCIReader } from './xci.js';
 import { sha256 } from '../crypto/sha256.js';
@@ -66,8 +66,7 @@ async function buildPartitionMetas(xci, keys, verify, adapter, extractCnmtHashMa
             const outputName = isNcz ? f.name.replace(/\.ncz$/i, '.nca') : f.name;
             if (isNcz) {
                 const headerReader = new AdapterNCZReader(adapter, f.offset, Math.min(f.size, 0x10000));
-                const tmpDecomp = new NCZDecompressor(headerReader, keys);
-                const { ncaSize } = await tmpDecomp.getSections();
+                const { ncaSize } = await parseNczSections(headerReader);
                 fileMetas.push({ name: outputName, size: ncaSize, isNcz: true, offset: f.offset, nczLen: f.size, inputName: f.name });
             } else {
                 fileMetas.push({ name: outputName, size: f.size, isNcz: false, offset: f.offset, inputName: f.name });

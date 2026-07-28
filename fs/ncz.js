@@ -102,6 +102,54 @@ class FakeSection {
     }
 }
 
+async function parseNczSections(reader) {
+    const magicBytes = await reader.read(0, 8);
+    const magic = bytesToAscii(magicBytes, 0, 8);
+    console.log('[NCZ] magic at offset 0:', JSON.stringify(magic));
+
+    let nczhdrOffset = 0;
+    let ncaHeader = null;
+    if (magic !== 'NCZSECTN') {
+        const magicAt4000Bytes = await reader.read(UNCOMPRESSABLE_HEADER_SIZE, 8);
+        const magicAt4000 = bytesToAscii(magicAt4000Bytes, 0, 8);
+        console.log('[NCZ] magic at offset 0x4000:', JSON.stringify(magicAt4000));
+        if (magicAt4000 === 'NCZSECTN') {
+            console.log('[NCZ] NCA header detected at offset 0, NCZSECTN at 0x4000');
+            ncaHeader = await reader.read(0, UNCOMPRESSABLE_HEADER_SIZE);
+            nczhdrOffset = UNCOMPRESSABLE_HEADER_SIZE;
+        } else {
+            throw new Error(`Invalid NCZ magic: ${magic} (at 0) / ${magicAt4000} (at 0x4000)`);
+        }
+    }
+
+    let offset = nczhdrOffset + 8;
+    const sectionCountBytes = await reader.read(offset, 8);
+    const sectionCount = Number(readBigUInt64LE(sectionCountBytes, 0));
+    console.log('[NCZ] sectionCount:', sectionCount);
+    offset += 8;
+
+    const sections = [];
+    for (let i = 0; i < sectionCount; i++) {
+        const sectionData = await reader.read(offset, 64);
+        sections.push(new NCZSection(sectionData, 0));
+        offset += 64;
+    }
+
+    if (sections[0].offset - UNCOMPRESSABLE_HEADER_SIZE > 0) {
+        sections.unshift(new FakeSection(
+            UNCOMPRESSABLE_HEADER_SIZE,
+            sections[0].offset - UNCOMPRESSABLE_HEADER_SIZE
+        ));
+    }
+
+    let ncaSize = UNCOMPRESSABLE_HEADER_SIZE;
+    for (const s of sections) {
+        ncaSize += s.size;
+    }
+
+    return { sections, ncaSize, headerEnd: offset, ncaHeader };
+}
+
 class NCZDecompressor {
     constructor(data, keys = null) {
         if (data instanceof DataReader) {
@@ -110,11 +158,10 @@ class NCZDecompressor {
             this.reader = new BufferReader(data);
         }
         this.keys = keys;
-        this.ncaHeader = null;
     }
 
     async decompress(progressCallback = null, writeChunk = null) {
-        const { sections, ncaSize, headerEnd } = await this.getSections();
+        const { sections, ncaSize, headerEnd, ncaHeader } = await parseNczSections(this.reader);
         console.log('[NCZ] sections:', sections.length, 'ncaSize:', ncaSize, 'headerEnd:', headerEnd);
 
         let useBlock = false;
@@ -126,10 +173,10 @@ class NCZDecompressor {
         }
 
         if (writeChunk) {
-            if (this.ncaHeader) await writeChunk(this.ncaHeader, 0);
+            if (ncaHeader) await writeChunk(ncaHeader, 0);
         } else {
             const output = allocByte(ncaSize);
-            if (this.ncaHeader) output.set(this.ncaHeader, 0);
+            if (ncaHeader) output.set(ncaHeader, 0);
             const wfn = async (chunk, pos) => output.set(chunk, pos);
 
             if (useBlock) {
@@ -292,53 +339,6 @@ class NCZDecompressor {
         }
     }
 
-    async getSections() {
-        const magicBytes = await this.reader.read(0, 8);
-        const magic = bytesToAscii(magicBytes, 0, 8);
-        console.log('[NCZ] magic at offset 0:', JSON.stringify(magic));
-
-        let nczhdrOffset = 0;
-        if (magic !== 'NCZSECTN') {
-            const magicAt4000Bytes = await this.reader.read(UNCOMPRESSABLE_HEADER_SIZE, 8);
-            const magicAt4000 = bytesToAscii(magicAt4000Bytes, 0, 8);
-            console.log('[NCZ] magic at offset 0x4000:', JSON.stringify(magicAt4000));
-            if (magicAt4000 === 'NCZSECTN') {
-                console.log('[NCZ] NCA header detected at offset 0, NCZSECTN at 0x4000');
-                this.ncaHeader = await this.reader.read(0, UNCOMPRESSABLE_HEADER_SIZE);
-                nczhdrOffset = UNCOMPRESSABLE_HEADER_SIZE;
-            } else {
-                throw new Error(`Invalid NCZ magic: ${magic} (at 0) / ${magicAt4000} (at 0x4000)`);
-            }
-        }
-
-        let offset = nczhdrOffset + 8;
-        const sectionCountBytes = await this.reader.read(offset, 8);
-        const sectionCount = Number(readBigUInt64LE(sectionCountBytes, 0));
-        console.log('[NCZ] sectionCount:', sectionCount);
-        offset += 8;
-
-        const sections = [];
-        for (let i = 0; i < sectionCount; i++) {
-            const sectionData = await this.reader.read(offset, 64);
-            sections.push(new NCZSection(sectionData, 0));
-            offset += 64;
-        }
-
-        if (sections[0].offset - UNCOMPRESSABLE_HEADER_SIZE > 0) {
-            sections.unshift(new FakeSection(
-                UNCOMPRESSABLE_HEADER_SIZE,
-                sections[0].offset - UNCOMPRESSABLE_HEADER_SIZE
-            ));
-        }
-
-        let ncaSize = UNCOMPRESSABLE_HEADER_SIZE;
-        for (const s of sections) {
-            ncaSize += s.size;
-        }
-
-        return { sections, ncaSize, headerEnd: offset };
-    }
-
 
 }
 
@@ -426,4 +426,4 @@ class AsyncBlockDecompressorReader {
     }
 }
 
-export { NCZDecompressor, DataReader, AdapterNCZReader, BufferReader, READ_CHUNK_SIZE };
+export { NCZDecompressor, DataReader, AdapterNCZReader, BufferReader, READ_CHUNK_SIZE, parseNczSections };
