@@ -1,5 +1,5 @@
 import { PFS0Writer } from './pfs0.js';
-import { NCZDecompressor, AdapterNCZReader } from './ncz.js';
+import { NCZDecompressor, AdapterNCZReader, parseNczSections } from './ncz.js';
 import { PFS0 } from './pfs0.js';
 import { sha256 } from '../crypto/sha256.js';
 import { extractContentHashMap } from './cnmt-hashes.js';
@@ -106,8 +106,7 @@ async function collectOutputMeta(files, adapter, keys) {
         const outputName = isNcz ? f.name.slice(0, -4) + '.nca' : f.name;
         if (isNcz) {
             const headerReader = new AdapterNCZReader(adapter, f.offset, Math.min(f.size, 0x10000));
-            const tmpDecomp = new NCZDecompressor(headerReader, keys);
-            const { ncaSize } = await tmpDecomp.getSections();
+            const { ncaSize } = await parseNczSections(headerReader);
             outputMeta.push({ name: outputName, size: ncaSize, isNcz: true, offset: f.offset, nczLen: f.size });
         } else {
             outputMeta.push({ name: outputName, size: f.size, isNcz: false, offset: f.offset });
