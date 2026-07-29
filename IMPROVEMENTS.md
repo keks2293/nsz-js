@@ -136,6 +136,22 @@ Prioritized areas for improvement identified 2026-05-30.
 
 
 
+## Refactoring Ideas
+
+- ✅ **Extract `parseNczSections(reader)` as standalone function** — `fs/ncz.js`. `collectOutputMeta` (`fs/nsz-convert.js:108-110`) and `xcz-convert.js:68-70` created `new NCZDecompressor(reader, keys)` только ради `getSections()`. `keys` не использовались. **Фикс**: `parseNczSections(reader)` — standalone function, возвращает `{ sections, ncaSize, headerEnd, ncaHeader }`. Мёртвый `NCZDecompressor` удалён.
+
+- ✅ **`NCZSection` — constructor-only data class, zero methods** — `fs/ncz.js`. Only instantiated in `parseNczSections()`, no methods. Matches Python nsz `Header.Section` pattern. Kept as class.
+
+- ⏳ **`NCZBlockHeader` — 4 of 7 parsed fields never read** — `fs/ncz.js`. `originalSize`, `checksum`, `blockSize`, `numBlocks` are parsed but never accessed downstream. Only `magic`, `numSections`, `sectionSize` are used. **Ожидает доработки** — как в Python nsz `Header.Block`, можно начать использовать все поля.
+
+- ⏳ **`NCAHeader` — static-only class, never instantiated** — `fs/nca.js`. `getContentTypeName()` is never called. Only `parse()` is used. **Ожидает доработки** — как в Python nsz `NcaHeader`: full class inheriting `File` с `open()`, getters/setters, instance state.
+
+- ⏳ **`Cnmt` — static-only class, wrapper around `parse()`** — `fs/cnmt.js`. No instance state, no methods beyond `parse()`. **Ожидает доработки** — как в Python nsz `Cnmt`: full class с instance state (`titleId`, `version`, `contentEntries`, `metaEntries`), метод `printInfo()`.
+
+- ❌ **`MetaEntry` — parsed in `Cnmt.parse()` but result never read** — `fs/cnmt.js:65`. `metaEntries` array is built but never accessed downstream. Python nsz `MetaEntry` — also never used (not even in `printInfo()`). Kept for CNMT format navigation — parsing meta entries advances the read position correctly through the binary structure. **Keeping as-is** — matches Python nsz pattern.
+
+- ❌ **`AesEcb` — builds encrypt+decrypt key schedule, only decrypt used in keys.js** — `crypto/aes128.js`, `keys.js:66,69,72`. **Following aes-js reference implementation** which also builds both `_Ke` and `_Kd` in `_prepare()` regardless of usage direction. General-purpose class, caller's responsibility to use only needed direction.
+
 ## Info
 
 - ❌ **accumulatedBytes not updated on error** — `main.js:449`. `accumulatedBytes += file.size` is only on success path. Not a bug: progress bar reaches 100% via `updateProgress(1)` at end. Error files are removed, shouldn't count toward progress. Best practice: only count successfully processed bytes.
