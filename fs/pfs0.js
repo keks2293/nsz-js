@@ -80,24 +80,17 @@ class PFS0Writer {
     }
 
     buildHeader() {
-        const namesLen = this.files.reduce((sum, f) => sum + f.name.length + 1, 1);
+        const namesLen = this.files.reduce((sum, f) => sum + f.name.length + 1, 0);
         const rawSize = 0x10 + this.files.length * 0x18 + namesLen;
-        // nsz getStringTableSize() always pads the string table to 0x20 via
-        // allign0x20(rawSize). When reusing the input container geometry
-        // (fixPadding=false, nsz's default), nsz copies the input PFS0's
-        // stringTableSize field verbatim instead of recomputing. We mirror that:
-        // use the input size if provided, else apply the 0x20 alignment.
-        const paddedSize = this.fixPadding
-            ? namesLen + (0x20 - (rawSize % 0x20))
-            : (this.inputStringTableSize ?? (namesLen + (0x20 - (rawSize % 0x20))));
         const stringTable = this.files.map(f => f.name).join('\0') + '\0';
+        const paddedSize = this.fixPadding
+            ? stringTable.length + (0x20 - (rawSize % 0x20))
+            : (this.inputStringTableSize ?? (stringTable.length + (0x20 - (rawSize % 0x20))));
         const padded = stringTable.length < paddedSize
             ? stringTable + '\0'.repeat(paddedSize - stringTable.length)
             : stringTable;
         const namesBytes = new TextEncoder().encode(padded);
-        const headerSize = this.fixPadding
-            ? (0x10 + this.files.length * 0x18 + paddedSize) + (0x20 - ((0x10 + this.files.length * 0x18 + paddedSize) % 0x20))
-            : (0x10 + this.files.length * 0x18 + paddedSize);
+        const headerSize = 0x10 + this.files.length * 0x18 + paddedSize;
         const buf = new Uint8Array(headerSize);
         const v = new DataView(buf.buffer);
 
