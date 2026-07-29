@@ -37,7 +37,7 @@ async function buildPartitionMetas(xci, keys, verify, adapter, extractCnmtHashMa
 
     for (const partition of partitions) {
         if (partition.size === 0) {
-            partitionMetas.push({ name: partition.name, files: [], totalSize: 0, hfs0BufferSize: 0, raw: false, cnmtHashMap: new Map() });
+            partitionMetas.push({ name: partition.name, files: [], totalSize: 0, hfs0BufferSize: PARTITION_HEADER_SIZE, raw: false, cnmtHashMap: new Map() });
             continue;
         }
 
@@ -74,15 +74,12 @@ async function buildPartitionMetas(xci, keys, verify, adapter, extractCnmtHashMa
         }
 
         const fileTotalSize = fileMetas.reduce((s, m) => s + m.size, 0);
-        const tmpWriter = new HFS0Writer(PARTITION_HEADER_SIZE);
-        for (const m of fileMetas) tmpWriter.addEntry(m.name, m.size);
-        const hfs0BufferSize = tmpWriter.getHeaderSize();
 
         partitionMetas.push({
             name: partition.name,
             files: fileMetas,
             totalSize: fileTotalSize,
-            hfs0BufferSize,
+            hfs0BufferSize: PARTITION_HEADER_SIZE,
             raw: false,
             cnmtHashMap
         });
@@ -142,7 +139,7 @@ async function writePartitions(adapter, partitionMetas, layout, keys, verify, op
         const pWriter = new HFS0Writer(PARTITION_HEADER_SIZE);
         for (const m of pm.files) pWriter.addEntry(m.name, m.size);
         const hfs0Header = pWriter.buildHeader();
-        await adapter.write(po.offset, hfs0Header);
+        await adapter.write(po.offset, hfs0Header.buffer);
 
         let writePos = po.offset + PARTITION_HEADER_SIZE;
         for (let fi = 0; fi < pm.files.length; fi++) {
