@@ -4,6 +4,12 @@ Prioritized areas for improvement identified 2026-05-30.
 
 ## High Impact
 
+- ✅ **`PFS0Writer` fixPadding double-padding + namesLen off-by-one** — `fs/pfs0.js`. Two bugs in `PFS0Writer.buildHeader()`:
+  1. `namesLen` reduce had initial value `1` instead of `0`, making it always 1 byte larger than the actual string table. Skewed alignment calculations.
+  2. When `fixPadding=true`, `paddedSize` already makes `0x10 + fileCount*0x18 + paddedSize` 0x20-aligned, but `headerSize` added another `(0x20 - inner % 0x20)` on top. This created a 0x20-byte gap between header end and data start that the PFS0 entries didn't account for (entries stored `offset=0` relative to headerEnd, but data was at headerEnd+0x20). The PFS0 was self-inconsistent — consumers parsing the header would look at the wrong file offset.
+  - **Fix**: changed `namesLen` initial value to `0`, removed the extra `headerSize` padding for `fixPadding=true` (now always `0x10 + fileCount*0x18 + paddedSize`).
+  - **Verified**: byte-identical to Python nsz 4.6.1 with `--fix-padding -D` on Trackline Express .nsz (4 files, stringTableSize=176, headerSize=288, file size=223285536, SHA256 match).
+
 - ✅ **HFS0 header building duplicated 6x** — `converter.js:339-375,504-570`, `nsz-cli.js:184-274`, `fs/xci.js:76-141`. `HFS0Writer` class exists but is unused by converter/CLI. Any HFS0 bug needs fixing in 6 places. Refactor to use `HFS0Writer` consistently.
 
 - ✅ **Verification logic duplicated + undefined in XCZ** — `converter.js` had duplicate `verifyHash` (defined inside `decompressNSZtoNSP` but not `decompressXCZtoXCI`), plus dead top-level function referencing undefined `onLog`. Fixed: single standalone `verifyHash(hash, name, fileHashes, onLog)` at module level. Follows ESLint `class-methods-use-this`.
