@@ -1,8 +1,8 @@
-import { PFS0Writer } from './pfs0.js';
+import { PFS0Writer, PFS0 } from './pfs0.js';
 import { NCZDecompressor, AdapterNCZReader, parseNczSections } from './ncz.js';
-import { PFS0 } from './pfs0.js';
 import { sha256 } from '../crypto/sha256.js';
 import { extractContentHashMap } from './cnmt-hashes.js';
+import { buildAdapter, collectBlob } from './adapter.js';
 
 function verifyHashByNcaId(hash, ncaId, cnmtHashMap, onLog) {
     const log = onLog || ((level, msg) => console.log(`  ${msg}`));
@@ -113,43 +113,6 @@ async function collectOutputMeta(files, adapter, keys) {
         }
     }
     return outputMeta;
-}
-
-async function buildAdapter(output, read, callbacks) {
-    const { log = () => {}, progress = () => {}, createHash } = callbacks;
-
-    if (output.fd !== undefined) {
-        const fs = await import('node:fs');
-        return {
-            read,
-            write: (offset, data) => fs.writeSync(output.fd, data, 0, data.byteLength, offset),
-            log, progress, createHash,
-        };
-    }
-    if (output.writable) {
-        return {
-            read,
-            write: (offset, data) => output.writable.write({ type: 'write', position: offset, data }),
-            log, progress, createHash,
-        };
-    }
-    if (output.memory) {
-        const chunks = [];
-        return {
-            read,
-            write: (offset, data) => { chunks.push({ offset, data }); },
-            log, progress, createHash,
-            _chunks: chunks,
-        };
-    }
-    throw new Error('convert: output must be { fd }, { writable }, or { memory: true }');
-}
-
-function collectBlob(adapter, totalSize) {
-    const chunks = adapter._chunks.sort((a, b) => a.offset - b.offset);
-    const buf = new Uint8Array(totalSize);
-    for (const c of chunks) buf.set(c.data, c.offset);
-    return new Blob([buf], { type: 'application/octet-stream' });
 }
 
 export async function convertNSZ(reader, keys, output, options = {}) {
