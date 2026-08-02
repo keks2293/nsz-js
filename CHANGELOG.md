@@ -1,5 +1,9 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-08-02)
+
+1. **Fix: CNMT `ContentEntry.type` offset** — `fs/cnmt.js`. Read at byte `54`/`0x36` per spec (was `53`); fixes split's meta/deltaFragment title filtering.
+
 ## ✅ Recent Changes (2026-07-29)
 
 1. **Fix: PFS0Writer `fixPadding=true` double-padding bug** — `fs/pfs0.js`. `buildHeader()` had two bugs in the `fixPadding` branch: `namesLen` used `headerSize` (included dataOffset, should be total header minus dataOffset), and `headerSize` padded itself `inner + (0x20 - inner%0x20)` which would produce a self-inconsistent PFS0 where `totalHeaderSize != stringTableSize + dataOffset`. Fixed `namesLen` to use `this.metaSize + stringsLen` and `headerSize` to use `inner` unpadded. Verified: 3 test NSPs now byte-identical to Python nsz `--fix-padding` output.

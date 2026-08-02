@@ -21,7 +21,7 @@ export class ContentEntry {
         const sizeHigh = view.getUint16(52, true);
         this.size = sizeLow + sizeHigh * 0x100000000;
 
-        this.type = view.getUint8(53);
+        this.type = view.getUint8(54);
     }
 }
 
