@@ -1,4 +1,7 @@
 import { AesEcb } from '../crypto/aes128.js';
+import { AesXts, AesCtr } from '../crypto/aes-ops.mjs';
+import { PFS0 } from './pfs0.js';
+import { Cnmt } from './cnmt.js';
 
 const FsType = Object.freeze({ NONE: 0, PFS0: 2, ROMFS: 3 });
 
@@ -146,6 +149,59 @@ function KeysParser_hexToBytes(hex) {
         bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
     }
     return bytes;
+}
+
+export function decryptNcaHeader(raw, keys = null) {
+    if (!keys || !keys.header_key) return null;
+    const headerKey = typeof keys.header_key === 'string'
+        ? KeysParser_hexToBytes(keys.header_key)
+        : (keys.header_key instanceof Uint8Array ? keys.header_key : new Uint8Array(keys.header_key));
+    if (headerKey.length !== 32) return null;
+    const arr = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+    const xts = new AesXts(headerKey);
+    const len = Math.min(0xC00, arr.length);
+    const decrypted = xts.decrypt(arr.subarray(0, len), 0);
+    return NCAHeader.parse(decrypted, keys);
+}
+
+export async function decryptNcaSection(data, section) {
+    if (section.cryptoType === 1 || !section.cryptoKey) return data;
+    const aesCtr = new AesCtr(section.cryptoKey, section.cryptoCounter);
+    aesCtr.seek(section.offset);
+    return await aesCtr.decrypt(data);
+}
+
+export async function readCnmtFromMeta(reader, entry, header) {
+    if (header.contentType !== 1) return null;
+    const section = header.sections[0];
+    if (!section) return null;
+
+    const data = await reader.read(entry.offset + section.offset, section.size);
+    const fsData = await decryptNcaSection(data, section);
+    return parseCnmtFromDecryptedSection(fsData, section);
+}
+
+function isPfs0(data, offset) {
+    return offset + 4 <= data.length
+        && String.fromCharCode(data[offset], data[offset + 1], data[offset + 2], data[offset + 3]) === 'PFS0';
+}
+
+export function parseCnmtFromDecryptedSection(fsData, section, options = {}) {
+    const { allowRawPfs0 = false } = options;
+    const pfs0Start = section.sectionStart || 0x20;
+    let pfs0Raw = null;
+    if (isPfs0(fsData, pfs0Start)) {
+        pfs0Raw = fsData.subarray(pfs0Start);
+    } else if (allowRawPfs0 && isPfs0(fsData, 0)) {
+        pfs0Raw = fsData;
+    }
+    if (!pfs0Raw) return null;
+    const pfs0 = new PFS0(pfs0Raw);
+    const files = pfs0.getFiles();
+    if (files.length === 0) return null;
+    const f = files[0];
+    const raw = pfs0Raw.subarray(f.offset, f.offset + f.size);
+    return Cnmt.parse(raw);
 }
 
 export class BKTR {

@@ -4,6 +4,8 @@ Prioritized areas for improvement identified 2026-05-30.
 
 ## High Impact
 
+- ✅ **AES-CTR section decrypt + CNMT-from-meta parse duplicated** — `fs/split.js` (old `decryptSection`/`readCnmtFromMeta`) and `fs/cnmt-hashes.js` had inline copies of "AES-CTR decrypt NCA section" and "find PFS0 in decrypted meta-NCA section, parse first file as CNMT". Extracted into shared `decryptNcaSection(data, section)` and `parseCnmtFromDecryptedSection(fsData, section, {allowRawPfs0})` (+ `isPfs0` helper) in `fs/nca.js`. `split.js` and `cnmt-hashes.js` now call them; `cnmt-hashes` keeps its `try/catch` + `No titleKeyDec` guard, passes `{allowRawPfs0:true}`. Verified: synthetic split, merge xci/nsp, `extractContentHashMap` smoke test, CLI split, all crypto/convert tests.
+
 - ✅ **`PFS0Writer` fixPadding double-padding + namesLen off-by-one** — `fs/pfs0.js`. Two bugs in `PFS0Writer.buildHeader()`:
   1. `namesLen` reduce had initial value `1` instead of `0`, making it always 1 byte larger than the actual string table. Skewed alignment calculations.
   2. When `fixPadding=true`, `paddedSize` already makes `0x10 + fileCount*0x18 + paddedSize` 0x20-aligned, but `headerSize` added another `(0x20 - inner % 0x20)` on top. This created a 0x20-byte gap between header end and data start that the PFS0 entries didn't account for (entries stored `offset=0` relative to headerEnd, but data was at headerEnd+0x20). The PFS0 was self-inconsistent — consumers parsing the header would look at the wrong file offset.

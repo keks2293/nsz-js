@@ -35,4 +35,15 @@ function collectBlob(adapter, totalSize) {
     return new Blob([buf], { type: 'application/octet-stream' });
 }
 
-export { buildAdapter, collectBlob };
+const COPY_CHUNK = 8 * 1024 * 1024;
+
+async function copyRange(reader, offset, size, write, onChunk) {
+    for (let pos = 0; pos < size; pos += COPY_CHUNK) {
+        const n = Math.min(COPY_CHUNK, size - pos);
+        const data = await reader.read(offset + pos, n);
+        await write(pos, data);
+        if (onChunk) onChunk(n);
+    }
+}
+
+export { buildAdapter, collectBlob, copyRange };

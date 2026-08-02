@@ -5,6 +5,8 @@ import { ZstdDecompressor } from './crypto/zstd.js';
 import { extractContentHashMap } from './fs/cnmt-hashes.js';
 import { convertNSZ } from './fs/nsz-convert.js';
 import { convertXCZ } from './fs/xcz-convert.js';
+import { mergeNSP } from './fs/merge.js';
+import { splitNSP as splitNSPFile } from './fs/split.js';
 
 class FileSliceReader extends DataReader {
     constructor(file, baseOffset = 0, totalLength = null) {
@@ -101,6 +103,45 @@ class NSZConverter {
         const outputName = file.name.replace(/\.xcz$/i, '.xci');
         onLog('success', `Output: ${outputName} (${this.formatBytes(result.size)})`);
         return { blob: result.blob || null, name: outputName, size: result.size, writable: !!writable };
+    }
+
+    async mergeNSPs(files, options = {}) {
+        const { onProgress = () => {}, onLog = () => {}, writable = null } = options;
+        onLog('info', `Merging ${files.length} NSPs...`);
+        await this.init();
+
+        const readers = files.map((f) => ({
+            name: f.name,
+            reader: new FileSliceReader(f, 0, f.size),
+        }));
+
+        const result = await mergeNSP(readers, writable ? { writable } : { memory: true }, {
+            log: onLog,
+            progress: onProgress,
+        });
+
+        onProgress(1.0, 'Done!');
+        const outputName = files[0].name.replace(/\.(nsp|xci)$/i, '') + '_merged.nsp';
+        onLog('success', `Output: ${outputName} (${this.formatBytes(result.size)}), ${result.memberCount} members`);
+        return { blob: result.blob || null, name: outputName, size: result.size, memberCount: result.memberCount, writable: !!writable };
+    }
+
+    async splitNSP(file, options = {}) {
+        const { onProgress = () => {}, onLog = () => {}, outputFactory = null } = options;
+        onLog('info', `Splitting ${file.name}...`);
+        await this.init();
+        if (!this.keys || !this.keys.header_key) {
+            onLog('warn', 'No keys loaded - split may fail to read CNMT metadata');
+        }
+
+        const reader = new FileSliceReader(file, 0, file.size);
+        const result = await splitNSPFile(reader, this.keys, outputFactory, {
+            log: onLog,
+            progress: onProgress,
+        });
+
+        onProgress(1.0, 'Done!');
+        return result;
     }
 
 }
