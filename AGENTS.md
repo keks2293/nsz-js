@@ -26,6 +26,20 @@
 
 CHANGELOG.md is the single source of truth for what works and what doesn't.
 
+### CHANGELOG numbering follows the new commit order
+
+When rewriting/splitting history (e.g., splitting one commit into several, or reordering commits), the numbering and ordering of entries in `CHANGELOG.md` must follow the **order of the rewritten commits**, NOT be copied from the original commit(s). Each commit adds its entry with the next sequential number (its position in the new history). Do not preserve the original numbering if it conflicts with the new commit order.
+
+### History rewrite verification
+
+When rewriting/splitting history, always verify after the rewrite:
+- `git diff <old tip> <new tip>` must be empty — the final tree must contain exactly the same content as the original, nothing lost or added.
+- Each intermediate commit must be self-sufficient: its imports/dependencies resolve using only files present at that commit (nothing depending on changes from future commits).
+
+### Force-push only on explicit request
+
+Never force-push to a shared branch without asking the user first. When asking, state the divergence (e.g. `ahead X / behind Y`) and explain what the force-push will change.
+
 ## Static Files
 
 **DO NOT manually edit files in the `static/` folder.**
