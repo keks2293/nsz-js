@@ -89,7 +89,7 @@ async function buildPartitionMetas(xci, keys, verify, adapter, extractCnmtHashMa
     return partitionMetas;
 }
 
-function computeLayout(partitionMetas) {
+function computeLayout(partitionMetas, baseOffset = 0) {
     const rootWriter = new HFS0Writer(ROOT_HFS0_PADDED_SIZE);
     const partSizes = [];
     for (const pm of partitionMetas) {
@@ -101,7 +101,7 @@ function computeLayout(partitionMetas) {
     const rootHeader = rootHfs0.buffer;
     const rootActualHeader = rootHfs0.actualHeader;
 
-    let currentDataOffset = ROOT_HFS0_OFFSET + rootHfs0.headerSize;
+    let currentDataOffset = baseOffset + ROOT_HFS0_OFFSET + rootHfs0.headerSize;
     const partOffsets = [];
     for (let i = 0; i < partitionMetas.length; i++) {
         partOffsets.push({ name: partitionMetas[i].name, offset: currentDataOffset });
@@ -112,7 +112,7 @@ function computeLayout(partitionMetas) {
     return { rootWriter, rootHeader, rootActualHeader, partSizes, partOffsets, totalSize };
 }
 
-async function writeXciHeaders(adapter, xciHeaderBytes, layout) {
+async function writeXciHeaders(adapter, xciHeaderBytes, layout, baseOffset = 0, prefixData = null) {
     const { rootHeader, rootActualHeader, totalSize } = layout;
 
     const xciOut = new Uint8Array(0x200);
@@ -122,8 +122,9 @@ async function writeXciHeaders(adapter, xciHeaderBytes, layout) {
     xciView.setBigUint64(0x130, BigInt(ROOT_HFS0_OFFSET), true);
     xciView.setBigUint64(0x138, BigInt(rootActualHeader), true);
 
-    await adapter.write(0, xciOut);
-    await adapter.write(ROOT_HFS0_OFFSET, rootHeader);
+    if (prefixData) await adapter.write(0, prefixData);
+    await adapter.write(baseOffset, xciOut);
+    await adapter.write(baseOffset + ROOT_HFS0_OFFSET, rootHeader);
 }
 
 async function writePartitions(adapter, partitionMetas, layout, keys, verify, options) {
@@ -201,10 +202,17 @@ async function convertXCZStreaming(xci, keys, adapter, options, partitionMetas) 
     if (!partitionMetas) {
         partitionMetas = await buildPartitionMetas(xci, keys, verify, adapter, options.extractCnmtHashMap);
     }
-    const layout = computeLayout(partitionMetas);
 
-    const xciHeaderBytes = await adapter.read(0, 0x200);
-    await writeXciHeaders(adapter, xciHeaderBytes, layout);
+    const baseOffset = xci.headOffset - 0x100;
+    const layout = computeLayout(partitionMetas, baseOffset);
+
+    let prefixData = null;
+    if (baseOffset > 0) {
+        prefixData = await adapter.read(0, baseOffset + ROOT_HFS0_OFFSET);
+    }
+
+    const xciHeaderBytes = await adapter.read(baseOffset, 0x200);
+    await writeXciHeaders(adapter, xciHeaderBytes, layout, baseOffset, prefixData);
 
     await writePartitions(adapter, partitionMetas, layout, keys, verify, { log, progress, createHash: options.createHash });
 

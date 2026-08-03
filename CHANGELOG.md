@@ -4,6 +4,8 @@
 
 1. **Fix: CNMT `ContentEntry.type` offset** — `fs/cnmt.js`. Read at byte `54`/`0x36` per spec (was `53`); fixes split's meta/deltaFragment title filtering.
 
+2. **Feature: full XCI (no-intro) support — read + write** — `fs/xci.js`, `fs/xcz-convert.js`. Read: root HFS0 located at `hfs0Offset + headOffset - 0x100` (0x10000 for full, 0xF000 for normal; matches nsz PR #148). Write: when input is full XCI (`headOffset=0x1100`), CardKeyArea is preserved — prefix `[0, 0x10000)` (InitialData + TitleKeyArea + CardHeader + CertArea) is copied verbatim, patched header written at `baseOffset=0x1000` (HEAD stays at `0x1100`), root HFS0 at `0x10000`. Round-trip full XCI ↔ XCZ keeps reversible layout; output NSP via merge is unaffected (CardKeyArea never read, offsets absolute from `0x10000`).
+
 ## ✅ Recent Changes (2026-07-29)
 
 1. **Fix: PFS0Writer `fixPadding=true` double-padding bug** — `fs/pfs0.js`. `buildHeader()` had two bugs in the `fixPadding` branch: `namesLen` used `headerSize` (included dataOffset, should be total header minus dataOffset), and `headerSize` padded itself `inner + (0x20 - inner%0x20)` which would produce a self-inconsistent PFS0 where `totalHeaderSize != stringTableSize + dataOffset`. Fixed `namesLen` to use `this.metaSize + stringsLen` and `headerSize` to use `inner` unpadded. Verified: 3 test NSPs now byte-identical to Python nsz `--fix-padding` output.
