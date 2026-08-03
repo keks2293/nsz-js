@@ -2,9 +2,17 @@
 
 ## ✅ Recent Changes (2026-08-02)
 
-1. **Fix: CNMT `ContentEntry.type` offset** — `fs/cnmt.js`. Read at byte `54`/`0x36` per spec (was `53`); fixes split's meta/deltaFragment title filtering.
+1. **Fix: CNMT `ContentEntry.type` offset** — `fs/cnmt.js`. Read at byte `54`/`0x36` per spec (was `53`); fixes meta/deltaFragment title filtering.
 
 2. **Feature: full XCI (no-intro) support — read + write** — `fs/xci.js`, `fs/xcz-convert.js`. Read: root HFS0 located at `hfs0Offset + headOffset - 0x100` (0x10000 for full, 0xF000 for normal; matches nsz PR #148). Write: when input is full XCI (`headOffset=0x1100`), CardKeyArea is preserved — prefix `[0, 0x10000)` (InitialData + TitleKeyArea + CardHeader + CertArea) is copied verbatim, patched header written at `baseOffset=0x1000` (HEAD stays at `0x1100`), root HFS0 at `0x10000`. Round-trip full XCI ↔ XCZ keeps reversible layout; output NSP via merge is unaffected (CardKeyArea never read, offsets absolute from `0x10000`).
+
+## ✅ Recent Changes (2026-08-01)
+
+1. **Feature: NSP merge + split, XCI inputs** — new `fs/merge.js`, `fs/split.js`, CLI `--merge`/`--split`, browser mode switcher (Convert/Merge/Split). Merge: unions members of 2+ NSPs (base/update/DLC) with first-wins dedup by filename, also accepts `.xci` inputs — secure partition HFS0 read header-only via `XCIReader.getSecureFiles()`, `HEAD` probed at `0x100` with fallback to the backup header at `0x1000` (magic `0x1100`) for raw/full dumps. Split: parses CNMT per meta-NCA (XTS header + AES-CTR section decrypt + inner PFS0), groups NCAs by title, writes one `{titleId}_{base|update|dlc}_v{version}.nsp` per title with matching `.tik`/`.cert`. Fixed: ticket parse on pooled buffers (`.slice()`).
+
+2. **Refactor: shared NCA decrypt + CNMT parse helpers** — `fs/nca.js`: `decryptNcaHeader`, `decryptNcaSection`, `parseCnmtFromDecryptedSection`, `readCnmtFromMeta` (+`isPfs0`). Inner PFS0 is located at the spec field `section.sectionStart` (FsHeader+`0x40`). `copyRange`/`COPY_CHUNK` moved to `fs/adapter.js`. `fs/ticket.js` now holds only the pure `Ticket` parser (throws on unknown `signatureType` instead of silently defaulting).
+
+3. **CLI: mode hints in help** — `nsz-cli.js`: mode-specific options tagged `[convert]`/`[convert, split]` in `printUsage()`.
 
 ## ✅ Recent Changes (2026-07-29)
 

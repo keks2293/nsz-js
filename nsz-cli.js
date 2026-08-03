@@ -8,6 +8,8 @@ import { KeysParser } from './keys.js';
 import { convertNSZ as convertNSZFile } from './fs/nsz-convert.js';
 import { convertXCZ as convertXCZFile } from './fs/xcz-convert.js';
 import { extractContentHashMap } from './fs/cnmt-hashes.js';
+import { mergeNSP as mergeNSPFile } from './fs/merge.js';
+import { splitNSP as splitNSPFile } from './fs/split.js';
 
 class FileDescriptorReader extends DataReader {
     constructor(fd, baseOffset = 0, totalLength = null) {
@@ -52,6 +54,9 @@ async function main() {
     let verify = true;
     let overwrite = false;
     let rmSource = false;
+    let mergeMode = false;
+    let splitMode = false;
+    const positionals = [];
 
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--fix-padding' || args[i] === '-p') {
@@ -63,60 +68,92 @@ async function main() {
             process.exit(0);
         } else if (args[i] === '--keys' && i + 1 < args.length) {
             keysPath = args[++i];
+        } else if (args[i] === '--merge') {
+            mergeMode = true;
+        } else if (args[i] === '--split') {
+            splitMode = true;
         } else if (args[i] === '--overwrite' || args[i] === '-w') {
             overwrite = true;
         } else if (args[i] === '--rm-source') {
             rmSource = true;
         } else if ((args[i] === '-o' || args[i] === '--output') && i + 1 < args.length) {
             outputDir = args[++i];
-        } else if (!inputPath) {
-            inputPath = args[i];
-        } else if (!keysPath && !args[i].startsWith('-')) {
-            keysPath = args[i];
+        } else if (!args[i].startsWith('-')) {
+            positionals.push(args[i]);
         }
     }
 
     function printUsage() {
         console.log('NSZ to NSP Converter');
         console.log('');
-        console.log('Usage: node nsz-cli.js <input> [keys.txt] [options]');
+        console.log('Usage:');
+        console.log('  node nsz-cli.js <input> [keys.txt] [options]        convert .nsz -> .nsp, .xcz -> .xci');
+        console.log('  node nsz-cli.js --merge <nsp|xci> <nsp|xci> [...] [options] merge NSPs/XCIs into one .nsp (base+update+dlc)');
+        console.log('  node nsz-cli.js --split <nsp> [keys.txt] [options]  split a merged NSP into one .nsp per title');
         console.log('');
         console.log('Input formats:');
         console.log('  .nsz   -> .nsp');
-        console.log('  .xcz                -> .xci');
+        console.log('  .xcz   -> .xci');
         console.log('');
         console.log('Options:');
         console.log('  -o, --output <dir>   Output directory');
         console.log('  -w, --overwrite      Overwrite existing output files');
-        console.log('  --rm-source          Delete input file after successful conversion');
-        console.log('  --no-verify, -nv     Skip SHA256 verification (faster, no CNMT parsing)');
-        console.log('  --fix-padding, -p    Re-pad PFS0 header to 0x20 boundary (default: reuse input string-table size, matching Python nsz)');
+        console.log('  --rm-source          Delete input file(s) after successful operation');
+        console.log('  --no-verify, -nv     Skip SHA256 verification [convert]');
+        console.log('  --fix-padding, -p    Re-pad PFS0 header to 0x20 boundary [convert] (default: reuse input string-table size, matching Python nsz)');
+        console.log('  --keys <file>        Keys file [convert, split] (needed for --split CNMT parsing)');
         console.log('');
     }
+
+    if (mergeMode && splitMode) {
+        console.error('Error: --merge and --split are mutually exclusive.');
+        process.exit(1);
+    }
+
+    if (mergeMode) {
+        if (positionals.length < 2) {
+            console.error('Error: --merge requires at least two .nsp/.xci inputs.');
+            printUsage();
+            process.exit(1);
+        }
+        for (const p of positionals) {
+            const ext = path.extname(p).toLowerCase();
+            if (ext !== '.nsp' && ext !== '.xci') {
+                console.error(`Error: --merge inputs must be .nsp or .xci files: ${p}`);
+                process.exit(1);
+            }
+        }
+        await mergeNSPs(positionals, outputDir, overwrite, rmSource);
+        return;
+    }
+
+    if (splitMode) {
+        inputPath = positionals[0];
+        if (positionals.length > 1) keysPath = keysPath || positionals[1];
+        if (!inputPath) {
+            console.error('Error: --split requires an .nsp input.');
+            printUsage();
+            process.exit(1);
+        }
+        const keys = await loadKeys(keysPath, true);
+        const input = openInputReader(inputPath);
+        try {
+            await splitNSP(input, inputPath, outputDir, keys, overwrite, rmSource);
+        } finally {
+            fs.closeSync(input.fd);
+        }
+        return;
+    }
+
+    inputPath = positionals[0];
+    if (positionals.length > 1) keysPath = keysPath || positionals[1];
 
     if (!inputPath) {
         printUsage();
         process.exit(1);
     }
 
-    let keys = null;
-    const keysLocations = [
-        keysPath,
-        './static/prod.keys'
-    ].filter(Boolean);
-
-    for (const loc of keysLocations) {
-        try {
-            const keyText = fs.readFileSync(loc, 'utf-8');
-            keys = KeysParser.parse(keyText);
-            console.log(`Keys loaded from ${loc}`);
-            break;
-        } catch(e) {}
-    }
-
-    if (!keys) {
-        console.log('Warning: No keys loaded - encrypted NCZ files may fail to decrypt');
-    }
+    const keys = await loadKeys(keysPath, false);
 
     const isXcz = inputPath.toLowerCase().endsWith('.xcz');
     const inStat = fs.statSync(inputPath);
@@ -135,6 +172,134 @@ async function main() {
         }
     } finally {
         fs.closeSync(inputFd);
+    }
+}
+
+async function loadKeys(keysPath, warnNoKeys) {
+    let keys = null;
+    const keysLocations = [
+        keysPath,
+        './static/prod.keys'
+    ].filter(Boolean);
+
+    for (const loc of keysLocations) {
+        try {
+            const keyText = fs.readFileSync(loc, 'utf-8');
+            keys = KeysParser.parse(keyText);
+            console.log(`Keys loaded from ${loc}`);
+            break;
+        } catch(e) {}
+    }
+
+    if (!keys) {
+        const msg = warnNoKeys
+            ? 'Warning: No keys loaded - CNMT parsing for --split may fail'
+            : 'Warning: No keys loaded - encrypted NCZ files may fail to decrypt';
+        console.log(msg);
+    }
+    return keys;
+}
+
+function openInputReader(inputPath) {
+    const inStat = fs.statSync(inputPath);
+    const inputSize = inStat.size;
+    console.log(`Input: ${inputPath} (${formatBytes(inputSize)})`);
+    const fd = fs.openSync(inputPath, 'r');
+    return { reader: new FileDescriptorReader(fd, 0, inputSize), fd, inputSize };
+}
+
+async function mergeNSPs(inputPaths, outputDir, overwrite, rmSource) {
+    console.log('=== MERGE NSPs ===');
+    const stem = path.basename(inputPaths[0], path.extname(inputPaths[0]));
+    const outName = `${stem}_merged.nsp`;
+    const outPath = outputDir ? path.join(outputDir, outName) : path.join(path.dirname(inputPaths[0]), outName);
+
+    if (!overwrite && fs.existsSync(outPath)) {
+        console.error(`Error: ${outPath} already exists. Use -w/--overwrite to overwrite.`);
+        process.exit(1);
+    }
+
+    const fds = [];
+    try {
+        const readers = [];
+        for (const p of inputPaths) {
+            const st = fs.statSync(p);
+            const fd = fs.openSync(p, 'r');
+            fds.push(fd);
+            readers.push({ name: p, reader: new FileDescriptorReader(fd, 0, st.size) });
+        }
+
+        const outputFd = fs.openSync(outPath, 'w');
+        fds.push(outputFd);
+        let result;
+        try {
+            result = await mergeNSPFile(readers, { fd: outputFd }, {
+                log: (level, msg) => console.log(msg),
+                progress: () => {},
+            });
+        } catch (e) {
+            fs.closeSync(outputFd);
+            try { fs.unlinkSync(outPath); } catch {}
+            throw e;
+        }
+
+        console.log('');
+        console.log('=== DONE ===');
+        console.log(`Output: ${outPath} (${formatBytes(result.size)})`);
+        console.log(`Members: ${result.memberCount} (deduplicated by name)`);
+
+        if (rmSource) {
+            for (const p of inputPaths) {
+                fs.unlinkSync(p);
+                console.log(`Deleted source: ${p}`);
+            }
+        }
+    } finally {
+        for (const fd of fds) {
+            try { fs.closeSync(fd); } catch {}
+        }
+    }
+}
+
+async function splitNSP(inFdInfo, inputPath, outputDir, keys, overwrite, rmSource) {
+    console.log('=== SPLIT NSP ===');
+    const outDir = outputDir || path.dirname(inputPath);
+    fs.mkdirSync(outDir, { recursive: true });
+
+    const created = [];
+    let result;
+    try {
+        result = await splitNSPFile(inFdInfo.reader, keys, async (group, index, name) => {
+            const outPath = path.join(outDir, name);
+            if (!overwrite && fs.existsSync(outPath)) {
+                console.log(`Skipping existing: ${outPath}`);
+                return null;
+            }
+            const fd = fs.openSync(outPath, 'w');
+            created.push({ fd, outPath });
+            return { fd, outPath };
+        }, {
+            log: (level, msg) => console.log(msg),
+            progress: () => {},
+        });
+    } finally {
+        for (const c of created) {
+            try { fs.closeSync(c.fd); } catch {}
+        }
+    }
+
+    console.log('');
+    console.log('=== DONE ===');
+    for (const out of result.outputs) {
+        console.log(`Output: ${out.outPath || out.name} (${formatBytes(out.size)})`);
+        if (out.missing.length > 0) {
+            console.log(`  Warning: ${out.missing.length} NCA(s) referenced by CNMT not found in input`);
+        }
+    }
+
+    if (rmSource) {
+        fs.unlinkSync(inputPath);
+        console.log(`Deleted source: ${inputPath}`);
     }
 }
 

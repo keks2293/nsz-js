@@ -96,6 +96,7 @@ async function main() {
     let fixPadding = false;
     let overwrite = false;
     let verify = false;
+    let mode = 'convert';
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     let downloadMode = isMobile ? 'sw' : 'fsa';
 
@@ -134,6 +135,40 @@ async function main() {
         const lower = name.toLowerCase();
         if (lower.endsWith('.xcz')) return 'xcz';
         return 'nsp';
+    }
+
+    function acceptFile(name) {
+        if (mode === 'convert') return isCompressedGame(name);
+        if (mode === 'merge') {
+            const lower = name.toLowerCase();
+            return lower.endsWith('.nsp') || lower.endsWith('.xci');
+        }
+        return name.toLowerCase().endsWith('.nsp');
+    }
+
+    function updateButtonLabel() {
+        convertBtn.textContent = mode === 'merge' ? 'Merge' : mode === 'split' ? 'Split' : 'Convert';
+        if (converting) return;
+        convertBtn.disabled = mode === 'merge' ? files.length < 2 : mode === 'split' ? files.length !== 1 : files.length === 0;
+    }
+
+    function setMode(m) {
+        mode = m;
+        document.querySelectorAll('.pill[data-op]').forEach(b => b.classList.toggle('on', b.dataset.op === m));
+        const keep = [];
+        const keepStatus = [];
+        for (let i = 0; i < files.length; i++) {
+            if (acceptFile(files[i].name)) {
+                keep.push(files[i]);
+                keepStatus.push(fileStatus[i] || '');
+            }
+        }
+        files.length = 0;
+        files.push(...keep);
+        fileStatus.length = 0;
+        fileStatus.push(...keepStatus);
+        updateFileList();
+        updateButtonLabel();
     }
 
     function addLog(type, message) {
@@ -194,7 +229,7 @@ async function main() {
 
         const hasFiles = files.length > 0;
         dropZone.classList.toggle('has-files', hasFiles);
-        if (!converting) convertBtn.disabled = !hasFiles;
+        if (!converting) updateButtonLabel();
         if (!hasFiles) {
             progressTitle.textContent = 'Ready';
             updateProgress(0);
@@ -271,7 +306,7 @@ async function main() {
         e.preventDefault();
         dropZone.classList.remove('dragover');
         for (const file of e.dataTransfer.files) {
-            if (!isCompressedGame(file.name)) continue;
+            if (!acceptFile(file.name)) continue;
             if (files.some(f => f.name === file.name)) {
                 addLog('warn', `Skipped duplicate: ${file.name}`);
                 continue;
@@ -283,7 +318,7 @@ async function main() {
 
     fileInput.addEventListener('change', async (e) => {
         for (const file of e.target.files) {
-            if (!isCompressedGame(file.name)) continue;
+            if (!acceptFile(file.name)) continue;
             if (files.some(f => f.name === file.name)) {
                 addLog('warn', `Skipped duplicate: ${file.name}`);
                 continue;
@@ -321,25 +356,13 @@ async function main() {
         });
     });
 
-    convertBtn.addEventListener('click', async () => {
-        if (files.length === 0) return;
+    document.querySelectorAll('.pill[data-op]').forEach(btn => {
+        btn.addEventListener('click', () => setMode(btn.dataset.op));
+    });
 
-        progressContainer.classList.add('visible');
-        logContainer.classList.add('visible');
-        convertBtn.disabled = true;
-        converting = true;
-        progressSpeed.textContent = '';
-        progressTime.textContent = '';
-
-
-        updateProgress(0);
-        addLog('info', `Starting conversion (${downloadMode})...`);
-
-        const totalBytes = files.reduce((s, f) => s + f.size, 0);
-        const startTime = Date.now();
-
+    function makeUpdateStats(totalBytes, startTime) {
         const speedSamples = [];
-        function updateStats(overallProgress) {
+        return function updateStats(overallProgress) {
             const now = Date.now();
             const bytesDone = totalBytes * Math.min(1, Math.max(0, overallProgress));
 
@@ -371,23 +394,88 @@ async function main() {
                 }
             }
             progressTime.textContent = elapsedStr;
+        };
+    }
+
+    async function pickDirectory() {
+        if (!('showDirectoryPicker' in window) || downloadMode !== 'fsa') return null;
+        try {
+            const h = await window.showDirectoryPicker({ startIn: 'downloads' });
+            addLog('info', 'Saving to selected directory');
+            return h;
+        } catch (e) {
+            if (e.name === 'AbortError') return 'ABORT';
+            addLog('warn', 'FSA not available: ' + e.message);
+            return null;
         }
+    }
 
-        let directoryHandle = null;
-
-        if ('showDirectoryPicker' in window && downloadMode === 'fsa') {
-            try {
-                directoryHandle = await window.showDirectoryPicker({ startIn: 'downloads' });
-                addLog('info', 'Saving to selected directory');
-            } catch (e) {
-                if (e.name === 'AbortError') {
-                    addLog('error', 'Save location rejected');
-                    convertBtn.disabled = false;
-                    return;
-                } else {
-                    addLog('warn', 'FSA not available: ' + e.message);
+    async function ensureSW() {
+        if (!('serviceWorker' in navigator) || location.protocol === 'file:') return false;
+        try {
+            if (!window._swRegistered) {
+                addLog('info', 'Starting SW...');
+                let reg = await navigator.serviceWorker.getRegistration();
+                if (!reg || reg.installing || reg.waiting) {
+                    if (reg) await reg.unregister();
+                    reg = await navigator.serviceWorker.register('download-worker.js');
                 }
+                if (!reg.active) {
+                    await navigator.serviceWorker.ready;
+                }
+                window._swRegistered = true;
+                addLog('info', 'SW active');
             }
+            return true;
+        } catch (e) {
+            addLog('info', 'SW not available: ' + e.message);
+            return false;
+        }
+    }
+
+    async function createSWWritable(outputName, iframe) {
+        const dl = new SWDownloader(outputName, iframe);
+        addLog('info', 'Connecting to SW...');
+        await dl.start();
+        dl.triggerDownload();
+        addLog('info', 'Stream ready');
+        return dl;
+    }
+
+    function downloadBlob(blob, name) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    async function runConvert() {
+        if (files.length === 0) return;
+
+        progressContainer.classList.add('visible');
+        logContainer.classList.add('visible');
+        convertBtn.disabled = true;
+        converting = true;
+        progressSpeed.textContent = '';
+        progressTime.textContent = '';
+
+        updateProgress(0);
+        addLog('info', `Starting conversion (${downloadMode})...`);
+
+        const totalBytes = files.reduce((s, f) => s + f.size, 0);
+        const startTime = Date.now();
+        const updateStats = makeUpdateStats(totalBytes, startTime);
+
+        const directoryHandle = await pickDirectory();
+        if (directoryHandle === 'ABORT') {
+            addLog('error', 'Save location rejected');
+            converting = false;
+            updateButtonLabel();
+            return;
         }
 
         const fileIframes = files.map(() => {
@@ -412,8 +500,7 @@ async function main() {
                     ? file.name.replace(/\.xcz$/i, '.xci')
                     : file.name.replace(/\.nsz$/i, '.nsp');
 
-                if (downloadMode === 'blob') {
-                } else if (directoryHandle && downloadMode === 'fsa') {
+                if (downloadMode !== 'blob' && directoryHandle) {
                     try {
                         let fileHandle;
                         if (overwrite) {
@@ -436,27 +523,9 @@ async function main() {
                     }
                 }
 
-                if (!writable && (downloadMode === 'sw' || downloadMode === 'fsa') && 'serviceWorker' in navigator && location.protocol !== 'file:') {
+                if (!writable && (downloadMode === 'sw' || downloadMode === 'fsa') && await ensureSW()) {
                     try {
-                        if (!window._swRegistered) {
-                            addLog('info', 'Starting SW...');
-                            let reg = await navigator.serviceWorker.getRegistration();
-                            if (!reg || reg.installing || reg.waiting) {
-                                if (reg) await reg.unregister();
-                                reg = await navigator.serviceWorker.register('download-worker.js');
-                            }
-                            if (!reg.active) {
-                                await navigator.serviceWorker.ready;
-                            }
-                            window._swRegistered = true;
-                            addLog('info', 'SW active');
-                        }
-                        const dl = new SWDownloader(outputName, fileIframes[i]);
-                        addLog('info', 'Connecting to SW...');
-                        await dl.start();
-                        dl.triggerDownload();
-                        writable = dl;
-                        addLog('info', 'Stream ready');
+                        writable = await createSWWritable(outputName, fileIframes[i]);
                     } catch (e) {
                         addLog('info', 'SW not available: ' + e.message);
                     }
@@ -491,14 +560,7 @@ async function main() {
                     await writable.close();
                     addLog('success', `${result.name} (${result.size ? formatBytes(result.size) : '?'})`);
                 } else {
-                    const url = URL.createObjectURL(result.blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = result.name;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
+                    downloadBlob(result.blob, result.name);
                     addLog('success', `${result.name}`);
                 }
 
@@ -519,9 +581,192 @@ async function main() {
         }
 
         converting = false;
-        convertBtn.disabled = false;
+        updateButtonLabel();
         progressTitle.textContent = 'Done';
         updateProgress(1);
+    }
+
+    async function runMerge() {
+        if (files.length < 2) return;
+
+        progressContainer.classList.add('visible');
+        logContainer.classList.add('visible');
+        convertBtn.disabled = true;
+        converting = true;
+        progressSpeed.textContent = '';
+        progressTime.textContent = '';
+
+        updateProgress(0);
+        addLog('info', `Starting merge (${downloadMode})...`);
+
+        const totalBytes = files.reduce((s, f) => s + f.size, 0);
+        const startTime = Date.now();
+        const updateStats = makeUpdateStats(totalBytes, startTime);
+
+        const directoryHandle = await pickDirectory();
+        if (directoryHandle === 'ABORT') {
+            addLog('error', 'Save location rejected');
+            converting = false;
+            updateButtonLabel();
+            return;
+        }
+
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        document.body.appendChild(iframe);
+
+        const outputName = files[0].name.replace(/\.(nsp|xci)$/i, '') + '_merged.nsp';
+        let writable = null;
+        if (downloadMode !== 'blob' && directoryHandle) {
+            try {
+                let fileHandle;
+                if (overwrite) {
+                    fileHandle = await directoryHandle.getFileHandle(outputName, { create: true });
+                } else {
+                    try {
+                        fileHandle = await directoryHandle.getFileHandle(outputName);
+                        addLog('warn', `Exists, skipping: ${outputName}`);
+                        converting = false;
+                        updateButtonLabel();
+                        return;
+                    } catch {
+                        fileHandle = await directoryHandle.getFileHandle(outputName, { create: true });
+                    }
+                }
+                writable = await fileHandle.createWritable();
+            } catch (e) {
+                addLog('warn', 'Failed to create file: ' + e.message);
+            }
+        }
+        if (!writable && (downloadMode === 'sw' || downloadMode === 'fsa') && await ensureSW()) {
+            try {
+                writable = await createSWWritable(outputName, iframe);
+            } catch (e) {
+                addLog('info', 'SW not available: ' + e.message);
+            }
+        }
+
+        const onProgress = (p) => { updateProgress(p); updateStats(p); };
+
+        try {
+            const result = await converter.mergeNSPs(files, {
+                onProgress,
+                onLog: addLog,
+                writable,
+            });
+            if (writable) {
+                await writable.close();
+            } else {
+                downloadBlob(result.blob, result.name);
+            }
+            addLog('success', `${result.name} (${formatBytes(result.size)}), ${result.memberCount} members`);
+            for (let i = 0; i < files.length; i++) fileStatus[i] = 'ok';
+            updateFileList();
+        } catch (error) {
+            addLog('error', `Merge failed: ${error.message}`);
+            if (writable) {
+                try { await writable.close(); } catch (_) {}
+                if (directoryHandle) {
+                    try { await directoryHandle.removeEntry(outputName); } catch (_) {}
+                }
+            }
+            fileStatus[0] = 'err';
+            updateFileList();
+        }
+
+        converting = false;
+        updateButtonLabel();
+        progressTitle.textContent = 'Done';
+        updateProgress(1);
+    }
+
+    async function runSplit() {
+        if (files.length !== 1) return;
+
+        progressContainer.classList.add('visible');
+        logContainer.classList.add('visible');
+        convertBtn.disabled = true;
+        converting = true;
+        progressSpeed.textContent = '';
+        progressTime.textContent = '';
+
+        updateProgress(0);
+        addLog('info', `Starting split (${downloadMode})...`);
+
+        const totalBytes = files[0].size;
+        const startTime = Date.now();
+        const updateStats = makeUpdateStats(totalBytes, startTime);
+
+        const directoryHandle = await pickDirectory();
+        if (directoryHandle === 'ABORT') {
+            addLog('error', 'Save location rejected');
+            converting = false;
+            updateButtonLabel();
+            return;
+        }
+
+        const onProgress = (p) => { updateProgress(p); updateStats(p); };
+
+        try {
+            const result = await converter.splitNSP(files[0], {
+                onProgress,
+                onLog: addLog,
+                outputFactory: async (group, index, name) => {
+                    if (downloadMode === 'blob') return { memory: true, name };
+                    if (downloadMode !== 'blob' && directoryHandle) {
+                        if (!overwrite) {
+                            try {
+                                await directoryHandle.getFileHandle(name);
+                                addLog('warn', `Exists, skipping: ${name}`);
+                                return null;
+                            } catch (_) {}
+                        }
+                        const fileHandle = await directoryHandle.getFileHandle(name, { create: true });
+                        const writable = await fileHandle.createWritable();
+                        return { writable, name };
+                    }
+                    if ((downloadMode === 'sw' || downloadMode === 'fsa') && await ensureSW()) {
+                        try {
+                            const iframe = document.createElement('iframe');
+                            iframe.style.display = 'none';
+                            document.body.appendChild(iframe);
+                            return { writable: await createSWWritable(name, iframe), name };
+                        } catch (e) {
+                            addLog('info', 'SW not available: ' + e.message);
+                        }
+                    }
+                    return { memory: true, name };
+                },
+            });
+
+            for (const out of result.outputs) {
+                if (out.blob) downloadBlob(out.blob, out.name);
+                addLog('success', `${out.name} (${formatBytes(out.size)})`);
+                if (out.missing.length > 0) {
+                    addLog('warn', `${out.missing.length} NCA(s) referenced by CNMT not found in input`);
+                }
+            }
+            if (result.outputs.length === 0) {
+                addLog('warn', 'No titles produced (all outputs exist?)');
+            }
+            fileStatus[0] = result.outputs.length > 0 ? 'ok' : 'skip';
+            updateFileList();
+        } catch (error) {
+            addLog('error', `Split failed: ${error.message}`);
+            fileStatus[0] = 'err';
+            updateFileList();
+        }
+
+        converting = false;
+        updateButtonLabel();
+        progressTitle.textContent = 'Done';
+        updateProgress(1);
+    }
+
+    convertBtn.addEventListener('click', async () => {
+        if (mode === 'merge') await runMerge();
+        else if (mode === 'split') await runSplit();
+        else await runConvert();
     });
 
     const ro = new ResizeObserver(() => requestAnimationFrame(() => snapFileListHeight()));
