@@ -15,7 +15,11 @@ export class Ticket {
             0x010005: 0x3C
         };
 
-        const sigSize = signatureSizes[signatureType] || 0x100;
+        if (!(signatureType in signatureSizes)) {
+            throw new Error('Invalid ticket format');
+        }
+
+        const sigSize = signatureSizes[signatureType];
         offset += sigSize;
 
         const paddingSize = 0x40 - ((sigSize + 4) % 0x40);

@@ -4,6 +4,8 @@ Prioritized areas for improvement identified 2026-05-30.
 
 ## High Impact
 
+- ❌ **PFS0-offset variant: `sectionStart || 0x20` and `allowRawPfs0` — not used** — considered a `0x20` default when the PFS0 offset field is `0`, plus an `allowRawPfs0` option probing offset 0. Rejected because the field at FsHeader+`0x40` is the PFS0 region **Offset** from `HierarchicalSha256Data.LayerRegions` (region 1; Size at `0x48`) and the section hash table verifies PFS0 bytes starting exactly at that offset — on a valid NCA it cannot be wrong (MasterHash mismatch otherwise). `sectionStart == 0` is a legitimate value meaning "PFS0 at section offset 0"; masking it with `|| 0x20` would mislocate such files, and neither Python nsz nor nscb_rust has any `0x20`/offset-0 fallback (see "Format Research" below).
+
 - ✅ **`PFS0Writer` fixPadding double-padding + namesLen off-by-one** — `fs/pfs0.js`. Two bugs in `PFS0Writer.buildHeader()`:
   1. `namesLen` reduce had initial value `1` instead of `0`, making it always 1 byte larger than the actual string table. Skewed alignment calculations.
   2. When `fixPadding=true`, `paddedSize` already makes `0x10 + fileCount*0x18 + paddedSize` 0x20-aligned, but `headerSize` added another `(0x20 - inner % 0x20)` on top. This created a 0x20-byte gap between header end and data start that the PFS0 entries didn't account for (entries stored `offset=0` relative to headerEnd, but data was at headerEnd+0x20). The PFS0 was self-inconsistent — consumers parsing the header would look at the wrong file offset.
@@ -29,6 +31,20 @@ Prioritized areas for improvement identified 2026-05-30.
 - ❌ **Нет финального flush zstd** — `fs/ncz.js:_decompressStream`, `crypto/zstddec-stream-wrapper.js`. Bug report claimed flush needed after all blocks. **Not a bug**: `ZSTD_decompressStream` returns `0` only when frame fully decoded with no residual output. Calling with empty input (`srcSize = 0`) is a no-op — API already drains all output internally.
 
 - ❌ **Manual `%`→`&` for power-of-2 in aes128.js** — `crypto/aes128.js`. V8 TurboFan strength-reduces `% 4`, `% 16` to `& 3`, `& 15` automatically. Manual replacement gave < 6% on full AES block — not worth readability loss. **Keeping `%`/`Math.floor` for readability.**
+
+## Format Research (2026-08-02)
+
+- **PFS0 offset in meta-NCA sections: spec field, not heuristics** — how to locate the inner PFS0 in a decrypted meta-NCA section:
+  - Per switchbrew, the field at FsHeader+`0x40` is the PFS0 filesystem region **Offset** from `HierarchicalSha256Data.LayerRegions` (region 1; Size at `0x48`). The section hash table verifies PFS0 bytes starting exactly at that offset — on a valid NCA the field cannot be wrong (MasterHash mismatch otherwise).
+  - **Python nsz**: trusts the field directly — `Pfs0.sectionStart = buffer[0x40:0x48]` used in `section.partition(fs.sectionStart, ...)` (`Fs/Nca.py:236`), no `0x20` default, no offset-0 probe; failure → `IOError('Not a valid PFS0 partition')`, swallowed per section.
+  - **nscb_rust**: trusts the same field for hash patching (`pfs0_offset()` at `0x440`, `nca.rs:343`); for CNMT discovery it scans the first 1 MiB of the decrypted section for the `PFS0` magic (`pfs0_candidate_offsets`, `ops/split.rs:908-921`) — it deliberately does not rely on a single offset.
+  - **Conclusion**: all references agree the field is authoritative (switchbrew, Python nsz, nscb_rust) — field-based lookup is correct and kept as-is, no fallback heuristics needed. If real files ever show a wrong field, mirror nscb_rust and scan for the magic instead of guessing offsets.
+
+- **XCI: HEAD probing + root-HFS0 offset semantics**:
+  - CardHeader magic: standard XCI at absolute `0x100`; raw/full dump CardHeader block at `0x1000`, magic at `0x1100`. All references agree: switchbrew, FinalRom (`xci_reader.dart`: probe `0x100` → `0x1100`, reads `hfs0_offset` at `headOffset+0x30`), Python nsz (`headerOffset = 0x1000` → magic at `0x1100`). Fixed our probe accordingly.
+  - `hfs0_offset` (CardHeader+`0x130`): root HFS0 is read at **absolute** `hfs0Offset` in FinalRom, nscb_rust and switchbrew. Python nsz is the outlier: for full XCI it reads at `hfs0Offset + 0x1000` (`Fs/Xci.py`).
+  - Empirically verified with synthetic standard/full XCI files against nsz 4.6.1 (`/tmp/nsz_xci_probe.py`): nsz accepts field `0xF000` (standard layout — reads root HFS0 at `0x10000` via `+0x1000`) and rejects absolute `0x10000` (`Not a valid HFS0 partition`).
+  - **Conclusion**: keep absolute semantics (FinalRom model) — decided, no change.
 
 ## Medium Impact
 
