@@ -111,7 +111,16 @@ async function main() {
         }
     }
 
-    overwriteBtn.classList.toggle('hidden', downloadMode !== 'fsa');
+    function updateOptionsVisibility() {
+        const fixVisible = mode === 'convert';
+        const verifyVisible = mode === 'convert';
+        const overwriteVisible = downloadMode === 'fsa';
+        fixPaddingBtn.classList.toggle('hidden', !fixVisible);
+        verifyBtn.classList.toggle('hidden', !verifyVisible);
+        overwriteBtn.classList.toggle('hidden', !overwriteVisible);
+    }
+
+    updateOptionsVisibility();
 
     const converter = new NSZConverter();
     const files = [];
@@ -155,6 +164,7 @@ async function main() {
     function setMode(m) {
         mode = m;
         document.querySelectorAll('.pill[data-op]').forEach(b => b.classList.toggle('on', b.dataset.op === m));
+        updateOptionsVisibility();
         const keep = [];
         const keepStatus = [];
         for (let i = 0; i < files.length; i++) {
@@ -352,7 +362,7 @@ async function main() {
             document.querySelectorAll('.pill[data-mode]').forEach(b => b.classList.remove('on'));
             btn.classList.add('on');
             downloadMode = radio.value;
-            overwriteBtn.classList.toggle('hidden', downloadMode !== 'fsa');
+            updateOptionsVisibility();
         });
     });
 
