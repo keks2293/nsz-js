@@ -46,6 +46,13 @@ Prioritized areas for improvement identified 2026-05-30.
   - Empirically verified with synthetic standard/full XCI files against nsz 4.6.1 (`/tmp/nsz_xci_probe.py`): nsz accepts field `0xF000` (standard layout — reads root HFS0 at `0x10000` via `+0x1000`) and rejects absolute `0x10000` (`Not a valid HFS0 partition`).
   - **Conclusion**: keep absolute semantics (FinalRom model) — decided, no change.
 
+- **Meta-NCA CNMT: `files[0]` in `parseCnmtFromDecryptedSection`** — `fs/nca.js:196`. Reviewed how references select the CNMT file inside a decrypted meta-NCA section:
+  - **Python nsz**: picks the file by extension — `Fs.factory` maps `.cnmt` → `Cnmt`, `BaseFs.getCnmt()` iterates files and returns the first `isinstance(f, Cnmt)` (`Fs/BaseFs.py:202`).
+  - **nscb_rust**: scans the first 1 MiB of the section for `PFS0` magic candidates (`pfs0_candidate_offsets`, `ops/split.rs:908`), parses each, and selects the entry named `*.cnmt`, with a sanity check (`title_id >> 52 == 0x100` + non-empty `content_entries`, `ops/split.rs:850-857`).
+  - **FinalRom**: takes `cnmtFiles.first` (`lib/switch/unmerger.dart:147`) — identical to ours.
+  - **Spec**: switchbrew (NCA Content FS): "NCA-type0 Meta — Only contains the `.cnmt` file". Empirically verified: all real meta-NCA sections (base/update/DLC, LN II) contain exactly one file. Real nstool dump (`jakcron/nstool#94`): meta section tree is a single `Application_<TitleId>.cnmt`.
+  - **Conclusion**: our `files[0]` is correct per spec; the extension-filter in nsz/nscb_rust is redundant defensive coding with identical observable behavior. **No change.** If a real file ever contains a non-CNMT first entry, mirror nsz/nscb_rust and select by `.cnmt` extension instead.
+
 ## Medium Impact
 
 - ✅ **Duplicated XCZ→XCI logic between converter.js and nsz-cli.js** — ~124 lines of identical algorithm (partition iteration, HFS0 building, NCZ decompression, hash verification) reimplemented with different I/O APIs. Core logic extracted into `fs/xcz-convert.js` with adapter pattern: `{ read, write, createHash, log, progress }`. Browser and CLI each provide platform-specific adapters. CLI `convertXCZ` reduced from ~170 to ~30 lines. Browser streaming path reduced from ~100 to ~15 lines.
