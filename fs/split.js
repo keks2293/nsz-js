@@ -15,18 +15,20 @@ function stem(name) {
     return dot === -1 ? name : name.slice(0, dot);
 }
 
-async function collectTicketsByRightsId(reader, ticketEntries, log = () => {}) {
-    const map = new Map();
+async function collectTickets(reader, ticketEntries, log = () => {}) {
+    const byRightsId = new Map();
+    const byTitleId = new Map();
     for (const e of ticketEntries) {
         try {
             const data = (await reader.read(e.offset, e.size)).slice();
             const t = Ticket.parse(data.buffer);
-            map.set(t.rightsId.toLowerCase(), e);
+            byRightsId.set(t.rightsId.toLowerCase(), e);
+            byTitleId.set(t.titleId.toLowerCase(), e);
         } catch (err) {
             log('warn', `Skipping malformed ticket: ${e.name}`);
         }
     }
-    return map;
+    return { byRightsId, byTitleId };
 }
 
 export async function splitNSP(reader, keys, outputFactory, options = {}) {
@@ -51,7 +53,7 @@ export async function splitNSP(reader, keys, outputFactory, options = {}) {
         throw new Error('splitNSP: no .nca files found in the input');
     }
 
-    const ticketsByRightsId = await collectTicketsByRightsId(reader, ticketEntries, log);
+    const { byRightsId, byTitleId } = await collectTickets(reader, ticketEntries, log);
 
     const parsedHeaders = new Map();
     for (const [name, entry] of ncaEntries) {
@@ -135,17 +137,24 @@ export async function splitNSP(reader, keys, outputFactory, options = {}) {
             fileList.push(e);
         }
 
+        let tik = null;
         if (g.rightsId) {
-            const tik = ticketsByRightsId.get(g.rightsId);
-            if (tik) {
-                writer.add(tik.name, tik.size);
-                fileList.push(tik);
-                const tikStem = stem(tik.name);
-                for (const cert of certEntries) {
-                    if (stem(cert.name) === tikStem) {
-                        writer.add(cert.name, cert.size);
-                        fileList.push(cert);
-                    }
+            tik = byRightsId.get(g.rightsId);
+            if (!tik) {
+                log('warn', `Protected title ${g.titleId} (rightsId=${g.rightsId}): no matching ticket in input`);
+            }
+        }
+        if (!tik) {
+            tik = byTitleId.get(g.titleId.toLowerCase());
+        }
+        if (tik) {
+            writer.add(tik.name, tik.size);
+            fileList.push(tik);
+            const tikStem = stem(tik.name);
+            for (const cert of certEntries) {
+                if (stem(cert.name) === tikStem) {
+                    writer.add(cert.name, cert.size);
+                    fileList.push(cert);
                 }
             }
         }

@@ -1,5 +1,9 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-08-05)
+
+1. **Fix: split lost `.tik`/`.cert` for titles with `rightsId=0` (e.g. DLC)** — `fs/split.js`. Ticket lookup used only `rightsId` from NCA headers; DLC whose NCAs are unencrypted (PUBLICDATA, `rightsId=0`) still ship with a ticket/cert, but split silently dropped them. `collectTicketsByRightsId` → `collectTickets` now builds two indexes (`byRightsId`, `byTitleId`); attachment falls back to matching a ticket whose `titleId` (first 16 hex chars of `rightsId`) equals the CNMT title id. Protected titles with no matching ticket now emit a `warn` instead of silently omitting the ticket. Verified on Little Nightmares II merged NSP: DLC outputs went from 2 files (no ticket) to 4 files (`cnmt.nca`, `nca`, `.tik`, `.cert`). Matches nscb_rust's filename-prefix ticket matching; certs stay stem-matched (tighter than nscb_rust's all-certs-everywhere).
+
 ## ✅ Recent Changes (2026-08-02)
 
 1. **Fix: CNMT `ContentEntry.type` offset** — `fs/cnmt.js`. Read at byte `54`/`0x36` per spec (was `53`); fixes meta/deltaFragment title filtering.
