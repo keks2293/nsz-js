@@ -150,7 +150,7 @@ async function main() {
         if (mode === 'convert') return isCompressedGame(name);
         if (mode === 'merge') {
             const lower = name.toLowerCase();
-            return lower.endsWith('.nsp') || lower.endsWith('.xci');
+            return lower.endsWith('.nsp') || lower.endsWith('.nsz') || lower.endsWith('.xci') || lower.endsWith('.xcz');
         }
         return name.toLowerCase().endsWith('.nsp');
     }
@@ -625,7 +625,7 @@ async function main() {
         iframe.style.display = 'none';
         document.body.appendChild(iframe);
 
-        const outputName = files[0].name.replace(/\.(nsp|xci)$/i, '') + '_merged.nsp';
+        const outputName = files[0].name.replace(/\.(nsp|nsz|xci|xcz)$/i, '') + '_merged.nsp';
         let writable = null;
         if (downloadMode !== 'blob' && directoryHandle) {
             try {

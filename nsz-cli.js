@@ -88,7 +88,7 @@ async function main() {
         console.log('');
         console.log('Usage:');
         console.log('  node nsz-cli.js <input> [keys.txt] [options]        convert .nsz -> .nsp, .xcz -> .xci');
-        console.log('  node nsz-cli.js --merge <nsp|xci> <nsp|xci> [...] [options] merge NSPs/XCIs into one .nsp (base+update+dlc)');
+        console.log('  node nsz-cli.js --merge <nsp|nsz|xci|xcz> <nsp|nsz|xci|xcz> [...] [options] merge NSPs/NSZs/XCIs/XCZs into one .nsp (base+update+dlc)');
         console.log('  node nsz-cli.js --split <nsp> [keys.txt] [options]  split a merged NSP into one .nsp per title');
         console.log('');
         console.log('Input formats:');
@@ -101,7 +101,7 @@ async function main() {
         console.log('  --rm-source          Delete input file(s) after successful operation');
         console.log('  --no-verify, -nv     Skip SHA256 verification [convert]');
         console.log('  --fix-padding, -p    Re-pad PFS0 header to 0x20 boundary [convert] (default: reuse input string-table size, matching Python nsz)');
-        console.log('  --keys <file>        Keys file [convert, split] (needed for --split CNMT parsing)');
+        console.log('  --keys <file>        Keys file [convert, merge, split] (needed for --split CNMT parsing and encrypted NCZ decryption)');
         console.log('');
     }
 
@@ -112,18 +112,19 @@ async function main() {
 
     if (mergeMode) {
         if (positionals.length < 2) {
-            console.error('Error: --merge requires at least two .nsp/.xci inputs.');
+            console.error('Error: --merge requires at least two .nsp/.nsz/.xci/.xcz inputs.');
             printUsage();
             process.exit(1);
         }
         for (const p of positionals) {
             const ext = path.extname(p).toLowerCase();
-            if (ext !== '.nsp' && ext !== '.xci') {
-                console.error(`Error: --merge inputs must be .nsp or .xci files: ${p}`);
+            if (ext !== '.nsp' && ext !== '.nsz' && ext !== '.xci' && ext !== '.xcz') {
+                console.error(`Error: --merge inputs must be .nsp/.nsz/.xci/.xcz files: ${p}`);
                 process.exit(1);
             }
         }
-        await mergeNSPs(positionals, outputDir, overwrite, rmSource);
+        const keys = await loadKeys(keysPath, false);
+        await mergeNSPs(positionals, keys, outputDir, overwrite, rmSource);
         return;
     }
 
@@ -208,7 +209,7 @@ function openInputReader(inputPath) {
     return { reader: new FileDescriptorReader(fd, 0, inputSize), fd, inputSize };
 }
 
-async function mergeNSPs(inputPaths, outputDir, overwrite, rmSource) {
+async function mergeNSPs(inputPaths, keys, outputDir, overwrite, rmSource) {
     console.log('=== MERGE NSPs ===');
     const stem = path.basename(inputPaths[0], path.extname(inputPaths[0]));
     const outName = `${stem}_merged.nsp`;
@@ -234,6 +235,7 @@ async function mergeNSPs(inputPaths, outputDir, overwrite, rmSource) {
         let result;
         try {
             result = await mergeNSPFile(readers, { fd: outputFd }, {
+                keys,
                 log: (level, msg) => console.log(msg),
                 progress: () => {},
             });

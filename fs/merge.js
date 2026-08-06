@@ -1,6 +1,15 @@
 import { PFS0, PFS0Writer } from './pfs0.js';
 import { buildAdapter, collectBlob, copyRange } from './adapter.js';
 import { XCIReader } from './xci.js';
+import { NCZDecompressor, AdapterNCZReader, parseNczSections } from './ncz.js';
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
 
 async function openContainer(r) {
     const magic = await r.reader.read(0, 4);
@@ -28,7 +37,7 @@ async function openContainer(r) {
 }
 
 export async function mergeNSP(readers, output, options = {}) {
-    const { log = () => {}, progress = () => {} } = options;
+    const { log = () => {}, progress = () => {}, keys = null } = options;
 
     if (!Array.isArray(readers) || readers.length < 2) {
         throw new Error('mergeNSP: at least two NSP/XCI inputs are required');
@@ -43,10 +52,20 @@ export async function mergeNSP(readers, output, options = {}) {
         const { kind, entries } = await openContainer(r);
         log('info', `Reading ${r.name}: ${entries.length} entries (${kind})`);
         for (const f of entries) {
-            if (seenNames.has(f.name)) continue;
-            seenNames.add(f.name);
-            members.push({ name: f.name, src: i, offset: f.offset, size: f.size });
-            totalDataSize += f.size;
+            const isNcz = f.name.toLowerCase().endsWith('.ncz');
+            const outputName = isNcz ? f.name.slice(0, -4) + '.nca' : f.name;
+            if (seenNames.has(outputName)) continue;
+            seenNames.add(outputName);
+            if (isNcz) {
+                const nczReader = new AdapterNCZReader(r.reader, f.offset, f.size);
+                const { ncaSize, sections } = await parseNczSections(nczReader);
+                log('info', `[DECOMPRESS] ${f.name} -> ${outputName} (${formatBytes(ncaSize)})`);
+                members.push({ name: outputName, src: i, offset: f.offset, size: ncaSize, isNcz: true, nczLen: f.size });
+                totalDataSize += ncaSize;
+            } else {
+                members.push({ name: outputName, src: i, offset: f.offset, size: f.size, isNcz: false });
+                totalDataSize += f.size;
+            }
         }
     }
 
@@ -69,16 +88,24 @@ export async function mergeNSP(readers, output, options = {}) {
     for (let i = 0; i < members.length; i++) {
         const m = members[i];
         const writePos = headerSize + writer.files[i].offset;
-        await copyRange(
-            readers[m.src].reader,
-            m.offset,
-            m.size,
-            (pos, data) => adapter.write(writePos + pos, data),
-            (n) => {
-                written += n;
-                progress(written / totalDataSize, `Copying ${m.name}...`);
-            },
-        );
+        const doneBefore = written;
+        if (m.isNcz) {
+            const nczReader = new AdapterNCZReader(readers[m.src].reader, m.offset, m.nczLen);
+            const decomp = new NCZDecompressor(nczReader, keys);
+            await decomp.decompress(
+                (p) => progress((doneBefore + m.size * p) / totalDataSize, `Decompressing ${m.name}...`),
+                (chunk, offset) => adapter.write(writePos + offset, chunk),
+            );
+        } else {
+            await copyRange(
+                readers[m.src].reader,
+                m.offset,
+                m.size,
+                (pos, data) => adapter.write(writePos + pos, data),
+                (n) => progress((doneBefore + n) / totalDataSize, `Copying ${m.name}...`),
+            );
+        }
+        written = doneBefore + m.size;
     }
 
     const totalSize = headerSize + totalDataSize;
