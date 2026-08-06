@@ -91,7 +91,7 @@ class NSZConverter {
             return { update: (d) => h.update(d), hex: () => h.hex() };
         };
 
-        const result = await convertXCZ(fileReader, this.keys, writable ? { writable } : { memory: true }, {
+        const result = await convertXCZ(fileReader, writable ? { writable } : { memory: true }, {
             verify,
             log: onLog,
             progress: onProgress,

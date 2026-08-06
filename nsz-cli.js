@@ -101,7 +101,7 @@ async function main() {
         console.log('  --rm-source          Delete input file(s) after successful operation');
         console.log('  --no-verify, -nv     Skip SHA256 verification [convert]');
         console.log('  --fix-padding, -p    Re-pad PFS0 header to 0x20 boundary [convert] (default: reuse input string-table size, matching Python nsz)');
-        console.log('  --keys <file>        Keys file [convert, split] (needed for --split CNMT parsing and .xcz partition decryption)');
+        console.log('  --keys <file>        Keys file [split] (required for --split CNMT parsing; used by convert --verify for CNMT hash checks)');
         console.log('');
     }
 
@@ -194,7 +194,7 @@ async function loadKeys(keysPath, warnNoKeys) {
     if (!keys) {
         const msg = warnNoKeys
             ? 'Warning: No keys loaded - CNMT parsing for --split may fail'
-            : 'Warning: No keys loaded - NCA verification and .xcz decryption may be limited';
+            : 'Warning: No keys loaded - convert --verify CNMT hash checks will be skipped';
         console.log(msg);
     }
     return keys;
@@ -316,7 +316,7 @@ async function convertXCZ(inReader, inputFd, inputPath, outputDir, keys, verify,
 
     const outputFd = fs.openSync(outPath, 'w');
     try {
-        await convertXCZFile(inReader, keys, { fd: outputFd }, {
+        await convertXCZFile(inReader, { fd: outputFd }, {
             verify,
             log: (level, msg) => console.log(msg),
             progress: () => {},

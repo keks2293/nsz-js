@@ -32,7 +32,7 @@ const PARTITION_HEADER_SIZE = 0x8000;
 const ROOT_HFS0_PADDED_SIZE = 0x8000;
 const ROOT_HFS0_OFFSET = 0xF000;
 
-async function buildPartitionMetas(xci, keys, verify, adapter, extractCnmtHashMap) {
+async function buildPartitionMetas(xci, verify, adapter, extractCnmtHashMap) {
     const partitions = xci.getPartitions();
     const partitionMetas = [];
 
@@ -127,7 +127,7 @@ async function writeXciHeaders(adapter, xciHeaderBytes, layout, baseOffset = 0, 
     await adapter.write(baseOffset + ROOT_HFS0_OFFSET, rootHeader);
 }
 
-async function writePartitions(adapter, partitionMetas, layout, keys, verify, options) {
+async function writePartitions(adapter, partitionMetas, layout, verify, options) {
     const { partOffsets, partSizes } = layout;
     const { log, progress } = options;
     const totalDataSize = partitionMetas.reduce((s, m) => s + m.totalSize, 0);
@@ -197,11 +197,11 @@ async function writePartitions(adapter, partitionMetas, layout, keys, verify, op
     }
 }
 
-async function convertXCZStreaming(xci, keys, adapter, options, partitionMetas) {
+async function convertXCZStreaming(xci, adapter, options, partitionMetas) {
     const { verify = false, log = () => {}, progress = () => {} } = options;
 
     if (!partitionMetas) {
-        partitionMetas = await buildPartitionMetas(xci, keys, verify, adapter, options.extractCnmtHashMap);
+        partitionMetas = await buildPartitionMetas(xci, verify, adapter, options.extractCnmtHashMap);
     }
 
     const baseOffset = xci.headOffset - 0x100;
@@ -215,12 +215,12 @@ async function convertXCZStreaming(xci, keys, adapter, options, partitionMetas) 
     const xciHeaderBytes = await adapter.read(baseOffset, 0x200);
     await writeXciHeaders(adapter, xciHeaderBytes, layout, baseOffset, prefixData);
 
-    await writePartitions(adapter, partitionMetas, layout, keys, verify, { log, progress, createHash: options.createHash });
+    await writePartitions(adapter, partitionMetas, layout, verify, { log, progress, createHash: options.createHash });
 
     return layout.totalSize;
 }
 
-export async function convertXCZ(reader, keys, output, options = {}) {
+export async function convertXCZ(reader, output, options = {}) {
     const { verify = false, log = () => {}, progress = () => {}, createHash, extractCnmtHashMap } = options;
 
     const xci = new XCIReader(reader);
@@ -229,9 +229,9 @@ export async function convertXCZ(reader, keys, output, options = {}) {
     const read = (offset, size) => reader.read(offset, size);
     const adapter = await buildAdapter(output, read, { log, progress, createHash });
 
-    const partitionMetas = await buildPartitionMetas(xci, keys, verify, adapter, extractCnmtHashMap);
+    const partitionMetas = await buildPartitionMetas(xci, verify, adapter, extractCnmtHashMap);
 
-    const totalSize = await convertXCZStreaming(xci, keys, adapter, {
+    const totalSize = await convertXCZStreaming(xci, adapter, {
         verify, log, progress, createHash,
     }, partitionMetas);
 
