@@ -151,13 +151,12 @@ async function parseNczSections(reader) {
 }
 
 class NCZDecompressor {
-    constructor(data, keys = null) {
+    constructor(data) {
         if (data instanceof DataReader) {
             this.reader = data;
         } else {
             this.reader = new BufferReader(data);
         }
-        this.keys = keys;
     }
 
     async decompress(progressCallback = null, writeChunk = null, parsed = null) {

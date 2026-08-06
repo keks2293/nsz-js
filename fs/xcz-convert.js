@@ -149,7 +149,7 @@ async function writePartitions(adapter, partitionMetas, layout, keys, verify, op
             if (meta.isNcz) {
                 const hasher = verify ? options.createHash() : null;
                 const nczReader = new AdapterNCZReader(adapter, meta.offset, meta.nczLen);
-                const decomp = new NCZDecompressor(nczReader, keys);
+                const decomp = new NCZDecompressor(nczReader);
                 await decomp.decompress(
                     (p) => progress(pct(dataOverall + meta.size * p), `Decompressing ${meta.inputName}...`),
                     async (chunk, offset) => {

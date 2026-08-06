@@ -37,7 +37,7 @@ async function openContainer(r) {
 }
 
 export async function mergeNSP(readers, output, options = {}) {
-    const { log = () => {}, progress = () => {}, keys = null } = options;
+    const { log = () => {}, progress = () => {} } = options;
 
     if (!Array.isArray(readers) || readers.length < 2) {
         throw new Error('mergeNSP: at least two NSP/XCI inputs are required');
@@ -92,7 +92,7 @@ export async function mergeNSP(readers, output, options = {}) {
         const doneBefore = written;
         if (m.isNcz) {
             const nczReader = new AdapterNCZReader(readers[m.src].reader, m.offset, m.nczLen);
-            const decomp = new NCZDecompressor(nczReader, keys);
+            const decomp = new NCZDecompressor(nczReader);
             await decomp.decompress(
                 (p) => progress((doneBefore + m.size * p) / totalDataSize, `Decompressing ${m.name}...`),
                 (chunk, offset) => adapter.write(writePos + offset, chunk),
