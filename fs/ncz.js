@@ -240,16 +240,12 @@ class NCZDecompressor {
         };
 
         if (isNode) {
-            console.log('[ZSTD] Using zstd CLI for Node.js streaming');
-            const { spawn } = await import('node:child_process');
-            const proc = spawn('zstd', ['-d', '--no-check'], { stdio: ['pipe', 'pipe', 'pipe'] });
-            let stderr = '';
-            proc.stderr.on('data', c => stderr += c.toString());
-            const exitPromise = new Promise(r => proc.on('close', (code) => r(code)));
+            const zlib = await import('node:zlib');
+            const decompressor = zlib.createZstdDecompress({ highWaterMark: 1024 * 1024 });
 
             const decompressPromise = (async () => {
                 let decompOffset = UNCOMPRESSABLE_HEADER_SIZE;
-                for await (const nodeChunk of proc.stdout) {
+                for await (const nodeChunk of decompressor) {
                     decompOffset = await processChunk(
                         new Uint8Array(nodeChunk.buffer, nodeChunk.byteOffset, nodeChunk.byteLength),
                         decompOffset
@@ -262,16 +258,14 @@ class NCZDecompressor {
             while (toRead > 0) {
                 const size = Math.min(toRead, READ_CHUNK_SIZE);
                 const chunk = await this.reader.read(pos, size);
-                if (!proc.stdin.write(chunk)) {
-                    await new Promise(r => proc.stdin.once('drain', r));
+                if (!decompressor.write(chunk)) {
+                    await new Promise(r => decompressor.once('drain', r));
                 }
                 pos += chunk.length;
                 toRead -= chunk.length;
             }
-            proc.stdin.end();
+            decompressor.end();
             await decompressPromise;
-            const exitCode = await exitPromise;
-            if (exitCode !== 0) throw new Error(`zstd decompress failed (exit ${exitCode}): ${stderr}`);
         } else {
             console.log('[ZSTD] Using zstddec WASM streaming decompression (async)');
             const { initZstddec, decodeStream } = await import('../crypto/zstddec-stream-wrapper.js');

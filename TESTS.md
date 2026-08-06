@@ -203,7 +203,7 @@ node nsz-cli.js --merge a.nsp b.nsp -o ./out --rm-source              # delete s
 **Synthetic component tests** (build valid-PFS0 NSPs and synthetic XCIs; split uses real `static/prod.keys` with generated NCA headers):
 - merge: 5 members after dedup, member data copied byte-identically
 - merge with XCI input: XCI secure-partition files unioned with NSP files, first-wins dedup across containers, data verified byte-identically (both `[xci, nsp]` and `[nsp, xci]` orders)
-- merge with NSZ input (`test_merge_ncz.mjs`, needs `zstd` CLI for generating synthetic fixtures): streaming-zstd and NCZBLOCK `.ncz` members decompressed to `.nca`, bytes verified against expected NCA; plain members copied; `.ncz`/`.nca` same-stem dedup across inputs keeps the first input
+- merge with NSZ input (`test_merge_ncz.mjs`, needs `zstd` CLI for generating synthetic fixtures): streaming-zstd and NCZBLOCK `.ncz` members decompressed to `.nca`, bytes verified against expected NCA; plain members copied; `.ncz`/`.nca` same-stem dedup across inputs keeps the first input. On Node the `.ncz` streaming decompression uses in-process `zlib.createZstdDecompress` (no CLI subprocess); verified separately with a 200MB synthetic NCZ (byte-identical, ~144ms)
 - split: 1 title group, output has 4 members (meta NCA, program NCA, `.tik`, `.cert`), meta NCA byte-identical to source
 - split round-trip: `--split` then `--merge` reproduces the original member set
 
