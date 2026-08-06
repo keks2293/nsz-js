@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { PFS0Writer, PFS0 } from './fs/pfs0.js';
 import { BufferReader } from './fs/ncz.js';
 import { mergeNSP } from './fs/merge.js';
+import { AesCtr } from './crypto/aes-ops.mjs';
 
 function ascii(str) {
     return new TextEncoder().encode(str);
@@ -294,6 +295,63 @@ async function main() {
         expected.set(new Uint8Array(0x2000).fill(0x11), 0x4000);
         expected.set(ctrPayload, 0x6000);
         assert(bytesEqual(cout, expected), 'AES-CTR section decrypted bytes match expected NCA');
+    }
+
+    // Stateless AES-CTR mid-block regression (regresses the webcrypto / JS-fallback
+    // bug where decrypt in non-16-aligned chunks corrupted the keystream).
+    const midChunk = 1000; // not a multiple of 16
+    const midPlain = new Uint8Array(ctrSecSize);
+    for (let i = 0; i < ctrSecSize; i++) midPlain[i] = (i * 17 + 3) & 0xFF;
+    const midEnc = new Uint8Array(ctrSecSize);
+    const midCtr = new AesCtr(ctrKey, ctrCounter, 0x6000);
+    midEnc.set(await midCtr.encrypt(midPlain), 0);
+    for (const backend of ['js', 'webcrypto']) {
+        const dec = new AesCtr(ctrKey, ctrCounter, 0x6000, backend);
+        const midOut = new Uint8Array(ctrSecSize);
+        for (let off = 0; off < ctrSecSize; off += midChunk) {
+            const n = Math.min(midChunk, ctrSecSize - off);
+            midOut.set(await dec.decrypt(midEnc.subarray(off, off + n)), off);
+        }
+        assert(bytesEqual(midOut, midPlain), `AES-CTR ${backend} backend decrypt in mid-block chunks matches reference`);
+    }
+
+// Stateless seek() continuity: re-seeding a single cipher to nonlocal offsets
+    // (forward jump, unaligned rewind, tail) must reproduce byte-for-byte the
+    // keystream an independent node cipher yields for those absolute positions.
+    // node's createCipheriv cannot itself begin mid-block, so the reference for an
+    // unaligned start `off` is derived from a cipher aligned to the containing
+    // block and sliced `off%16` bytes in.
+    async function nodeKeystreamSlice(off, n) {
+        const tail = off & 15;
+        const z = new Uint8Array(tail + n);
+        const refCtr = new AesCtr(ctrKey, ctrCounter);
+        refCtr.seek(off - tail);
+        const ks = await refCtr.encrypt(z); // zeroes -> raw keystream
+        const plain = midPlain.subarray(off, off + n);
+        const out = new Uint8Array(n);
+        for (let i = 0; i < n; i++) out[i] = plain[i] ^ ks[tail + i];
+        return out;
+    }
+
+    const plan = [
+        { off: 0x0000, n: 0x2000 },             // aligned start
+        { off: 0x9000, n: 0x1000 },             // forward jump (block-aligned)
+        { off: 0x1e042, n: 0x800 },             // unaligned rewind to a live block
+        { off: ctrSecSize - 0x300, n: 0x300 },  // tail (partial run into next block)
+    ];
+    for (const backend of ['js', 'webcrypto']) {
+        const seekCtr = new AesCtr(ctrKey, ctrCounter, 0, backend);
+        for (const { off, n } of plan) {
+            const expected = await nodeKeystreamSlice(off, n);
+            seekCtr.seek(off);
+            const out = new Uint8Array(n);
+            for (let s = 0; s < n; s += midChunk) {
+                const c = Math.min(midChunk, n - s);
+                out.set(await seekCtr.encrypt(midPlain.subarray(off + s, off + s + c)), s);
+            }
+            assert(bytesEqual(out, expected),
+                `AES-CTR ${backend} seek 0x${off.toString(16)} chunked encrypt matches node`);
+        }
     }
 
     console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} TEST(S) FAILED`);
