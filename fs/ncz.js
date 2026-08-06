@@ -160,8 +160,8 @@ class NCZDecompressor {
         this.keys = keys;
     }
 
-    async decompress(progressCallback = null, writeChunk = null) {
-        const { sections, ncaSize, headerEnd, ncaHeader } = await parseNczSections(this.reader);
+    async decompress(progressCallback = null, writeChunk = null, parsed = null) {
+        const { sections, ncaSize, headerEnd, ncaHeader } = parsed ?? await parseNczSections(this.reader);
         console.log('[NCZ] sections:', sections.length, 'ncaSize:', ncaSize, 'headerEnd:', headerEnd);
 
         let useBlock = false;

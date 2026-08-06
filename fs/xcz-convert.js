@@ -67,8 +67,8 @@ async function buildPartitionMetas(xci, keys, verify, adapter, extractCnmtHashMa
             const outputName = isNcz ? f.name.replace(/\.ncz$/i, '.nca') : f.name;
             if (isNcz) {
                 const headerReader = new AdapterNCZReader(adapter, f.offset, Math.min(f.size, 0x10000));
-                const { ncaSize } = await parseNczSections(headerReader);
-                fileMetas.push({ name: outputName, size: ncaSize, isNcz: true, offset: f.offset, nczLen: f.size, inputName: f.name });
+                const parsed = await parseNczSections(headerReader);
+                fileMetas.push({ name: outputName, size: parsed.ncaSize, isNcz: true, offset: f.offset, nczLen: f.size, inputName: f.name, parsed });
             } else {
                 fileMetas.push({ name: outputName, size: f.size, isNcz: false, offset: f.offset, inputName: f.name });
             }
@@ -155,7 +155,8 @@ async function writePartitions(adapter, partitionMetas, layout, keys, verify, op
                     async (chunk, offset) => {
                         if (hasher) hasher.update(chunk);
                         await adapter.write(writePos + offset, chunk);
-                    });
+                    },
+                    meta.parsed);
                 if (hasher) {
                     const hash = hasher.hex();
                     log('info', `  [NCA HASH]   ${hash}`);
