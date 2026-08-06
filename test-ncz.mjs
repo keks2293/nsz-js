@@ -9,7 +9,6 @@ import { NCZDecompressor } from './fs/ncz.js';
 import { AesCtr } from './crypto/aes-ops.mjs';
 import { ZstdDecompressor } from './crypto/zstd.js';
 import { PFS0 } from './fs/pfs0.js';
-import { KeysParser } from './keys.js';
 import { sha256 } from './crypto/sha256.js';
 
 let passed = 0;
@@ -105,16 +104,13 @@ async function testNCZDecompression() {
     
     const nszPath = process.argv[2] || './test.nsz';
     const workingPath = process.argv[3] || './test.nsp';
-    const keysPath = process.argv[4] || './static/prod.keys';
-    
+
     if (!fs.existsSync(nszPath)) {
         console.log('  ⊘ Skipping - NSZ file not found');
         return;
     }
-    
+
     const nszData = fs.readFileSync(nszPath);
-    const keysText = fs.readFileSync(keysPath, 'utf-8');
-    const keys = KeysParser.parse(keysText);
     
     // Extract NCZ file from NSZ container first
     const pfs0 = new PFS0(nszData);
@@ -127,7 +123,7 @@ async function testNCZDecompression() {
     const nczData = nszData.slice(nczFile.offset, nczFile.offset + nczFile.size);
     
     console.log('  Loading NCZ decompressor...');
-    const decompressor = new NCZDecompressor(nczData, keys);
+    const decompressor = new NCZDecompressor(nczData);
     
     console.log('  Starting decompression...');
     const result = await decompressor.decompress();

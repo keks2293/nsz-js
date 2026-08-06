@@ -36,7 +36,7 @@ async function test() {
     const nczData = data.slice(nczFile.offset, nczFile.offset + nczFile.size);
     console.log('NCZ data length:', nczData.length);
 
-    const decompressor = new NCZDecompressor(nczData, null);
+    const decompressor = new NCZDecompressor(nczData);
     const decompressed = new Uint8Array(await decompressor.decompress());
 
     console.log('Decompressed size:', decompressed.length);

@@ -28,11 +28,11 @@ function verifyFileNameHash(hash, nczName, ncaName, onLog) {
     }
 }
 
-async function convertNSZStreaming(pfs0, keys, adapter, options, cnmtHashes = new Set()) {
+async function convertNSZStreaming(pfs0, adapter, options, cnmtHashes = new Set()) {
     const { verify = false, fixPadding = false } = options;
     const files = pfs0.getFiles();
 
-    const outputMeta = await collectOutputMeta(files, adapter, keys);
+    const outputMeta = await collectOutputMeta(files, adapter);
 
     const writer = new PFS0Writer(fixPadding, pfs0.stringTableSize);
     for (const m of outputMeta) {
@@ -56,7 +56,7 @@ async function convertNSZStreaming(pfs0, keys, adapter, options, cnmtHashes = ne
             options.log('info', `[EXISTS]     ${f.name}`);
             const hasher = verify ? options.createHash() : null;
             const nczReader = new AdapterNCZReader(adapter, meta.offset, meta.nczLen);
-            const decomp = new NCZDecompressor(nczReader, keys);
+            const decomp = new NCZDecompressor(nczReader);
             await decomp.decompress(
                 (p) => options.progress(pct(dataWritten + meta.size * p), `Decompressing ${f.name}...`),
                 async (chunk, offset) => {
@@ -100,7 +100,7 @@ async function convertNSZStreaming(pfs0, keys, adapter, options, cnmtHashes = ne
     return { headerSize: pfs0Header.headerSize, totalDataSize };
 }
 
-async function collectOutputMeta(files, adapter, keys) {
+async function collectOutputMeta(files, adapter) {
     const outputMeta = [];
     for (const f of files) {
         const isNcz = f.name.toLowerCase().endsWith('.ncz');
@@ -116,7 +116,7 @@ async function collectOutputMeta(files, adapter, keys) {
     return outputMeta;
 }
 
-export async function convertNSZ(reader, keys, output, options = {}) {
+export async function convertNSZ(reader, output, options = {}) {
     const { verify = false, fixPadding = false, log = () => {}, progress = () => {}, createHash, extractCnmtHashMap } = options;
 
     const pfs0 = await PFS0.open(reader);
@@ -134,7 +134,7 @@ export async function convertNSZ(reader, keys, output, options = {}) {
 
     const read = (offset, size) => reader.read(offset, size);
     const adapter = await buildAdapter(output, read, { log, progress, createHash });
-    const result = await convertNSZStreaming(pfs0, keys, adapter, {
+    const result = await convertNSZStreaming(pfs0, adapter, {
         verify, fixPadding, log, progress, createHash,
     }, cnmtHashMap);
 
