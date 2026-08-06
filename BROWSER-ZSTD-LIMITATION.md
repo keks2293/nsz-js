@@ -31,17 +31,23 @@ Since `zstddec` handles all cases correctly (both streaming and block decompress
 
 ## The Node.js Path
 
-Node.js CLI (`nsz-cli.js`) uses the system `zstd` binary via `spawn` for streaming decompression (faster, no WASM overhead):
-```javascript
-const proc = spawn('zstd', ['-d', '--no-check'], { stdio: ['pipe', 'pipe', 'pipe'] });
-```
+Node.js does not use a subprocess. Node ≥ 22.11 has native zstd via `node:zlib`:
 
-For NCZBLOCK block decompression, Node.js also uses `zstddec` via `crypto/zstd.js`.
+- Streaming decompression uses `zlib.createZstdDecompress()` (in-process, streaming, handles any window size) — previously this path spawned the system `zstd -d` CLI binary per file, which is no longer done:
+```javascript
+const decompressor = zlib.createZstdDecompress({ highWaterMark: 1024 * 1024 });
+decompressor.write(chunk);
+// ... for await (const chunk of decompressor) { ... }
+```
+- NCZBLOCK block decompression uses `zlib.zstdDecompressSync` on Node.
+
+Browser keeps the WASM `zstddec` path (no native zstd API in browsers).
 
 ## Current Implementation
 
-- `crypto/zstd.js` — All zstddec usage is centralized here. Uses a shared `ZSTDDecoder` instance.
-- `ncz.js` — Browser streaming and block paths use `crypto/zstd.js`
+- `crypto/zstd.js` — `zstddec` usage for block decompression (browser `ZstdDecompressor.decompressBuffer`).
+- `crypto/zstddec-stream-wrapper.js` — browser streaming decompression (`initZstddec` + `decodeStream`).
+- `fs/ncz.js` — Node streaming uses `node:zlib` `createZstdDecompress`, Node block uses `zstdDecompressSync`; browser branches use the two `crypto/zstd*` modules above.
 
 ## Known zstddec Bug
 

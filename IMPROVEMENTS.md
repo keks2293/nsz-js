@@ -118,7 +118,7 @@ Prioritized areas for improvement identified 2026-05-30.
 
 ## Speed Optimization
 
-- ✅ **Use node:zlib for block decompression on Node.js** — `fs/ncz.js:443-445`. Block decompression now uses `node:zlib` (`zstdDecompressSync`) on Node.js instead of WASM (`ZstdDecompressor.decompressBuffer`). Streaming already used zstd CLI (spawn). Benchmark on Trackline Express (109 MB) and Little Nightmares II (580 MB):
+- ✅ **Use node:zlib for block decompression on Node.js** — `fs/ncz.js:443-445`. Block decompression now uses `node:zlib` (`zstdDecompressSync`) on Node.js instead of WASM (`ZstdDecompressor.decompressBuffer`). At the time streaming used the zstd CLI (spawn) — since 2026-08-06 streaming also runs in-process via `zlib.createZstdDecompress` (no subprocess). Benchmark on Trackline Express (109 MB) and Little Nightmares II (580 MB):
 
     **Block mode** (1MB blocks, sequential):
     | Method | Trackline 109MB | LN2 580MB |

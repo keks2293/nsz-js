@@ -205,10 +205,10 @@ class NCZDecompressor {
         }
 
         let sectionIdx = 0;
+        let lastAesCtr = null;
+        let lastDecryptEnd = -1;
         const processChunk = async (chunk, decompOffset) => {
             let offset = 0;
-            let lastAesCtr = null;
-            let lastDecryptEnd = -1;
             while (offset < chunk.length) {
                 const ncaPos = decompOffset + offset;
                 while (sectionIdx < sortedSections.length - 1 &&

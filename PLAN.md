@@ -17,7 +17,7 @@ The project now supports:
 - **Output formats**: `.nsp`, `.nca`, `.xci`
 - **Compression**: zstd streaming and NCZBLOCK block
 - **Crypto**: AES-CTR (types 3, 4/BKTR), key derivation from prod.keys
-- **Decompression**: zstddec WASM (browser), zstd CLI (Node.js streaming)
+- **Decompression**: node:zlib zstd (in-process, Node.js), zstddec WASM (browser)
 - **Verification**: SHA256 hash matching, CNMT hash extraction
 
 See `CHANGELOG.md` for the full status report.
