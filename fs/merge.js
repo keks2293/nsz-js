@@ -58,14 +58,15 @@ export async function mergeNSP(readers, output, options = {}) {
             seenNames.add(outputName);
             if (isNcz) {
                 const nczReader = new AdapterNCZReader(r.reader, f.offset, f.size);
-                const { ncaSize, sections } = await parseNczSections(nczReader);
+                const parsed = await parseNczSections(nczReader);
+                const { ncaSize, sections } = parsed;
                 if (sections.length === 0) {
                     log('warn', `${f.name} is not compressed; copying as-is`);
                     members.push({ name: outputName, src: i, offset: f.offset, size: f.size, isNcz: false });
                     totalDataSize += f.size;
                 } else {
                     log('info', `[DECOMPRESS] ${f.name} -> ${outputName} (${formatBytes(ncaSize)})`);
-                    members.push({ name: outputName, src: i, offset: f.offset, size: ncaSize, isNcz: true, nczLen: f.size });
+                    members.push({ name: outputName, src: i, offset: f.offset, size: ncaSize, isNcz: true, nczLen: f.size, parsed });
                     totalDataSize += ncaSize;
                 }
             } else {
@@ -101,6 +102,7 @@ export async function mergeNSP(readers, output, options = {}) {
             await decomp.decompress(
                 (p) => progress((doneBefore + m.size * p) / totalDataSize, `Decompressing ${m.name}...`),
                 (chunk, offset) => adapter.write(writePos + offset, chunk),
+                m.parsed,
             );
         } else {
             await copyRange(

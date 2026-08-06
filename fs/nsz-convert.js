@@ -62,7 +62,8 @@ async function convertNSZStreaming(pfs0, keys, adapter, options, cnmtHashes = ne
                 async (chunk, offset) => {
                     if (hasher) hasher.update(chunk);
                     await adapter.write(writePos + offset, chunk);
-                });
+                },
+                meta.parsed);
             if (hasher) {
                 const hash = hasher.hex();
                 options.log('info', `[NCA HASH]   ${hash}`);
@@ -106,8 +107,8 @@ async function collectOutputMeta(files, adapter, keys) {
         const outputName = isNcz ? f.name.slice(0, -4) + '.nca' : f.name;
         if (isNcz) {
             const headerReader = new AdapterNCZReader(adapter, f.offset, Math.min(f.size, 0x10000));
-            const { ncaSize } = await parseNczSections(headerReader);
-            outputMeta.push({ name: outputName, size: ncaSize, isNcz: true, offset: f.offset, nczLen: f.size });
+            const parsed = await parseNczSections(headerReader);
+            outputMeta.push({ name: outputName, size: parsed.ncaSize, isNcz: true, offset: f.offset, nczLen: f.size, parsed });
         } else {
             outputMeta.push({ name: outputName, size: f.size, isNcz: false, offset: f.offset });
         }
