@@ -186,7 +186,7 @@ Tests with hardcoded paths skip gracefully when files are not present.
 
 **Purpose:** verify the new NSP merge and split operations (`fs/merge.js`, `fs/split.js`).
 
-**What merge does:** unions the members of 2+ NSPs/XCIs into one NSP, deduplicating by filename (first occurrence wins). No keys needed. XCI inputs contribute their secure-partition files (read header-only via `XCIReader.getSecureFiles()`); mixed `base.xci + update.nsp` → `.nsp` works. Output: `<stem of first input>_merged.nsp`.
+**What merge does:** unions the members of 2+ NSPs/NSZs/XCIs/XCZs into one NSP, deduplicating by output filename (first occurrence wins). Compressed `.ncz` members are decompressed to `.nca` on the fly (both streaming-zstd and NCZBLOCK modes; section AES keys come from the NCZ headers, so no keys file needed). XCI/XCZ inputs contribute their secure-partition files (read header-only via `XCIReader.getSecureFiles()`); mixed `base.xci + update.nsp` → `.nsp` works. Output: `<stem of first input>_merged.nsp`.
 
 **What split does:** for each `.cnmt.nca` in the input, decrypts the NCA header (XTS) and the first section (AES-CTR), parses the inner PFS0 → CNMT, groups the referenced NCAs into a per-title NSP, and attaches the matching `.tik`/`.cert` via rights-id lookup. Needs `header_key` + title-key derivation (any `static/prod.keys`). Output: `{titleId}_{base|update|dlc}_v{version}.nsp` per title.
 
@@ -194,6 +194,8 @@ Tests with hardcoded paths skip gracefully when files are not present.
 ```bash
 node nsz-cli.js --merge base.nsp update.nsp dlc.nsp -o ./out          # merge NSPs (dedup by name)
 node nsz-cli.js --merge base.xci update.nsp -o ./out                  # merge XCI base + NSP update -> NSP
+node nsz-cli.js --merge base.nsz update.nsp -o ./out                  # merge NSZ base (decompresses .ncz members) + NSP update
+node nsz-cli.js --merge base.xcz dlc.nsp -o ./out                     # merge XCZ base (decompresses .ncz members) + NSP DLC
 node nsz-cli.js --split merged.nsp ./static/prod.keys -o ./out        # split per title
 node nsz-cli.js --merge a.nsp b.nsp -o ./out --rm-source              # delete sources after
 ```
@@ -201,10 +203,11 @@ node nsz-cli.js --merge a.nsp b.nsp -o ./out --rm-source              # delete s
 **Synthetic component tests** (build valid-PFS0 NSPs and synthetic XCIs; split uses real `static/prod.keys` with generated NCA headers):
 - merge: 5 members after dedup, member data copied byte-identically
 - merge with XCI input: XCI secure-partition files unioned with NSP files, first-wins dedup across containers, data verified byte-identically (both `[xci, nsp]` and `[nsp, xci]` orders)
+- merge with NSZ input (`test_merge_ncz.mjs`, needs `zstd` CLI for generating synthetic fixtures): streaming-zstd and NCZBLOCK `.ncz` members decompressed to `.nca`, bytes verified against expected NCA; plain members copied; `.ncz`/`.nca` same-stem dedup across inputs keeps the first input
 - split: 1 title group, output has 4 members (meta NCA, program NCA, `.tik`, `.cert`), meta NCA byte-identical to source
 - split round-trip: `--split` then `--merge` reproduces the original member set
 
-**Browser:** Mode switcher (Convert / Merge / Split). Merge needs ≥2 `.nsp`/`.xci`, Split needs exactly 1 `.nsp`. Works with File System (FSA), Stream (Service Worker), or Blob download modes.
+**Browser:** Mode switcher (Convert / Merge / Split). Merge needs ≥2 `.nsp`/`.nsz`/`.xci`/`.xcz`, Split needs exactly 1 `.nsp`. Works with File System (FSA), Stream (Service Worker), or Blob download modes.
 
 ---
 
@@ -222,6 +225,7 @@ node nsz-cli.js --merge a.nsp b.nsp -o ./out --rm-source              # delete s
 | Ticket key analysis | - | ✅ test_ticket_keys.mjs | - |
 | AES-CTR + zstd | - | ✅ test_convert.mjs | - |
 | NSP/XCI merge (union + dedup, XCI inputs) | ✅ FinalRom merger | ✅ CLI (synthetic NSP + XCI) | ✅ browser/Playwright |
+| NSZ/XCZ merge (NCZ decompression to .nca) | - | ✅ test_merge_ncz.mjs (streaming + NCZBLOCK) | ✅ browser/Playwright |
 | NSP split (CNMT grouping, per-title NSP) | ✅ FinalRom unmerger | ✅ CLI (synthetic NSP + real keys) | ✅ browser/Playwright |
 
 ---

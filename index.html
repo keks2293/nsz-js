@@ -688,7 +688,7 @@
                             </svg>
                         </div>
                         <div class="drop-text">Drop files here or tap to browse</div>
-                        <div class="drop-hint">convert <b>.nsz</b> → .nsp &nbsp;|&nbsp; <b>.xcz</b> → .xci<br>merge <b>.nsp</b>/<b>.xci</b> → one merged .nsp<br>split merged .nsp → per-title .nsp</div>
+                        <div class="drop-hint">convert <b>.nsz</b> → .nsp &nbsp;|&nbsp; <b>.xcz</b> → .xci<br>merge <b>.nsp</b>/<b>.nsz</b>/<b>.xci</b>/<b>.xcz</b> → one merged .nsp<br>split merged .nsp → per-title .nsp</div>
                     </div>
                     <div class="drop-zone-error" id="dropZoneError" style="display:none">
                         <div class="drop-icon" style="background:rgba(248,113,113,0.15)">
@@ -715,12 +715,12 @@
                                 </button>
                                 <div id="operation-info" popover class="info-popover" role="dialog" aria-label="Operation descriptions">
                                     <b>Convert</b> — .nsz → .nsp, .xcz → .xci.<br>
-                                    <b>Merge</b> — merge .nsp/.xci (base + update + DLC) into one .nsp.<br>
+                                    <b>Merge</b> — merge .nsp/.nsz/.xci/.xcz (base + update + DLC) into one .nsp. Compressed .ncz members are decompressed to .nca.<br>
                                     <b>Split</b> — split a merged NSP into one .nsp per title. Needs keys.
                                 </div>
                                 <div class="pills segmented" id="operationOptions">
                                     <button class="pill on" data-op="convert" title="Decompress .nsz/.xcz into .nsp/.xci">Convert</button>
-                                    <button class="pill" data-op="merge" title="Merge multiple NSPs/XCIs into one NSP (base + update + DLC)">Merge</button>
+                                    <button class="pill" data-op="merge" title="Merge multiple NSPs/NSZs/XCIs/XCZs into one NSP (base + update + DLC)">Merge</button>
                                     <button class="pill" data-op="split" title="Split a merged NSP into one .nsp per title">Split</button>
                                 </div>
                             </div>

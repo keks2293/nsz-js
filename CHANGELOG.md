@@ -1,5 +1,9 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-08-06)
+
+1. **Feature: compressed file support on merge (.nsz/.xcz inputs)** — `fs/merge.js`, `nsz-cli.js`, `converter.js`, `main.js`, `index.html`. `mergeNSP` now accepts compressed containers: PFS0 with `.ncz` members (NSZ) and XCIs with `.ncz` members (XCZ). `.ncz` members are decompressed to `.nca` on the fly during the copy phase (`NCZDecompressor` with `AdapterNCZReader`, both streaming-zstd and NCZBLOCK modes) — section AES keys are read from the NCZ headers, so no keys file is required (still accepted via `--keys`). Dedup is now by output filename (`foo.ncz` ↔ `foo.nca` collide, first input wins). Non-compressed `.ncz` (plain NCA with wrong extension) falls back to raw copy with a `warn`. CLI `--merge` accepts `.nsz`/`.xcz` extensions and passes keys through; browser merge mode accepts `.nsz`/`.xcz` files and output-name regex extended. New test `test_merge_ncz.mjs` (synthetic NSZ, streaming + NCZBLOCK, dedup-across-extension).
+
 ## ✅ Recent Changes (2026-08-05)
 
 1. **Fix: split lost `.tik`/`.cert` for titles with `rightsId=0` (e.g. DLC)** — `fs/split.js`. Ticket lookup used only `rightsId` from NCA headers; DLC whose NCAs are unencrypted (PUBLICDATA, `rightsId=0`) still ship with a ticket/cert, but split silently dropped them. `collectTicketsByRightsId` → `collectTickets` now builds two indexes (`byRightsId`, `byTitleId`); attachment falls back to matching a ticket whose `titleId` (first 16 hex chars of `rightsId`) equals the CNMT title id. Protected titles with no matching ticket now emit a `warn` instead of silently omitting the ticket. Verified on Little Nightmares II merged NSP: DLC outputs went from 2 files (no ticket) to 4 files (`cnmt.nca`, `nca`, `.tik`, `.cert`). Matches nscb_rust's filename-prefix ticket matching; certs stay stem-matched (tighter than nscb_rust's all-certs-everywhere).

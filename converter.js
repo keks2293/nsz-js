@@ -116,12 +116,13 @@ class NSZConverter {
         }));
 
         const result = await mergeNSP(readers, writable ? { writable } : { memory: true }, {
+            keys: this.keys,
             log: onLog,
             progress: onProgress,
         });
 
         onProgress(1.0, 'Done!');
-        const outputName = files[0].name.replace(/\.(nsp|xci)$/i, '') + '_merged.nsp';
+        const outputName = files[0].name.replace(/\.(nsp|nsz|xci|xcz)$/i, '') + '_merged.nsp';
         onLog('success', `Output: ${outputName} (${this.formatBytes(result.size)}), ${result.memberCount} members`);
         return { blob: result.blob || null, name: outputName, size: result.size, memberCount: result.memberCount, writable: !!writable };
     }
