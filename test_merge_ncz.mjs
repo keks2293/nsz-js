@@ -141,7 +141,7 @@ async function main() {
             { name: 'synthetic.nsp', reader: makeReader(nspData) },
         ],
         { memory: true },
-        { keys: null, log: (l, m) => logs.push(m), progress: () => {} },
+        { log: (l, m) => logs.push(m), progress: () => {} },
     );
 
     console.log('Merge log:');
@@ -180,7 +180,7 @@ async function main() {
             { name: 'dup.nsz', reader: makeReader(nszDup) },
         ],
         { memory: true },
-        { keys: null, log: (l, m) => dupLogs.push(m), progress: () => {} },
+        { log: (l, m) => dupLogs.push(m), progress: () => {} },
     );
     const dupMerged = new PFS0(new Uint8Array(await dupResult.blob.arrayBuffer()));
     const dupFiles = dupMerged.getFiles();
@@ -204,7 +204,7 @@ async function main() {
             { name: 'block.nsp', reader: makeReader(nspBlock) },
         ],
         { memory: true },
-        { keys: null, log: (l, m) => blockLogs.push(m), progress: () => {} },
+        { log: (l, m) => blockLogs.push(m), progress: () => {} },
     );
     const blockMerged = new PFS0(new Uint8Array(await blockResult.blob.arrayBuffer()));
     const blockOut = blockMerged.getFiles().find(f => f.name === 'block-test.nca');
@@ -236,7 +236,7 @@ async function main() {
             { name: 'rand.nsp', reader: makeReader(nspRand) },
         ],
         { memory: true },
-        { keys: null, log: (l, m) => randLogs.push(m), progress: () => {} },
+        { log: (l, m) => randLogs.push(m), progress: () => {} },
     );
     const randMerged = new PFS0(new Uint8Array(await randResult.blob.arrayBuffer()));
     const randOut = randMerged.getFiles().find(f => f.name === 'rand-test.nca');
@@ -253,18 +253,24 @@ async function main() {
 
     // AES-CTR section (cryptoType 3): regresses the decrypt continuity bug where
     // re-seeding the cipher on unaligned chunk boundaries corrupted output.
+    // The section is ~16MB of random bytes, deliberately NOT a multiple of 16:
+    // with the 16MB input-feeding pattern, node's streaming zstd emits at least
+    // one output chunk starting at a non-16-aligned position inside the section,
+    // so the old code (which re-seeded the cipher at every chunk) produced a
+    // shifted keystream for that whole chunk. Verified: this exact case corrupts
+    // on the pre-fix code (788 wrong bytes), passes byte-identical on the fix.
+    const ctrSecSize = 0x1000001;
     const ctrKey = new Uint8Array(16);
     const ctrCounter = new Uint8Array(16);
     for (let i = 0; i < 16; i++) ctrKey[i] = (i * 11 + 5) & 0xFF;
     const { AesCtr } = await import('./crypto/aes-ops.mjs');
-    const ctrPayload = new Uint8Array(0x8000);
-    for (let i = 0; i < ctrPayload.length; i++) ctrPayload[i] = (i * 3 + 1) & 0xFF;
+    const ctrPayload = randomBytes(ctrSecSize);
     const encrypted = new Uint8Array(ctrPayload);
     const ctr = new AesCtr(ctrKey, ctrCounter, 0x4000 + 0x2000);
     encrypted.set(await ctr.decrypt(ctrPayload), 0);
     const nczCtr = buildNczSections(header, [
         { offset: 0x4000, size: 0x2000, cryptoType: 1, data: new Uint8Array(0x2000).fill(0x11) },
-        { offset: 0x6000, size: 0x8000, cryptoType: 3, key: ctrKey, counter: ctrCounter, data: encrypted },
+        { offset: 0x6000, size: ctrSecSize, cryptoType: 3, key: ctrKey, counter: ctrCounter, data: encrypted },
     ]);
     const nszCtr = buildPfs0([{ name: 'ctr-test.ncz', data: nczCtr }]);
     const nspCtr = buildPfs0([{ name: 'ctr-other.nca', data: extraNca }]);
@@ -275,7 +281,7 @@ async function main() {
             { name: 'ctr.nsp', reader: makeReader(nspCtr) },
         ],
         { memory: true },
-        { keys: null, log: (l, m) => ctrLogs.push(m), progress: () => {} },
+        { log: (l, m) => ctrLogs.push(m), progress: () => {} },
     );
     const ctrMerged = new PFS0(new Uint8Array(await ctrResult.blob.arrayBuffer()));
     const ctrOut = ctrMerged.getFiles().find(f => f.name === 'ctr-test.nca');
@@ -283,7 +289,7 @@ async function main() {
     if (ctrOut) {
         const cd = new Uint8Array(await ctrResult.blob.arrayBuffer());
         const cout = cd.subarray(ctrOut.offset, ctrOut.offset + ctrOut.size);
-        const expected = new Uint8Array(0x4000 + 0x2000 + 0x8000);
+        const expected = new Uint8Array(0x4000 + 0x2000 + ctrSecSize);
         expected.set(header, 0);
         expected.set(new Uint8Array(0x2000).fill(0x11), 0x4000);
         expected.set(ctrPayload, 0x6000);
