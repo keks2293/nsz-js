@@ -11,18 +11,23 @@ if (isNode) {
 
 const hasWebCrypto = !isNode && typeof crypto !== 'undefined' && crypto.subtle?.encrypt;
 
+function webcryptoSubtle() {
+    return globalThis.crypto?.subtle;
+}
+
 class AesCtr {
-    constructor(key, nonce, offset = 0) {
+    constructor(key, nonce, offset = 0, backend = 'auto') {
         if (key.length !== BLOCK_SIZE) throw new Error(`Key must be ${BLOCK_SIZE} bytes`);
         this.key = key;
         this.nonce = nonce;
         this._counter = null;
         this._cryptoKey = null;
-        if (nodeCrypto) {
+        this._backend = backend === 'auto'
+            ? (nodeCrypto ? 'node' : (hasWebCrypto ? 'webcrypto' : 'js'))
+            : backend;
+        if (this._backend === 'node') {
             // cipher created in seek()
-        } else if (hasWebCrypto) {
-            // cryptoKey lazy in encrypt()
-        } else {
+        } else if (this._backend === 'js') {
             this._fallbackAes = new AesEcb(key);
         }
         this.seek(offset);
@@ -36,26 +41,42 @@ class AesCtr {
             counter[j] = tmp & 0xff;
             tmp = Math.floor(tmp / 256);
         }
-        if (nodeCrypto) {
+        if (this._backend === 'node') {
             this._cipher = nodeCrypto.createCipheriv('aes-128-ctr', this.key, counter);
+        }
+        this._pos = offset;
+    }
+
+    async _ensureCryptoKey() {
+        if (!this._cryptoKey) {
+            const subtle = webcryptoSubtle();
+            this._cryptoKey = await subtle.importKey(
+                'raw', this.key, { name: 'AES-CTR' }, false, ['encrypt']
+            );
         }
     }
 
-    async encrypt(data) {
-        if (nodeCrypto) {
-            return this._cipher.update(data);
+    // 16-byte keystream block for the current counter (does not advance it)
+    async _keystreamBlock() {
+        if (this._backend === 'webcrypto') {
+            await this._ensureCryptoKey();
+            return new Uint8Array(await webcryptoSubtle().encrypt(
+                { name: 'AES-CTR', counter: this._counter, length: 64 },
+                this._cryptoKey, new Uint8Array(BLOCK_SIZE)
+            ));
         }
-        if (hasWebCrypto) {
-            if (!this._cryptoKey) {
-                this._cryptoKey = await crypto.subtle.importKey(
-                    'raw', this.key, { name: 'AES-CTR' }, false, ['encrypt']
-                );
-            }
-            const blocks = (data.length + 15) >> 4;
-            const result = await crypto.subtle.encrypt(
+        return this._fallbackAes.encryptBlock(this._counter);
+    }
+
+    // data starts at a 16-aligned absolute position; counter is seek()ed there
+    async _encryptAligned(data) {
+        if (this._backend === 'webcrypto') {
+            await this._ensureCryptoKey();
+            const result = await webcryptoSubtle().encrypt(
                 { name: 'AES-CTR', counter: this._counter, length: 64 },
                 this._cryptoKey, data
             );
+            const blocks = (data.length + 15) >> 4;
             for (let b = 0; b < blocks; b++) {
                 for (let j = BLOCK_SIZE - 1; j >= 8; j--) {
                     this._counter[j]++;
@@ -65,6 +86,37 @@ class AesCtr {
             return new Uint8Array(result);
         }
         return AesCtrJS(this._fallbackAes, this._counter, data);
+    }
+
+    async encrypt(data) {
+        if (this._backend === 'node') {
+            const out = this._cipher.update(data);
+            this._pos += data.length;
+            return out;
+        }
+        // Stateless paths (webcrypto / pure-JS) generate keystream per whole block,
+        // so a chunk that starts mid-block needs the tail of the previous block's
+        // keystream first, then block-aligned continuation.
+        const out = new Uint8Array(data.length);
+        let src = 0;
+        let pos = this._pos;
+        if (pos % BLOCK_SIZE !== 0) {
+            const blockOff = pos % BLOCK_SIZE;
+            this.seek(pos);
+            const ks = await this._keystreamBlock();
+            const headLen = Math.min(BLOCK_SIZE - blockOff, data.length);
+            for (let i = 0; i < headLen; i++) out[src + i] = data[src + i] ^ ks[blockOff + i];
+            src += headLen;
+            pos += headLen;
+        }
+        if (src < data.length) {
+            this.seek(pos);
+            const res = await this._encryptAligned(data.subarray(src));
+            out.set(res, src);
+            pos += data.length - src;
+        }
+        this._pos = pos;
+        return out;
     }
 
     async decrypt(data) {
