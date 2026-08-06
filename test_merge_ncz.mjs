@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { PFS0Writer, PFS0 } from './fs/pfs0.js';
 import { BufferReader } from './fs/ncz.js';
 import { mergeNSP } from './fs/merge.js';
@@ -19,7 +20,7 @@ function u64le(view, bytes, offset, value) {
 }
 
 function buildNcz(header, payload) {
-    const compressed = execFileSync('zstd', ['-q', '-c'], { input: Buffer.from(payload) });
+    const compressed = execFileSync('zstd', ['-q', '-c'], { input: Buffer.from(payload), maxBuffer: 64 * 1024 * 1024 });
     const sectionCount = 1;
     const headerSize = 0x4000;
     const entrySize = 64;
@@ -37,10 +38,38 @@ function buildNcz(header, payload) {
     return buf;
 }
 
+function buildNczSections(header, sections) {
+    // sections: [{ offset, size, cryptoType, key, counter, data }], sorted by offset, contiguous
+    const sectionCount = sections.length;
+    const headerSize = 0x4000;
+    const entrySize = 64;
+    const sectionsOff = headerSize + 8 + 8;
+    const dataOff = sectionsOff + entrySize * sectionCount;
+    const payload = [];
+    for (const s of sections) payload.push(s.data);
+    const compressed = execFileSync('zstd', ['-q', '-c'], { input: Buffer.concat(payload), maxBuffer: 64 * 1024 * 1024 });
+    const buf = new Uint8Array(dataOff + compressed.length);
+    buf.set(header, 0);
+    buf.set(ascii('NCZSECTN'), 0x4000);
+    const view = new DataView(buf.buffer);
+    u64le(view, buf, 0x4008, sectionCount);
+    for (let i = 0; i < sectionCount; i++) {
+        const s = sections[i];
+        const off = sectionsOff + i * entrySize;
+        u64le(view, buf, off + 0, s.offset);
+        u64le(view, buf, off + 8, s.size);
+        u64le(view, buf, off + 16, s.cryptoType);
+        buf.set(s.key ?? new Uint8Array(16), off + 32);
+        buf.set(s.counter ?? new Uint8Array(16), off + 48);
+    }
+    buf.set(compressed, dataOff);
+    return buf;
+}
+
 function buildNczBlock(header, payload) {
     const blockSizeExponent = 14;
     const blockSize = 1 << blockSizeExponent;
-    const compressed = execFileSync('zstd', ['-q', '-c'], { input: Buffer.from(payload) });
+    const compressed = execFileSync('zstd', ['-q', '-c'], { input: Buffer.from(payload), maxBuffer: 64 * 1024 * 1024 });
     const numberOfBlocks = Math.ceil(payload.length / blockSize);
     const blockHeaderOff = 0x4000 + 8 + 8 + 64;
     const sizeListOff = blockHeaderOff + 24;
@@ -193,6 +222,78 @@ async function main() {
         expected.set(header, 0);
         expected.set(blockPayload, 0x4000);
         assert(bytesEqual(bout, expected), 'NCZBLOCK member decompressed bytes match expected NCA');
+    }
+
+    // High-entropy (random) streaming payload: exercises the write-backpressure path
+    // in _decompressStream on incompressible data (large single write past the zstd
+    // transform's highWaterMark). Guards against re-entrant/'drain'-style write loops
+    // that corrupt zstd streaming output on random frames.
+    const randomPayload = new Uint8Array(0xC00000);
+    for (let i = 0; i < randomPayload.length; i += 4096) {
+        randomPayload.set(randomBytes(Math.min(4096, randomPayload.length - i)), i);
+    }
+    const nczRand = buildNcz(header, randomPayload);
+    const nszRand = buildPfs0([{ name: 'rand-test.ncz', data: nczRand }]);
+    const nspRand = buildPfs0([{ name: 'rand-other.nca', data: extraNca }]);
+    const randLogs = [];
+    const randResult = await mergeNSP(
+        [
+            { name: 'rand.nsz', reader: makeReader(nszRand) },
+            { name: 'rand.nsp', reader: makeReader(nspRand) },
+        ],
+        { memory: true },
+        { keys: null, log: (l, m) => randLogs.push(m), progress: () => {} },
+    );
+    const randMerged = new PFS0(new Uint8Array(await randResult.blob.arrayBuffer()));
+    const randOut = randMerged.getFiles().find(f => f.name === 'rand-test.nca');
+    assert(randOut !== undefined, 'high-entropy NCZ member decompressed to .nca in output');
+    if (randOut) {
+        const rd = new Uint8Array(await randResult.blob.arrayBuffer());
+        const rout = rd.subarray(randOut.offset, randOut.offset + randOut.size);
+        const expected = new Uint8Array(0x4000 + randomPayload.length);
+        expected.set(header, 0);
+        expected.set(randomPayload, 0x4000);
+        assert(rout.length === expected.length, `high-entropy decompressed size correct (${rout.length} == ${expected.length})`);
+        assert(bytesEqual(rout, expected), 'high-entropy decompressed bytes match expected NCA');
+    }
+
+    // AES-CTR section (cryptoType 3): regresses the decrypt continuity bug where
+    // re-seeding the cipher on unaligned chunk boundaries corrupted output.
+    const ctrKey = new Uint8Array(16);
+    const ctrCounter = new Uint8Array(16);
+    for (let i = 0; i < 16; i++) ctrKey[i] = (i * 11 + 5) & 0xFF;
+    const { AesCtr } = await import('./crypto/aes-ops.mjs');
+    const ctrPayload = new Uint8Array(0x8000);
+    for (let i = 0; i < ctrPayload.length; i++) ctrPayload[i] = (i * 3 + 1) & 0xFF;
+    const encrypted = new Uint8Array(ctrPayload);
+    const ctr = new AesCtr(ctrKey, ctrCounter, 0x4000 + 0x2000);
+    encrypted.set(await ctr.decrypt(ctrPayload), 0);
+    const nczCtr = buildNczSections(header, [
+        { offset: 0x4000, size: 0x2000, cryptoType: 1, data: new Uint8Array(0x2000).fill(0x11) },
+        { offset: 0x6000, size: 0x8000, cryptoType: 3, key: ctrKey, counter: ctrCounter, data: encrypted },
+    ]);
+    const nszCtr = buildPfs0([{ name: 'ctr-test.ncz', data: nczCtr }]);
+    const nspCtr = buildPfs0([{ name: 'ctr-other.nca', data: extraNca }]);
+    const ctrLogs = [];
+    const ctrResult = await mergeNSP(
+        [
+            { name: 'ctr.nsz', reader: makeReader(nszCtr) },
+            { name: 'ctr.nsp', reader: makeReader(nspCtr) },
+        ],
+        { memory: true },
+        { keys: null, log: (l, m) => ctrLogs.push(m), progress: () => {} },
+    );
+    const ctrMerged = new PFS0(new Uint8Array(await ctrResult.blob.arrayBuffer()));
+    const ctrOut = ctrMerged.getFiles().find(f => f.name === 'ctr-test.nca');
+    assert(ctrOut !== undefined, 'AES-CTR NCZ member decompressed to .nca in output');
+    if (ctrOut) {
+        const cd = new Uint8Array(await ctrResult.blob.arrayBuffer());
+        const cout = cd.subarray(ctrOut.offset, ctrOut.offset + ctrOut.size);
+        const expected = new Uint8Array(0x4000 + 0x2000 + 0x8000);
+        expected.set(header, 0);
+        expected.set(new Uint8Array(0x2000).fill(0x11), 0x4000);
+        expected.set(ctrPayload, 0x6000);
+        assert(bytesEqual(cout, expected), 'AES-CTR section decrypted bytes match expected NCA');
     }
 
     console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} TEST(S) FAILED`);
