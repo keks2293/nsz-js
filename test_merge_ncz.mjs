@@ -1,15 +1,9 @@
 #!/usr/bin/env node
-import { execFileSync, spawnSync } from 'node:child_process';
+import { zstdCompressSync } from 'node:zlib';
 import { randomBytes } from 'node:crypto';
 import { PFS0Writer, PFS0 } from './fs/pfs0.js';
 import { BufferReader } from './fs/ncz.js';
 import { mergeNSP } from './fs/merge.js';
-
-const hasZstd = spawnSync('zstd', ['--version']).status === 0;
-if (!hasZstd) {
-    console.log('  ⊘ Skipping - zstd CLI not found (needed to synthesize test NCZ files)');
-    process.exit(0);
-}
 
 function ascii(str) {
     return new TextEncoder().encode(str);
@@ -20,7 +14,7 @@ function u64le(view, bytes, offset, value) {
 }
 
 function buildNcz(header, payload) {
-    const compressed = execFileSync('zstd', ['-q', '-c'], { input: Buffer.from(payload), maxBuffer: 64 * 1024 * 1024 });
+    const compressed = zstdCompressSync(Buffer.from(payload));
     const sectionCount = 1;
     const headerSize = 0x4000;
     const entrySize = 64;
@@ -47,7 +41,7 @@ function buildNczSections(header, sections) {
     const dataOff = sectionsOff + entrySize * sectionCount;
     const payload = [];
     for (const s of sections) payload.push(s.data);
-    const compressed = execFileSync('zstd', ['-q', '-c'], { input: Buffer.concat(payload), maxBuffer: 64 * 1024 * 1024 });
+    const compressed = zstdCompressSync(Buffer.concat(payload));
     const buf = new Uint8Array(dataOff + compressed.length);
     buf.set(header, 0);
     buf.set(ascii('NCZSECTN'), 0x4000);
@@ -69,7 +63,7 @@ function buildNczSections(header, sections) {
 function buildNczBlock(header, payload) {
     const blockSizeExponent = 14;
     const blockSize = 1 << blockSizeExponent;
-    const compressed = execFileSync('zstd', ['-q', '-c'], { input: Buffer.from(payload), maxBuffer: 64 * 1024 * 1024 });
+    const compressed = zstdCompressSync(Buffer.from(payload));
     const numberOfBlocks = Math.ceil(payload.length / blockSize);
     const blockHeaderOff = 0x4000 + 8 + 8 + 64;
     const sizeListOff = blockHeaderOff + 24;

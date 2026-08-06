@@ -129,6 +129,30 @@ Prioritized areas for improvement identified 2026-05-30.
 
     Browser fallback remains WASM.
 
+    **Streaming mode** (real Trackline Express NSZ, largest `.ncz` compressed 107.5 MB → 211.5 MB decompressed; 3 runs, best-of-3):
+    | Method | Raw decode (ms) | Full pipeline w/ AES-CTR (ms) |
+    |---|---|---|
+    | `node:zlib` `createZstdDecompress` | 266 | **337** |
+    | `zstd -d` CLI spawn | 257 | 305–386 (spawn/pipe variance) |
+    | `zstddec` WASM `decodeStream` | **218** | — (browser-only) |
+
+    **Block mode** (`NCZBLOCK`, synthetic 128 MB pattern, 1 MB blocks × 128, level 19; 3 runs):
+    | Method | 128 blocks (ms) |
+    |---|---|
+    | `node:zlib` `zstdDecompressSync` | **29** |
+    | `zstddec` WASM `decompressBuffer` | 30 |
+    | `zstd -d` CLI spawn per block | 654 (~20x) |
+
+    Conclusion: in streaming all three implementations are within noise (~15% spread) — `node:zlib` is on par with the native CLI (and its full pipeline is fastest/least-variance), WASM is not slower but stays browser-only. In block mode `node:zlib` sync and WASM are tied and both ~20x faster than spawning the CLI per block. `node:zlib` additionally removes one subprocess spawn per `.ncz` (matters for multi-member merges).
+
+    **Compression** (50 MB real decompressed Trackline NCA; node:zlib `zstdCompressSync` ignores the `level` option entirely — fixed ~level-3 output, 363 B for all levels 1–22 on a 1 MB pattern):
+    | Method | level 3 (50 MB) | level 19 (50 MB) |
+    |---|---|---|
+    | `zstdCompressSync` | 121–125 ms → 15.7 MB | 120 ms → 15.7 MB (level ignored) |
+    | `zstd` CLI | 73–82 ms → 15.5 MB | 5997–6498 ms → 12.7 MB |
+
+    Node zstd compression is a fixed default level (ratio ≈ CLI level 3); for high-ratio NSZ compression the CLI (level 19) is required. The project only decompresses, so this only matters for test fixture generation (`test_merge_ncz.mjs` now uses `zstdCompressSync` in-process, no CLI dependency).
+
 - ❌ **`_safeView()` method for WASM memory copy safety** — `crypto/zstd.js`. Добавляли статический метод `_safeView(data)` который проверял `data.buffer === wasmBuffer` и делал `slice(0)` только для WASM views. Применяли в `decompressBuffer` и `decodeStream`. **Что проверили**:
     - **Memory grow**: бенчмарк показал 0 grows за 1600 yields (200MB файл). WASM memory не растёт при декомпрессии — начальный аллокации достаточно.
     - **Speedup от removes slice(0)**: 101.6ms vs 129.7ms (22% экономия) на 200MB.
