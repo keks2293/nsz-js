@@ -159,7 +159,7 @@ class AesEcb {
         }
         const out = new Uint8Array(data.length);
         for (let i = 0; i < data.length; i += BLOCK_SIZE) {
-            out.set(this.encryptBlock(data.subarray(i, i + BLOCK_SIZE)), i);
+            this.encryptBlock(data.subarray(i, i + BLOCK_SIZE), out.subarray(i, i + BLOCK_SIZE));
         }
         return out;
     }
@@ -168,12 +168,12 @@ class AesEcb {
         if (data.length % BLOCK_SIZE) throw new Error('Data length must be a multiple of 16');
         const out = new Uint8Array(data.length);
         for (let i = 0; i < data.length; i += BLOCK_SIZE) {
-            out.set(this.decryptBlock(data.subarray(i, i + BLOCK_SIZE)), i);
+            this.decryptBlock(data.subarray(i, i + BLOCK_SIZE), out.subarray(i, i + BLOCK_SIZE));
         }
         return out;
     }
 
-    encryptBlock(block) {
+    encryptBlock(block, out) {
         const k = this.keys;
         let s0 = ((block[0] << 24) | (block[1] << 16) | (block[2] << 8) | block[3]) ^ k[0];
         let s1 = ((block[4] << 24) | (block[5] << 16) | (block[6] << 8) | block[7]) ^ k[1];
@@ -189,28 +189,27 @@ class AesEcb {
             s0 = t0; s1 = t1; s2 = t2; s3 = t3;
         }
 
-        const rk = 40;
-        return new Uint8Array([
-            (sbox[s0 >>> 24] ^ (k[rk] >>> 24)) & 0xff,
-            (sbox[(s1 >>> 16) & 0xff] ^ (k[rk] >>> 16)) & 0xff,
-            (sbox[(s2 >>> 8) & 0xff] ^ (k[rk] >>> 8)) & 0xff,
-            (sbox[s3 & 0xff] ^ k[rk]) & 0xff,
-            (sbox[s1 >>> 24] ^ (k[rk | 1] >>> 24)) & 0xff,
-            (sbox[(s2 >>> 16) & 0xff] ^ (k[rk | 1] >>> 16)) & 0xff,
-            (sbox[(s3 >>> 8) & 0xff] ^ (k[rk | 1] >>> 8)) & 0xff,
-            (sbox[s0 & 0xff] ^ k[rk | 1]) & 0xff,
-            (sbox[s2 >>> 24] ^ (k[rk | 2] >>> 24)) & 0xff,
-            (sbox[(s3 >>> 16) & 0xff] ^ (k[rk | 2] >>> 16)) & 0xff,
-            (sbox[(s0 >>> 8) & 0xff] ^ (k[rk | 2] >>> 8)) & 0xff,
-            (sbox[s1 & 0xff] ^ k[rk | 2]) & 0xff,
-            (sbox[s3 >>> 24] ^ (k[rk | 3] >>> 24)) & 0xff,
-            (sbox[(s0 >>> 16) & 0xff] ^ (k[rk | 3] >>> 16)) & 0xff,
-            (sbox[(s1 >>> 8) & 0xff] ^ (k[rk | 3] >>> 8)) & 0xff,
-            (sbox[s2 & 0xff] ^ k[rk | 3]) & 0xff
-        ]);
+        if (!out) out = new Uint8Array(BLOCK_SIZE);
+        out[0] = (sbox[s0 >>> 24] ^ (k[40] >>> 24)) & 0xff;
+        out[1] = (sbox[(s1 >>> 16) & 0xff] ^ (k[40] >>> 16)) & 0xff;
+        out[2] = (sbox[(s2 >>> 8) & 0xff] ^ (k[40] >>> 8)) & 0xff;
+        out[3] = (sbox[s3 & 0xff] ^ k[40]) & 0xff;
+        out[4] = (sbox[s1 >>> 24] ^ (k[41] >>> 24)) & 0xff;
+        out[5] = (sbox[(s2 >>> 16) & 0xff] ^ (k[41] >>> 16)) & 0xff;
+        out[6] = (sbox[(s3 >>> 8) & 0xff] ^ (k[41] >>> 8)) & 0xff;
+        out[7] = (sbox[s0 & 0xff] ^ k[41]) & 0xff;
+        out[8] = (sbox[s2 >>> 24] ^ (k[42] >>> 24)) & 0xff;
+        out[9] = (sbox[(s3 >>> 16) & 0xff] ^ (k[42] >>> 16)) & 0xff;
+        out[10] = (sbox[(s0 >>> 8) & 0xff] ^ (k[42] >>> 8)) & 0xff;
+        out[11] = (sbox[s1 & 0xff] ^ k[42]) & 0xff;
+        out[12] = (sbox[s3 >>> 24] ^ (k[43] >>> 24)) & 0xff;
+        out[13] = (sbox[(s0 >>> 16) & 0xff] ^ (k[43] >>> 16)) & 0xff;
+        out[14] = (sbox[(s1 >>> 8) & 0xff] ^ (k[43] >>> 8)) & 0xff;
+        out[15] = (sbox[s2 & 0xff] ^ k[43]) & 0xff;
+        return out;
     }
 
-    decryptBlock(block) {
+    decryptBlock(block, out) {
         const k = this.decKeys;
         let s0 = ((block[0] << 24) | (block[1] << 16) | (block[2] << 8) | block[3]) ^ k[40];
         let s1 = ((block[4] << 24) | (block[5] << 16) | (block[6] << 8) | block[7]) ^ k[41];
@@ -226,34 +225,33 @@ class AesEcb {
             s0 = t0; s1 = t1; s2 = t2; s3 = t3;
         }
 
-        const rk = 0;
-        return new Uint8Array([
-            (invSbox[s0 >>> 24] ^ (k[rk] >>> 24)) & 0xff,
-            (invSbox[(s3 >>> 16) & 0xff] ^ (k[rk] >>> 16)) & 0xff,
-            (invSbox[(s2 >>> 8) & 0xff] ^ (k[rk] >>> 8)) & 0xff,
-            (invSbox[s1 & 0xff] ^ k[rk]) & 0xff,
-            (invSbox[s1 >>> 24] ^ (k[rk | 1] >>> 24)) & 0xff,
-            (invSbox[(s0 >>> 16) & 0xff] ^ (k[rk | 1] >>> 16)) & 0xff,
-            (invSbox[(s3 >>> 8) & 0xff] ^ (k[rk | 1] >>> 8)) & 0xff,
-            (invSbox[s2 & 0xff] ^ k[rk | 1]) & 0xff,
-            (invSbox[s2 >>> 24] ^ (k[rk | 2] >>> 24)) & 0xff,
-            (invSbox[(s1 >>> 16) & 0xff] ^ (k[rk | 2] >>> 16)) & 0xff,
-            (invSbox[(s0 >>> 8) & 0xff] ^ (k[rk | 2] >>> 8)) & 0xff,
-            (invSbox[s3 & 0xff] ^ k[rk | 2]) & 0xff,
-            (invSbox[s3 >>> 24] ^ (k[rk | 3] >>> 24)) & 0xff,
-            (invSbox[(s2 >>> 16) & 0xff] ^ (k[rk | 3] >>> 16)) & 0xff,
-            (invSbox[(s1 >>> 8) & 0xff] ^ (k[rk | 3] >>> 8)) & 0xff,
-            (invSbox[s0 & 0xff] ^ k[rk | 3]) & 0xff
-        ]);
+        if (!out) out = new Uint8Array(BLOCK_SIZE);
+        out[0] = (invSbox[s0 >>> 24] ^ (k[0] >>> 24)) & 0xff;
+        out[1] = (invSbox[(s3 >>> 16) & 0xff] ^ (k[0] >>> 16)) & 0xff;
+        out[2] = (invSbox[(s2 >>> 8) & 0xff] ^ (k[0] >>> 8)) & 0xff;
+        out[3] = (invSbox[s1 & 0xff] ^ k[0]) & 0xff;
+        out[4] = (invSbox[s1 >>> 24] ^ (k[1] >>> 24)) & 0xff;
+        out[5] = (invSbox[(s0 >>> 16) & 0xff] ^ (k[1] >>> 16)) & 0xff;
+        out[6] = (invSbox[(s3 >>> 8) & 0xff] ^ (k[1] >>> 8)) & 0xff;
+        out[7] = (invSbox[s2 & 0xff] ^ k[1]) & 0xff;
+        out[8] = (invSbox[s2 >>> 24] ^ (k[2] >>> 24)) & 0xff;
+        out[9] = (invSbox[(s1 >>> 16) & 0xff] ^ (k[2] >>> 16)) & 0xff;
+        out[10] = (invSbox[(s0 >>> 8) & 0xff] ^ (k[2] >>> 8)) & 0xff;
+        out[11] = (invSbox[s3 & 0xff] ^ k[2]) & 0xff;
+        out[12] = (invSbox[s3 >>> 24] ^ (k[3] >>> 24)) & 0xff;
+        out[13] = (invSbox[(s2 >>> 16) & 0xff] ^ (k[3] >>> 16)) & 0xff;
+        out[14] = (invSbox[(s1 >>> 8) & 0xff] ^ (k[3] >>> 8)) & 0xff;
+        out[15] = (invSbox[s0 & 0xff] ^ k[3]) & 0xff;
+        return out;
     }
 }
 
 function AesCtrJS(aes, counter, data) {
     const out = new Uint8Array(data.length);
     for (let off = 0; off < data.length; off += BLOCK_SIZE) {
-        const ks = aes.encryptBlock(counter);
+        aes.encryptBlock(counter, out.subarray(off, off + BLOCK_SIZE));
         for (let j = 0; j < BLOCK_SIZE && off + j < data.length; j++) {
-            out[off + j] = data[off + j] ^ ks[j];
+            out[off + j] = data[off + j] ^ out[off + j];
         }
         for (let j = BLOCK_SIZE - 1; j >= 8; j--) {
             counter[j]++;
@@ -261,16 +259,6 @@ function AesCtrJS(aes, counter, data) {
         }
     }
     return out;
-}
-
-function xor(a, b) {
-    const r = new Uint8Array(a.length);
-    for (let i = 0; i < a.length; i++) r[i] = a[i] ^ b[i];
-    return r;
-}
-
-function xorInto(dst, a, b) {
-    for (let i = 0; i < dst.length; i++) dst[i] = a[i] ^ b[i];
 }
 
 function getTweakBytes(sector) {
@@ -282,16 +270,17 @@ function getTweakBytes(sector) {
     return buf;
 }
 
-function gf128Mul(tweak) {
-    const result = new Uint8Array(16);
+// In-place GF(2^128) multiply storing into `tweak` (the alpha-chain per block).
+function gf128MulIn(tweak) {
     let carry = 0;
     for (let i = 0; i < 16; i++) {
         const newCarry = (tweak[i] >>> 7) & 1;
-        result[i] = ((tweak[i] << 1) | carry) & 0xff;
+        const shifted = ((tweak[i] << 1) | carry) & 0xff;
         carry = newCarry;
+        tweak[i] = shifted;
     }
-    if (carry) result[0] ^= 0x87;
-    return result;
+    if (carry) tweak[0] ^= 0x87;
+    return tweak;
 }
 
 const SECTOR_SIZE = 0x200;
@@ -309,23 +298,21 @@ class AesXts {
 
     decrypt(data, startSector = 0) {
         const result = new Uint8Array(data.length);
+        const xored = new Uint8Array(BLOCK_SIZE);
         let sector = startSector;
 
         for (let offset = 0; offset < data.length; offset += SECTOR_SIZE) {
             const chunkSize = Math.min(SECTOR_SIZE, data.length - offset);
             const chunk = data.subarray(offset, offset + chunkSize);
             const tweakBytes = getTweakBytes(sector);
-            let tweak = this._encTweak(tweakBytes);
-            const xored = new Uint8Array(BLOCK_SIZE);
+            const tweak = this._encTweak(tweakBytes);
 
-            for (let i = 0; i < chunk.length; i += BLOCK_SIZE) {
-                const blockEnd = Math.min(i + BLOCK_SIZE, chunk.length);
-                if (blockEnd - i < BLOCK_SIZE) break;
+            for (let i = 0; i + BLOCK_SIZE <= chunk.length; i += BLOCK_SIZE) {
                 const block = chunk.subarray(i, i + BLOCK_SIZE);
-                xorInto(xored, block, tweak);
+                for (let j = 0; j < BLOCK_SIZE; j++) xored[j] = block[j] ^ tweak[j];
                 const decrypted = this._decData(xored);
-                xorInto(result.subarray(offset + i, offset + i + BLOCK_SIZE), decrypted, tweak);
-                tweak = gf128Mul(tweak);
+                for (let j = 0; j < BLOCK_SIZE; j++) result[offset + i + j] = decrypted[j] ^ tweak[j];
+                gf128MulIn(tweak);
             }
             sector++;
         }
