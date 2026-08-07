@@ -75,7 +75,56 @@ node test_aes_manual.cjs
 
 ---
 
-### bench_aes.mjs (Node.js - Benchmark)
+### test_aes128.mjs (Node.js)
+**Location:** `/test_aes128.mjs`
+**Purpose:** Regression vectors for the software AES-128 primitives (`crypto/aes128.js`)
+**What it tests:**
+- `AesEcb.encrypt` single-block, `encryptBlock` with caller-provided `out` (in-place) and without (fresh alloc)
+- `AesCtrJS` keystream XOR (js-fallback browser path)
+- `AesXts` sector decrypt against a fixed sector-0 vector
+- XTS streaming invariant: whole decrypt == concatenation of sector-aligned chunk decrypts (`startSector` advancing)
+- XTS determinism
+
+Fixed vectors are byte-identical to the pre-optimization reference.
+
+**How to run:**
+```bash
+node test_aes128.mjs
+```
+
+**Expected output:** `8 passed, 0 failed`
+
+---
+
+### bench_aes128.mjs (Node.js — Micro-benchmark)
+**Location:** `/bench_aes128.mjs`
+**Purpose:** In-memory throughput of the software AES primitives (NO disk I/O)
+**Measures (best-of-5, MB/s, `node bench_aes128.mjs [mib]`):**
+- AES-CTR software js-fallback keystream (browser path)
+- AES-XTS software
+- AES-128-CTR via `node:crypto` (reference for the Node/webcrypto path)
+
+**How to run:**
+```bash
+node bench_aes128.mjs 64
+```
+
+---
+
+### bench_real_nsz.mjs (Node.js — Real-pipeline benchmark)
+**Location:** `/bench_real_nsz.mjs`
+**Purpose:** Decompress a real `.nsz` (all `.ncz` members) with the output **discarded** (dev-null) so the SSD is not worn. Reports total MiB, wall time, MB/s (best of N).
+
+**How to run:**
+```bash
+node bench_real_nsz.mjs path/to/file.nsz [runs]
+```
+
+Reference `Little Nightmares II` (5.02 GiB NCZ): ~684 MB/s best-of-3 on the Node path (WebCrypto/native zstd dominate).
+
+---
+
+### bench_aes.mjs (Node.js — Benchmark)
 **Location:** `/bench_aes.mjs`
 **Purpose:** AES-CTR throughput benchmark
 **What it measures:**
