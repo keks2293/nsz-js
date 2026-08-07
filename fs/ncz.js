@@ -4,6 +4,15 @@ const isNode = typeof process !== 'undefined' && process.versions?.node;
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
 const SECTION_CHUNK_SIZE = 0x1000000; // 16MB
 
+// Override the AES-CTR backend for benchmarking/debugging on Node.
+// Values: 'auto' (default), 'node', 'webcrypto', 'js'.
+function aesBackend() {
+    const v = isNode ? process.env.NSZ_AES_CTR_BACKEND : undefined;
+    if (v === undefined || v === 'auto') return 'auto';
+    if (v === 'node' || v === 'webcrypto' || v === 'js') return v;
+    throw new Error(`NSZ_AES_CTR_BACKEND: unsupported value "${v}" (use auto|node|webcrypto|js)`);
+}
+
 function allocByte(n) {
     return new Uint8Array(n);
 }
@@ -199,7 +208,7 @@ class NCZDecompressor {
         const sectionAesCtrs = new Map();
         for (const s of sortedSections) {
             if (s.cryptoType === 3 || s.cryptoType === 4) {
-                sectionAesCtrs.set(s, new AesCtr(s.cryptoKey, s.cryptoCounter));
+                sectionAesCtrs.set(s, new AesCtr(s.cryptoKey, s.cryptoCounter, 0, aesBackend()));
             }
         }
 
@@ -313,7 +322,7 @@ class NCZDecompressor {
 
             let aesCtr = null;
             if (section.cryptoType === 3 || section.cryptoType === 4) {
-                aesCtr = new AesCtr(section.cryptoKey, section.cryptoCounter);
+                aesCtr = new AesCtr(section.cryptoKey, section.cryptoCounter, 0, aesBackend());
                 aesCtr.seek(i);
             }
 

@@ -83,6 +83,16 @@ Browser HTML files load dependencies:
 
 **DO NOT use import maps or CDN URLs** - the whole point of the `static/` folder is to enable offline use.
 
+## Benchmarking
+
+**Never write benchmark output to real disk repeatedly** — it wears the SSD. Benchmark rules:
+
+- **Real-pipeline benchmarks**: run on the real `.nsz`/`.ncz` file with output **discarded** (stream to `/dev/null`, i.e. `writeChunk` that drops data). Do NOT write full decompressed output to disk just to measure throughput.
+- **Micro-benchmarks** (e.g. AES primitives): use in-memory buffers (64 MiB), no disk I/O at all.
+- Report **best-of-N** (≥3 runs) and **MB/s**, not wall time of a single run. Warm up before measuring.
+- When comparing an optimization, verify **byte-identical output** vs. the reference implementation first (e.g. `verify_clean.mjs` pattern), then measure.
+- Persist useful bench/verify scripts in the repo (`bench_*.mjs`, `test_*.mjs`) instead of throwing them away.
+
 ## Package Versions
 
 Current versions (update this when upgrading):
