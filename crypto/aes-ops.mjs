@@ -97,18 +97,23 @@ class AesCtr {
         // Stateless paths (webcrypto / pure-JS) generate keystream per whole block,
         // so a chunk that starts mid-block needs the tail of the previous block's
         // keystream first, then block-aligned continuation.
+        let pos = this._pos;
+        if (pos % BLOCK_SIZE === 0) {
+            // aligned fast path: no head, return the cipher output directly (no extra copy)
+            this.seek(pos);
+            const res = await this._encryptAligned(data);
+            this._pos = pos + data.length;
+            return res;
+        }
         const out = new Uint8Array(data.length);
         let src = 0;
-        let pos = this._pos;
-        if (pos % BLOCK_SIZE !== 0) {
-            const blockOff = pos % BLOCK_SIZE;
-            this.seek(pos);
-            const ks = await this._keystreamBlock();
-            const headLen = Math.min(BLOCK_SIZE - blockOff, data.length);
-            for (let i = 0; i < headLen; i++) out[src + i] = data[src + i] ^ ks[blockOff + i];
-            src += headLen;
-            pos += headLen;
-        }
+        const blockOff = pos % BLOCK_SIZE;
+        this.seek(pos);
+        const ks = await this._keystreamBlock();
+        const headLen = Math.min(BLOCK_SIZE - blockOff, data.length);
+        for (let i = 0; i < headLen; i++) out[src + i] = data[src + i] ^ ks[blockOff + i];
+        src += headLen;
+        pos += headLen;
         if (src < data.length) {
             this.seek(pos);
             const res = await this._encryptAligned(data.subarray(src));
