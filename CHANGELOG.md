@@ -1,5 +1,9 @@
 # NSZ to NSP Converter - Status Report
 
+## ✅ Recent Changes (2026-08-08)
+
+1. **Refactor: move AES-CTR backend selection into `crypto/aes-ops.mjs`** — new `crypto/platform.js` is the single source of truth for `isNode`. `crypto/aes-ops.mjs` now defines `aesBackend()` (`NSZ_AES_CTR_BACKEND` env override, Node only) and imports `isNode` from `platform.js` instead of re-detecting `process`; `fs/ncz.js` imports `aesBackend()` from `aes-ops.mjs` instead of defining its own copy (it keeps its local `isNode` until the follow-up zstd refactor removes it). No behavior change; `test_merge_ncz.mjs` passes.
+
 ## ✅ Recent Changes (2026-08-06)
 
 1. **Feature: compressed file support on merge (.nsz/.xcz inputs)** — `fs/merge.js`, `nsz-cli.js`, `converter.js`, `main.js`, `index.html`. `mergeNSP` now accepts compressed containers: PFS0 with `.ncz` members (NSZ) and XCIs with `.ncz` members (XCZ). `.ncz` members are decompressed to `.nca` on the fly during the copy phase (`NCZDecompressor` with `AdapterNCZReader`, both streaming-zstd and NCZBLOCK modes) — section AES keys are read from the NCZ headers, so no keys file is required (still accepted via `--keys`). Dedup is now by output filename (`foo.ncz` ↔ `foo.nca` collide, first input wins). CLI `--merge` accepts `.nsz`/`.xcz` extensions and passes keys through; browser merge mode accepts `.nsz`/`.xcz` files and output-name regex extended. New test `test_merge_ncz.mjs` (synthetic NSZ, streaming + NCZBLOCK, dedup-across-extension).

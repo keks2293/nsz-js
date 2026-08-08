@@ -1,17 +1,8 @@
-import { AesCtr } from '../crypto/aes-ops.mjs';
+import { AesCtr, aesBackend } from '../crypto/aes-ops.mjs';
 
 const isNode = typeof process !== 'undefined' && process.versions?.node;
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
 const SECTION_CHUNK_SIZE = 0x1000000; // 16MB
-
-// Override the AES-CTR backend for benchmarking/debugging on Node.
-// Values: 'auto' (default), 'node', 'webcrypto', 'js'.
-function aesBackend() {
-    const v = isNode ? process.env.NSZ_AES_CTR_BACKEND : undefined;
-    if (v === undefined || v === 'auto') return 'auto';
-    if (v === 'node' || v === 'webcrypto' || v === 'js') return v;
-    throw new Error(`NSZ_AES_CTR_BACKEND: unsupported value "${v}" (use auto|node|webcrypto|js)`);
-}
 
 function allocByte(n) {
     return new Uint8Array(n);

@@ -1,6 +1,5 @@
 import { BLOCK_SIZE, AesEcb, AesCtrJS, AesXts } from './aes128.js';
-
-const isNode = typeof process !== 'undefined' && process.versions?.node;
+import { isNode } from './platform.js';
 
 let nodeCrypto = null;
 
@@ -10,6 +9,15 @@ if (isNode) {
 }
 
 const hasWebCrypto = !isNode && typeof crypto !== 'undefined' && crypto.subtle?.encrypt;
+
+// Override the AES-CTR backend for benchmarking/debugging on Node.
+// Values: 'auto' (default), 'node', 'webcrypto', 'js'.
+export function aesBackend() {
+    const v = isNode ? process.env.NSZ_AES_CTR_BACKEND : undefined;
+    if (v === undefined || v === 'auto') return 'auto';
+    if (v === 'node' || v === 'webcrypto' || v === 'js') return v;
+    throw new Error(`NSZ_AES_CTR_BACKEND: unsupported value "${v}" (use auto|node|webcrypto|js)`);
+}
 
 function webcryptoSubtle() {
     return globalThis.crypto?.subtle;
