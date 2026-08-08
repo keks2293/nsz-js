@@ -1,6 +1,7 @@
 import { AesCtr, aesBackend } from '../crypto/aes-ops.mjs';
 
 const isNode = typeof process !== 'undefined' && process.versions?.node;
+let nodeZlibPromise = null;
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
 const SECTION_CHUNK_SIZE = 0x1000000; // 16MB
 
@@ -388,7 +389,8 @@ class AsyncBlockDecompressorReader {
 
         if (compressedSize < decompressedSize) {
             if (isNode) {
-                const { zstdDecompressSync } = await import('node:zlib');
+                if (!nodeZlibPromise) nodeZlibPromise = import('node:zlib');
+                const { zstdDecompressSync } = await nodeZlibPromise;
                 this.currentBlock = new Uint8Array(zstdDecompressSync(compressedData));
             } else {
                 const { ZstdDecompressor } = await import('../crypto/zstd.js');
