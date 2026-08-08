@@ -1,7 +1,5 @@
 import { AesCtr, aesBackend } from '../crypto/aes-ops.mjs';
-
-const isNode = typeof process !== 'undefined' && process.versions?.node;
-let nodeZlibPromise = null;
+import { decompressBlock, decompressStream } from '../crypto/zstd.js';
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
 const SECTION_CHUNK_SIZE = 0x1000000; // 16MB
 
@@ -244,50 +242,18 @@ class NCZDecompressor {
             return decompOffset + chunk.length;
         };
 
-        if (isNode) {
-            const zlib = await import('node:zlib');
-            const decompressor = zlib.createZstdDecompress({ highWaterMark: 1024 * 1024 });
-
-            const decompressPromise = (async () => {
-                let decompOffset = UNCOMPRESSABLE_HEADER_SIZE;
-                for await (const nodeChunk of decompressor) {
-                    decompOffset = await processChunk(
-                        new Uint8Array(nodeChunk.buffer, nodeChunk.byteOffset, nodeChunk.byteLength),
-                        decompOffset
-                    );
-                }
-            })();
-
-            let pos = headerEnd;
-            let toRead = remaining;
-            while (toRead > 0) {
-                const size = Math.min(toRead, READ_CHUNK_SIZE);
-                const chunk = await this.reader.read(pos, size);
-                if (!decompressor.write(chunk)) {
-                    await new Promise(r => decompressor.once('drain', r));
-                }
-                pos += chunk.length;
-                toRead -= chunk.length;
-            }
-            decompressor.end();
-            await decompressPromise;
-        } else {
-            console.log('[ZSTD] Using zstddec WASM streaming decompression (async)');
-            const { initZstddec, decodeStream } = await import('../crypto/zstddec-stream-wrapper.js');
-            await initZstddec();
-            let pos = headerEnd;
-            let toRead = remaining;
-            let decompOffset = UNCOMPRESSABLE_HEADER_SIZE;
-            for await (const chunk of decodeStream(async () => {
-                if (toRead <= 0) return null;
-                const size = Math.min(toRead, READ_CHUNK_SIZE);
-                const data = await this.reader.read(pos, size);
-                pos += data.length;
-                toRead -= data.length;
-                return data;
-            })) {
-                decompOffset = await processChunk(chunk, decompOffset);
-            }
+        let pos = headerEnd;
+        let toRead = remaining;
+        let decompOffset = UNCOMPRESSABLE_HEADER_SIZE;
+        for await (const chunk of decompressStream(async () => {
+            if (toRead <= 0) return null;
+            const size = Math.min(toRead, READ_CHUNK_SIZE);
+            const data = await this.reader.read(pos, size);
+            pos += data.length;
+            toRead -= data.length;
+            return data;
+        })) {
+            decompOffset = await processChunk(chunk, decompOffset);
         }
     }
 
@@ -299,6 +265,7 @@ class NCZDecompressor {
         }
         const sizeListSize = blockHeader.numberOfBlocks * 4;
         const sizeListData = await this.reader.read(headerEnd + 24, sizeListSize);
+
         const reader = new AsyncBlockDecompressorReader(
             this.reader, headerEnd,
             blockHeader.blockSizeExponent, blockHeader.numberOfBlocks,
@@ -341,61 +308,60 @@ class NCZDecompressor {
 
 }
 
+// Parse the NCZBLOCK size list into an independent block schedule: per-block
+// relOffset (from baseOffset) and compressedSize in two parallel flat arrays,
+// plus blockSize and the last (short) block's decompressedSize derived from
+// decompressedSize % blockSize. Flat parallel arrays (not per-block objects)
+// for cache locality and zero heap churn on huge NCZ. Pure — no I/O, no
+// container globals — so a parallel block decoder can pair relOffsets[i] with
+// sizes[i] as per-block jobs and run decompressBlock in workers.
+function parseBlockSchedule(blockSizeExponent, numberOfBlocks, decompressedSize, sizeListData) {
+    const blockSize = Math.pow(2, blockSizeExponent);
+    const sizes = new Array(numberOfBlocks);
+    const relOffsets = new Array(numberOfBlocks);
+    let offset = 24 + numberOfBlocks * 4;
+    for (let i = 0; i < numberOfBlocks; i++) {
+        const compressedSize = readUInt32LE(sizeListData, i * 4);
+        sizes[i] = compressedSize;
+        relOffsets[i] = offset;
+        offset += compressedSize;
+    }
+    const remainder = decompressedSize % blockSize;
+    return { sizes, relOffsets, blockSize, remainder };
+}
+
 class AsyncBlockDecompressorReader {
     constructor(reader, baseOffset, blockSizeExponent, numberOfBlocks, decompressedSize, sizeListData) {
         this.reader = reader;
         this.baseOffset = baseOffset;
-        this.blockSize = Math.pow(2, blockSizeExponent);
-        this.numberOfBlocks = numberOfBlocks;
-        this.decompressedSize = decompressedSize;
         this.currentBlock = null;
         this.currentBlockIndex = -1;
 
-        const compressedBlockSizeList = [];
-        for (let i = 0; i < numberOfBlocks; i++) {
-            compressedBlockSizeList.push(readUInt32LE(sizeListData, i * 4));
-        }
-
-        const blockDataOffset = 24 + numberOfBlocks * 4;
-        this.compressedBlockOffsetList = [blockDataOffset];
-        for (let i = 0; i < numberOfBlocks - 1; i++) {
-            this.compressedBlockOffsetList.push(
-                this.compressedBlockOffsetList[i] + compressedBlockSizeList[i]
-            );
-        }
-        this.compressedBlockSizeList = compressedBlockSizeList;
+        this.schedule = parseBlockSchedule(blockSizeExponent, numberOfBlocks, decompressedSize, sizeListData);
     }
 
     async nextBlock() {
-        this.currentBlockIndex++;
-        if (this.currentBlockIndex >= this.numberOfBlocks) {
+        const i = ++this.currentBlockIndex;
+        const { sizes, relOffsets, blockSize, remainder } = this.schedule;
+        if (i >= sizes.length) {
             this.currentBlock = null;
             return null;
         }
 
-        const blockId = this.currentBlockIndex;
-        const relOffset = this.compressedBlockOffsetList[blockId];
-        const compressedSize = this.compressedBlockSizeList[blockId];
-
-        let decompressedSize = this.blockSize;
-        if (blockId >= this.numberOfBlocks - 1) {
-            const remainder = this.decompressedSize % this.blockSize;
-            if (remainder > 0) {
-                decompressedSize = remainder;
-            }
+        const compressedSize = sizes[i];
+        let decompressedSize = blockSize;
+        if (i === sizes.length - 1 && remainder > 0) {
+            decompressedSize = remainder;
         }
 
-        const compressedData = await this.reader.read(this.baseOffset + relOffset, compressedSize);
+        const compressedData = await this.reader.read(this.baseOffset + relOffsets[i], compressedSize);
 
+        // The raw/incompressible-vs-compressed decision is container knowledge:
+        // a stored raw block fits in less space than the decompressed size, so
+        // no zstd decode is needed. The raw fast path returns the bytes
+        // directly (no Promise), so it stays free of a per-block microtask.
         if (compressedSize < decompressedSize) {
-            if (isNode) {
-                if (!nodeZlibPromise) nodeZlibPromise = import('node:zlib');
-                const { zstdDecompressSync } = await nodeZlibPromise;
-                this.currentBlock = new Uint8Array(zstdDecompressSync(compressedData));
-            } else {
-                const { ZstdDecompressor } = await import('../crypto/zstd.js');
-                this.currentBlock = await ZstdDecompressor.decompressBuffer(compressedData);
-            }
+            this.currentBlock = await decompressBlock(compressedData);
         } else {
             this.currentBlock = compressedData;
         }
@@ -426,4 +392,4 @@ class AsyncBlockDecompressorReader {
     }
 }
 
-export { NCZDecompressor, DataReader, AdapterNCZReader, BufferReader, READ_CHUNK_SIZE, parseNczSections };
+export { NCZDecompressor, DataReader, AdapterNCZReader, BufferReader, READ_CHUNK_SIZE, parseNczSections, parseBlockSchedule, AsyncBlockDecompressorReader };
