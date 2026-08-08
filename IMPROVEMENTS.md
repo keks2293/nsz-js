@@ -187,6 +187,18 @@ Prioritized areas for improvement identified 2026-05-30.
     - **Аналогия**: Python nsz использует тот же sync pipeline — декомпрессия и обработка в одном потоке.
     - **Потенциал**: Web Worker + SharedArrayBuffer дали бы ~33% ускорение (параллельная декомпрессия + AES/write), но требует cross-origin isolation заголовков (COOP/COEP) и значительной переработки архитектуры. Пока оставляем как есть.
 
+- ✅ **NCZBLOCK `parseBlockSchedule`: object-array → flat parallel arrays** — `fs/ncz.js`. Коммит `e560686` («perf: single-pass NCZBLOCK block schedule») заменил два параллельных плоских списка (`compressedBlockSizeList`, `compressedBlockOffsetList`) на массив объектов `{relOffset, compressedSize, decompressedSize}`. Заявлено как «perf» (one allocation, one loop), но на деле:
+    - **Микробенчмарк** (262 144 блока, ~4 GiB NCA, best-of-9):
+      | Операция | flat (2×Array\<number\>) | массив объектов | flat быстрее |
+      |---|---|---|---|
+      | build | 0.35 ms | 0.76 ms | 2.2× |
+      | lookup sequential | 0.65 ms | 1.22 ms | 1.9× |
+      | lookup random | 0.67 ms | 3.32 ms | 5.0× |
+      | build + lookup (sequential) | 1.00 ms | 1.99 ms | 2.0× |
+    - **End-to-end на синтетике NCZBLOCK** (32 MiB NCA, 2048 блоков, `bench_nczblock.mjs`, best-of-5, A/B чередование): obj ~2291/2618/2114/2475/2305 MB/s vs flat ~2352/2583/2068/2338/2177 MB/s — разница в пределах шума (±10% от турбо-частоты). Звёзда zstd+read доминирует.
+    - **Корректность**: дифференциальный фаззинг (5880 комбинаций параметров) — 0 расхождений между flat и объектной формой. Flat-оффсеты (plain Array\<number\>) не усекаются > 2^53 (в отличие от `Uint32Array`, который ломается > 4 GiB).
+    - **Итог**: flat честнее по производительности (~2× на микроуровне) и совместим с Python nsz (`BlockDecompressorReader.CompressedBlockOffsetList`/`CompressedBlockOffsetList`), но end-to-end разница не видна. Объектная форма была сделана ради «самодостаточности job-ов» для параллельного декодера, но flat массивы прекрасно передаются воркерам по индексу. Вернул flat-представление в `parseBlockSchedule` (`sizes`, `relOffsets`, `blockSize`, `remainder`), сохранив экспорт API.
+
 ## Memory Optimization
 
 - ❌ **Reduce READ_CHUNK_SIZE** — `fs/ncz.js:52` uses 16MB. **Keeping as-is** — matches Python nsz `SolidCompressor.CHUNK_SZ = 0x1000000`.
