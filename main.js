@@ -485,6 +485,12 @@ async function main() {
         updateProgress(0);
         addLog('info', `Starting conversion (${downloadMode})...`);
 
+        const convertOptions = [];
+        if (fixPadding) convertOptions.push('fix-padding');
+        if (verify) convertOptions.push('verify');
+        if (!converter.keys) convertOptions.push('no-keys');
+        addLog('info', `Options: ${convertOptions.join(', ') || 'none'}`);
+
         const totalBytes = files.reduce((s, f) => s + f.size, 0);
         const startTime = Date.now();
         const updateStats = makeUpdateStats(totalBytes, startTime);
@@ -618,6 +624,12 @@ async function main() {
         updateProgress(0);
         addLog('info', `Starting merge (${downloadMode})...`);
 
+        const mergeOptions = [];
+        if (latestWins) mergeOptions.push('latest');
+        if (noDeltas) mergeOptions.push('nodelta');
+        if (!converter.keys) mergeOptions.push('no-keys');
+        addLog('info', `Options: ${mergeOptions.join(', ') || 'none'}`);
+
         const totalBytes = files.reduce((s, f) => s + f.size, 0);
         const startTime = Date.now();
         const updateStats = makeUpdateStats(totalBytes, startTime);
@@ -712,6 +724,8 @@ async function main() {
 
         updateProgress(0);
         addLog('info', `Starting split (${downloadMode})...`);
+
+        addLog('info', 'Options: none');
 
         const totalBytes = files[0].size;
         const startTime = Date.now();
