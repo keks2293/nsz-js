@@ -2,6 +2,12 @@ import { PFS0, PFS0Writer } from './pfs0.js';
 import { buildAdapter, collectBlob, copyRange } from './adapter.js';
 import { XCIReader } from './xci.js';
 import { NCZDecompressor, AdapterNCZReader, parseNczSections } from './ncz.js';
+import { decryptNcaHeader, readCnmtFromMeta } from './nca.js';
+
+function stem(name) {
+    const dot = name.lastIndexOf('.');
+    return dot === -1 ? name : name.slice(0, dot);
+}
 
 function formatBytes(bytes) {
     if (bytes === 0) return '0 B';
@@ -37,11 +43,20 @@ async function openContainer(r) {
 }
 
 export async function mergeNSP(readers, output, options = {}) {
-    const { log = () => {}, progress = () => {} } = options;
+    const { log = () => {}, progress = () => {}, nodelta = false, keys = null } = options;
 
     if (!Array.isArray(readers) || readers.length < 2) {
         throw new Error('mergeNSP: at least two NSP/XCI inputs are required');
     }
+
+    if (nodelta && !keys) {
+        throw new Error('mergeNSP: nodelta requires keys (--keys / keys file) to read CNMT metadata');
+    }
+
+    // Collect delta fragment ncaIds from all inputs' CNMTs
+    const deltaFrags = nodelta && keys
+        ? new Set()
+        : null;
 
     const members = [];
     const seenNames = new Set();
@@ -51,10 +66,37 @@ export async function mergeNSP(readers, output, options = {}) {
         const r = readers[i];
         const { kind, entries } = await openContainer(r);
         log('info', `Reading ${r.name}: ${entries.length} entries (${kind})`);
+
+        // Collect delta fragment ncaIds from this input's CNMTs
+        if (deltaFrags) {
+            for (const e of entries) {
+                const lower = e.name.toLowerCase();
+                if (!lower.endsWith('.cnmt.nca')) continue;
+                let header = null;
+                try {
+                    const raw = await r.reader.read(e.offset, Math.min(e.size, 0xC00));
+                    header = decryptNcaHeader(raw, keys);
+                } catch (_e) {}
+                if (!header || header.contentType !== 1) continue;
+                let cnmt = null;
+                try {
+                    cnmt = await readCnmtFromMeta(r.reader, e, header);
+                } catch (_e) {}
+                if (!cnmt) continue;
+                for (const content of cnmt.contentEntries) {
+                    if (content.type === 6) deltaFrags.add(content.ncaId);
+                }
+            }
+        }
+
         for (const f of entries) {
             const isNcz = f.name.toLowerCase().endsWith('.ncz');
             const outputName = isNcz ? f.name.slice(0, -4) + '.nca' : f.name;
             if (seenNames.has(outputName)) continue;
+            if (deltaFrags && deltaFrags.has(stem(f.name))) {
+                log('info', `[nodelta] excluding delta fragment ${outputName}`);
+                continue;
+            }
             seenNames.add(outputName);
             if (isNcz) {
                 const nczReader = new AdapterNCZReader(r.reader, f.offset, f.size);

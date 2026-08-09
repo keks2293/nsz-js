@@ -92,10 +92,12 @@ async function main() {
     const verifyBtn = document.getElementById('verifyBtn');
     const progressSpeed = document.getElementById('progressSpeed');
     const progressTime = document.getElementById('progressTime');
+    const noDeltaBtn = document.getElementById('noDeltaBtn');
 
     let fixPadding = false;
     let overwrite = false;
     let verify = false;
+    let noDeltas = false;
     let mode = 'convert';
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     let downloadMode = isMobile ? 'sw' : 'fsa';
@@ -115,9 +117,11 @@ async function main() {
         const fixVisible = mode === 'convert';
         const verifyVisible = mode === 'convert';
         const overwriteVisible = downloadMode === 'fsa';
+        const noDeltaVisible = mode === 'merge';
         fixPaddingBtn.classList.toggle('hidden', !fixVisible);
         verifyBtn.classList.toggle('hidden', !verifyVisible);
         overwriteBtn.classList.toggle('hidden', !overwriteVisible);
+        noDeltaBtn.classList.toggle('hidden', !noDeltaVisible);
     }
 
     updateOptionsVisibility();
@@ -352,6 +356,11 @@ async function main() {
     verifyBtn.addEventListener('click', () => {
         verify = !verify;
         verifyBtn.classList.toggle('on', verify);
+    });
+
+    noDeltaBtn.addEventListener('click', () => {
+        noDeltas = !noDeltas;
+        noDeltaBtn.classList.toggle('on', noDeltas);
     });
 
     document.querySelectorAll('.pill[data-mode]').forEach(btn => {
@@ -663,6 +672,7 @@ async function main() {
                 onProgress,
                 onLog: addLog,
                 writable,
+                nodelta: noDeltas,
             });
             if (writable) {
                 await writable.close();

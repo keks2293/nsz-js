@@ -56,6 +56,7 @@ async function main() {
     let rmSource = false;
     let mergeMode = false;
     let splitMode = false;
+    let nodelta = false;
     const positionals = [];
 
     for (let i = 0; i < args.length; i++) {
@@ -72,6 +73,8 @@ async function main() {
             mergeMode = true;
         } else if (args[i] === '--split') {
             splitMode = true;
+        } else if (args[i] === '--nodelta' || args[i] === '-n') {
+            nodelta = true;
         } else if (args[i] === '--overwrite' || args[i] === '-w') {
             overwrite = true;
         } else if (args[i] === '--rm-source') {
@@ -102,6 +105,7 @@ async function main() {
         console.log('  --no-verify, -nv     Skip SHA256 verification [convert]');
         console.log('  --fix-padding, -p    Re-pad PFS0 header to 0x20 boundary [convert] (default: reuse input string-table size, matching Python nsz)');
         console.log('  --keys <file>        Keys file [split] (required for --split CNMT parsing; used by convert --verify for CNMT hash checks)');
+        console.log('  -n, --nodelta        Exclude delta-fragment NCAs [merge]: drop NCAs referenced as DeltaFragment (ContentInfo type 6) in CNMTs (requires --keys)');
         console.log('');
     }
 
@@ -123,7 +127,7 @@ async function main() {
                 process.exit(1);
             }
         }
-        await mergeNSPs(positionals, outputDir, overwrite, rmSource);
+        await mergeNSPs(positionals, outputDir, overwrite, rmSource, nodelta, keysPath);
         return;
     }
 
@@ -135,7 +139,7 @@ async function main() {
             printUsage();
             process.exit(1);
         }
-        const keys = await loadKeys(keysPath, true);
+        const keys = await loadKeys(keysPath);
         const input = openInputReader(inputPath);
         try {
             await splitNSP(input, inputPath, outputDir, keys, overwrite, rmSource);
@@ -153,7 +157,8 @@ async function main() {
         process.exit(1);
     }
 
-    const keys = await loadKeys(keysPath, false);
+    const keys = await loadKeys(keysPath);
+    if (!keys) console.log('Warning: No keys loaded - convert --verify CNMT hash checks will be skipped');
 
     const isXcz = inputPath.toLowerCase().endsWith('.xcz');
     const inStat = fs.statSync(inputPath);
@@ -175,7 +180,7 @@ async function main() {
     }
 }
 
-async function loadKeys(keysPath, warnNoKeys) {
+async function loadKeys(keysPath) {
     let keys = null;
     const keysLocations = [
         keysPath,
@@ -191,12 +196,6 @@ async function loadKeys(keysPath, warnNoKeys) {
         } catch(e) {}
     }
 
-    if (!keys) {
-        const msg = warnNoKeys
-            ? 'Warning: No keys loaded - CNMT parsing for --split may fail'
-            : 'Warning: No keys loaded - convert --verify CNMT hash checks will be skipped';
-        console.log(msg);
-    }
     return keys;
 }
 
@@ -208,7 +207,7 @@ function openInputReader(inputPath) {
     return { reader: new FileDescriptorReader(fd, 0, inputSize), fd, inputSize };
 }
 
-async function mergeNSPs(inputPaths, outputDir, overwrite, rmSource) {
+async function mergeNSPs(inputPaths, outputDir, overwrite, rmSource, nodelta, keysPath) {
     console.log('=== MERGE NSPs ===');
     const stem = path.basename(inputPaths[0], path.extname(inputPaths[0]));
     const outName = `${stem}_merged.nsp`;
@@ -217,6 +216,15 @@ async function mergeNSPs(inputPaths, outputDir, overwrite, rmSource) {
     if (!overwrite && fs.existsSync(outPath)) {
         console.error(`Error: ${outPath} already exists. Use -w/--overwrite to overwrite.`);
         process.exit(1);
+    }
+
+    let keys = null;
+    if (nodelta) {
+        keys = await loadKeys(keysPath);
+        if (!keys) {
+            console.error('Error: --nodelta requires a keys file (--keys <path> or ./static/prod.keys) to read CNMT metadata.');
+            process.exit(1);
+        }
     }
 
     const fds = [];
@@ -236,6 +244,8 @@ async function mergeNSPs(inputPaths, outputDir, overwrite, rmSource) {
             result = await mergeNSPFile(readers, { fd: outputFd }, {
                 log: (level, msg) => console.log(msg),
                 progress: () => {},
+                nodelta,
+                keys,
             });
         } catch (e) {
             fs.closeSync(outputFd);
@@ -247,6 +257,7 @@ async function mergeNSPs(inputPaths, outputDir, overwrite, rmSource) {
         console.log('=== DONE ===');
         console.log(`Output: ${outPath} (${formatBytes(result.size)})`);
         console.log(`Members: ${result.memberCount} (deduplicated by name)`);
+        if (nodelta && keys) console.log('Delta fragments: excluded (--nodelta)');
 
         if (rmSource) {
             for (const p of inputPaths) {
