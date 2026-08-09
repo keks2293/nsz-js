@@ -140,6 +140,10 @@ async function main() {
             process.exit(1);
         }
         const keys = await loadKeys(keysPath);
+        if (!keys) {
+            console.error('Error: --split requires a keys file (--keys <path> or ./static/prod.keys) to read NCA headers and CNMT metadata.');
+            process.exit(1);
+        }
         const input = openInputReader(inputPath);
         try {
             await splitNSP(input, inputPath, outputDir, keys, overwrite, rmSource);

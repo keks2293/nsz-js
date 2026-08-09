@@ -133,7 +133,7 @@ class NSZConverter {
         onLog('info', `Splitting ${file.name}...`);
         await this.init();
         if (!this.keys || !this.keys.header_key) {
-            onLog('warn', 'No keys loaded - split may fail to read CNMT metadata');
+            throw new Error('Keys are required to split (read NCA headers and CNMT metadata). Load keys first.');
         }
 
         const reader = new FileSliceReader(file, 0, file.size);

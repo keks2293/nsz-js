@@ -488,7 +488,6 @@ async function main() {
         const convertOptions = [];
         if (fixPadding) convertOptions.push('fix-padding');
         if (verify) convertOptions.push('verify');
-        if (!converter.keys) convertOptions.push('no-keys');
         addLog('info', `Options: ${convertOptions.join(', ') || 'none'}`);
 
         const totalBytes = files.reduce((s, f) => s + f.size, 0);
@@ -627,7 +626,6 @@ async function main() {
         const mergeOptions = [];
         if (latestWins) mergeOptions.push('latest');
         if (noDeltas) mergeOptions.push('nodelta');
-        if (!converter.keys) mergeOptions.push('no-keys');
         addLog('info', `Options: ${mergeOptions.join(', ') || 'none'}`);
 
         const totalBytes = files.reduce((s, f) => s + f.size, 0);
