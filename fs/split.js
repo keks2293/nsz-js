@@ -32,6 +32,9 @@ async function collectTickets(reader, ticketEntries, log = () => {}) {
 }
 
 export async function splitNSP(reader, keys, outputFactory, options = {}) {
+    if (!keys || !keys.header_key) {
+        throw new Error('splitNSP: keys are required to read NCA headers and CNMT metadata');
+    }
     const { log = () => {}, progress = () => {} } = options;
 
     const pfs0 = await PFS0.open(reader);
