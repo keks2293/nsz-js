@@ -5,6 +5,7 @@ import { PFS0Writer, PFS0 } from './fs/pfs0.js';
 import { BufferReader } from './fs/ncz.js';
 import { mergeNSP } from './fs/merge.js';
 import { AesCtr } from './crypto/aes-ops.mjs';
+import { AesEcb } from './crypto/aes128.js';
 
 function ascii(str) {
     return new TextEncoder().encode(str);
@@ -333,6 +334,179 @@ async function main() {
         return out;
     }
 
+    // --- Synthetic encrypted NCA header + CNMT builders (for --nodelta test) ---
+
+    function hexToBytes(hex) {
+        const b = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < hex.length; i += 2) b[i / 2] = parseInt(hex.substr(i, 2), 16);
+        return b;
+    }
+
+    function bytesToHex(bytes) {
+        const r = [];
+        for (const b of bytes) r.push(b.toString(16).padStart(2, '0'));
+        return r.join('');
+    }
+
+    function tweakBytesFor(sector) {
+        const buf = new Uint8Array(16);
+        for (let i = 15; i >= 0; i--) {
+            buf[i] = sector & 0xFF;
+            sector = Math.floor(sector / 256);
+        }
+        return buf;
+    }
+
+    function gf128MulIn(tweak) {
+        let carry = 0;
+        for (let i = 0; i < 16; i++) {
+            const newCarry = (tweak[i] >>> 7) & 1;
+            const shifted = ((tweak[i] << 1) | carry) & 0xff;
+            carry = newCarry;
+            tweak[i] = shifted;
+        }
+        if (carry) tweak[0] ^= 0x87;
+        return tweak;
+    }
+
+    function xtsEncrypt(data, key) {
+        const k1 = key.subarray(0, 16);
+        const k2 = key.subarray(16, 32);
+        const aesEncData = new AesEcb(k1);
+        const aesEncTweak = new AesEcb(k2);
+        const result = new Uint8Array(data.length);
+        const xored = new Uint8Array(16);
+        let sector = 0;
+        for (let offset = 0; offset < data.length; offset += 0x200) {
+            const chunkSize = Math.min(0x200, data.length - offset);
+            const tweak = aesEncTweak.encryptBlock(tweakBytesFor(sector));
+            for (let i = 0; i + 16 <= chunkSize; i += 16) {
+                const block = data.subarray(offset + i, offset + i + 16);
+                for (let j = 0; j < 16; j++) xored[j] = block[j] ^ tweak[j];
+                const enc = aesEncData.encryptBlock(xored);
+                for (let j = 0; j < 16; j++) result[offset + i + j] = enc[j] ^ tweak[j];
+                gf128MulIn(tweak);
+            }
+            sector++;
+        }
+        return result;
+    }
+
+    async function buildNcaFile({ titleId, contentIndex, contentType, titleKeyDec, kak, headerKey, section }) {
+        const h = new Uint8Array(0xC00);
+        const v = new DataView(h.buffer);
+        h[0x200] = 0x4E; h[0x201] = 0x43; h[0x202] = 0x41; h[0x203] = 0x33;
+        h[0x205] = contentType;
+        h[0x206] = 1;
+        h[0x207] = 0;
+        const sectionSize = section ? Math.ceil(section.data.length / 0x200) * 0x200 : 0;
+        v.setBigUint64(0x208, section ? BigInt(section.offset + sectionSize) : 0x1000n, true);
+        const tid = hexToBytes(titleId);
+        for (let i = 0; i < 8; i++) h[0x210 + i] = tid[7 - i];
+        v.setUint32(0x218, contentIndex, true);
+        h[0x220] = 1;
+        const plain = new Uint8Array(0x40);
+        plain.set(titleKeyDec, 0x20);
+        const aesEnc = new AesEcb(kak);
+        h.set(aesEnc.encrypt(plain), 0x300);
+        if (section) {
+            const mediaOffset = section.offset / 0x200;
+            v.setUint32(0x240, mediaOffset, true);
+            v.setUint32(0x244, mediaOffset + sectionSize / 0x200, true);
+            h[0x403] = 2; // fsType PFS0
+            h[0x404] = 3; // cryptoType AES-CTR
+            v.setBigUint64(0x440, 0n, true);
+            v.setBigUint64(0x448, BigInt(section.data.length), true);
+            h.set(section.nonce.slice(0, 8).reverse(), 0x540);
+        }
+        const enc = xtsEncrypt(h, headerKey);
+        if (!section) return enc.slice(0, 0x1000);
+        const padded = new Uint8Array(sectionSize);
+        padded.set(section.data, 0);
+        const file = new Uint8Array(section.offset + sectionSize);
+        file.set(enc, 0);
+        const ctr = new AesCtr(titleKeyDec, section.nonce);
+        ctr.seek(section.offset);
+        file.set(await ctr.encrypt(padded), section.offset);
+        return file;
+    }
+
+    function buildCnmt({ titleId, version, titleType, contentEntries }) {
+        const n = contentEntries.length;
+        const tableOffset = 0x40;
+        const total = 0x20 + tableOffset + n * 0x38;
+        const d = new Uint8Array(total);
+        const v = new DataView(d.buffer);
+        const tid = hexToBytes(titleId);
+        for (let i = 0; i < 8; i++) d[i] = tid[7 - i];
+        v.setUint32(8, version, true);
+        d[12] = titleType;
+        v.setUint16(0x0E, tableOffset, true);
+        v.setUint16(0x10, n, true);
+        const cs = 0x20 + tableOffset;
+        for (let i = 0; i < n; i++) {
+            const off = cs + i * 0x38;
+            d.set(randomBytes(32), off);
+            const entry = contentEntries[i];
+            const id = typeof entry === 'string' ? entry : entry.id;
+            const type = typeof entry === 'string' ? 1 : (entry.type !== undefined ? entry.type : 1);
+            d.set(hexToBytes(id), off + 32);
+            v.setUint32(off + 48, 0x1000, true);
+            d[off + 54] = type;
+        }
+        return d;
+    }
+
+    function buildCnmtSection(titleId, version, titleType, contentEntries, nonce) {
+        const cnmtBin = buildCnmt({ titleId, version, titleType, contentEntries });
+        const pfs0 = buildPfs0([{ name: 'cnmt.bin', data: cnmtBin }]);
+        return { data: pfs0, nonce, offset: 0x1000 };
+    }
+
+    const headerKey = new Uint8Array(32);
+    const kak = new Uint8Array(16);
+    const titleKeyDec = new Uint8Array(16);
+    for (let i = 0; i < 16; i++) {
+        headerKey[i] = (i * 7 + 1) & 0xFF;
+        headerKey[i + 16] = (i * 3 + 5) & 0xFF;
+        kak[i] = (i * 5 + 2) & 0xFF;
+        titleKeyDec[i] = (i * 11 + 9) & 0xFF;
+    }
+    const keys = {
+        header_key: bytesToHex(headerKey),
+        keyAreaKeys: [[bytesToHex(kak), null, null]],
+    };
+
+    const progUpdate = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const nonce = new Uint8Array(16);
+    for (let i = 0; i < 16; i++) nonce[i] = (i * 13 + 3) & 0xFF;
+
+    const programUpdateData = await buildNcaFile({
+        titleId: '0100E65002BB8000', contentIndex: 0, contentType: 0,
+        titleKeyDec, kak, headerKey,
+    });
+    const metaUpdateData = await buildNcaFile({
+        titleId: '0100E65002BB8800', contentIndex: 0, contentType: 1,
+        titleKeyDec, kak, headerKey,
+        section: buildCnmtSection('0100E65002BB8800', 786432, 0x81, [progUpdate], nonce),
+    });
+
+    const nszBase = buildPfs0([
+        { name: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.nca', data: await buildNcaFile({
+            titleId: '0100E65002BB8000', contentIndex: 0, contentType: 0,
+            titleKeyDec, kak, headerKey,
+        }) },
+        { name: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.cnmt.nca', data: await buildNcaFile({
+            titleId: '0100E65002BB8000', contentIndex: 0, contentType: 1,
+            titleKeyDec, kak, headerKey,
+            section: buildCnmtSection('0100E65002BB8000', 0, 0x80, ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'], nonce),
+        }) },
+    ]);
+    const nszUpdate = buildPfs0([
+        { name: `${progUpdate}.nca`, data: programUpdateData },
+        { name: `${progUpdate}.cnmt.nca`, data: metaUpdateData },
+    ]);
+
     const plan = [
         { off: 0x0000, n: 0x2000 },             // aligned start
         { off: 0x9000, n: 0x1000 },             // forward jump (block-aligned)
@@ -353,6 +527,70 @@ async function main() {
                 `AES-CTR ${backend} seek 0x${off.toString(16)} chunked encrypt matches node`);
         }
     }
+
+    // --nodelta (opt-in): an update whose CNMT references a DeltaFragment
+    // (ContentInfo type 6) and ships the fragment file. With nodelta + keys the
+    // fragment is dropped; without nodelta it is kept; nodelta without keys
+    // throws.
+    const deltaFragId = 'dddddddddddddddddddddddddddddddd';
+    const metaUpdateDeltaData = await buildNcaFile({
+        titleId: '0100E65002BB9900', contentIndex: 0, contentType: 1,
+        titleKeyDec, kak, headerKey,
+        section: buildCnmtSection('0100E65002BB9900', 786432, 0x81,
+            [{ id: progUpdate, type: 1 }, { id: deltaFragId, type: 6 }], nonce),
+    });
+    const fragData = new Uint8Array(0x1000).fill(0xEE);
+    const nszUpdateDelta = buildPfs0([
+        { name: `${progUpdate}.nca`, data: programUpdateData },
+        { name: `${deltaFragId}.nca`, data: fragData },
+        { name: `${progUpdate}.cnmt.nca`, data: metaUpdateDeltaData },
+    ]);
+
+    // Default (nodelta off): the fragment is kept.
+    const defaultResult = await mergeNSP(
+        [
+            { name: 'base.nsp', reader: makeReader(nszBase) },
+            { name: 'update.nsp', reader: makeReader(nszUpdateDelta) },
+        ],
+        { memory: true },
+        { log: () => {}, progress: () => {}, keys },
+    );
+    const defaultNames = new PFS0(new Uint8Array(await defaultResult.blob.arrayBuffer())).getFiles().map(f => f.name);
+    assert(defaultNames.includes(`${deltaFragId}.nca`), 'without --nodelta the delta fragment is kept');
+
+    // nodelta on + keys: the fragment is dropped, program + CNMT stay.
+    const nodeltaLogs = [];
+    const nodeltaResult = await mergeNSP(
+        [
+            { name: 'base.nsp', reader: makeReader(nszBase) },
+            { name: 'update.nsp', reader: makeReader(nszUpdateDelta) },
+        ],
+        { memory: true },
+        { log: (l, m) => nodeltaLogs.push(m), progress: () => {}, keys, nodelta: true },
+    );
+    const nodeltaMerged = new PFS0(new Uint8Array(await nodeltaResult.blob.arrayBuffer()));
+    const nodeltaNames = nodeltaMerged.getFiles().map(f => f.name);
+    console.log('Nodelta log:');
+    for (const l of nodeltaLogs) console.log(`  ${l}`);
+    assert(!nodeltaNames.includes(`${deltaFragId}.nca`), 'nodelta drops the delta fragment');
+    assert(nodeltaNames.includes(`${progUpdate}.nca`), 'nodelta keeps the program NCA');
+    assert(nodeltaNames.includes(`${progUpdate}.cnmt.nca`), 'nodelta keeps the CNMT');
+
+    // nodelta without keys is a hard error.
+    let threw = false;
+    try {
+        await mergeNSP(
+            [
+                { name: 'base.nsp', reader: makeReader(nszBase) },
+                { name: 'update.nsp', reader: makeReader(nszUpdateDelta) },
+            ],
+            { memory: true },
+            { log: () => {}, progress: () => {}, nodelta: true },
+        );
+    } catch (e) {
+        threw = /nodelta requires keys/.test(e.message);
+    }
+    assert(threw, 'nodelta without keys throws');
 
     console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} TEST(S) FAILED`);
     process.exit(failures === 0 ? 0 : 1);

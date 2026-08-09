@@ -743,16 +743,18 @@
                                 <button class="setting-label" popovertarget="options-info" aria-label="Show options descriptions">
                                     Options ⓘ
                                 </button>
-                                <div id="options-info" popover class="info-popover" role="dialog" aria-label="Options descriptions">
-                                    <b>Fix Padding</b> — Fixes PFS0 padding to match the nxdumptool/no-intro standard.<br>
-                                    <b>Overwrite</b> — Continue even if a file with same name exists.<br>
-                                    <b>Verify</b> — Verify SHA-256 hash after conversion. Slower, rarely needed.
-                                </div>
-                                <div class="pills" id="optionsButtons">
-                                    <button class="pill" id="fixPaddingBtn" title="Fixes PFS0 padding to match the nxdumptool/no-intro standard.">Fix Padding</button>
-                                    <button class="pill" id="overwriteBtn" title="Continue even if file with same name exists.">Overwrite</button>
-                                    <button class="pill" id="verifyBtn" title="Verify SHA-256 hash after conversion. Slower, rarely needed.">Verify</button>
-                                </div>
+                                 <div id="options-info" popover class="info-popover" role="dialog" aria-label="Options descriptions">
+                                     <b>Fix Padding</b> — Fixes PFS0 padding to match the nxdumptool/no-intro standard.<br>
+                                     <b>Overwrite</b> — Continue even if a file with same name exists.<br>
+                                     <b>Verify</b> — Verify SHA-256 hash after conversion. Slower, rarely needed.<br>
+                                     <b>No Deltas</b> — Merge: exclude delta-fragment NCAs (needs keys to detect them).
+                                 </div>
+                                 <div class="pills" id="optionsButtons">
+                                     <button class="pill" id="fixPaddingBtn" title="Fixes PFS0 padding to match the nxdumptool/no-intro standard.">Fix Padding</button>
+                                     <button class="pill" id="overwriteBtn" title="Continue even if file with same name exists.">Overwrite</button>
+                                     <button class="pill" id="verifyBtn" title="Verify SHA-256 hash after conversion. Slower, rarely needed.">Verify</button>
+                                     <button class="pill" id="noDeltaBtn" title="Merge: exclude delta-fragment NCAs (needs keys to detect them).">No Deltas</button>
+                                 </div>
                             </div>
                         </div>
                         <div class="actions">

@@ -106,7 +106,7 @@ class NSZConverter {
     }
 
     async mergeNSPs(files, options = {}) {
-        const { onProgress = () => {}, onLog = () => {}, writable = null } = options;
+        const { onProgress = () => {}, onLog = () => {}, writable = null, nodelta = false } = options;
         onLog('info', `Merging ${files.length} NSPs...`);
         await this.init();
 
@@ -119,6 +119,7 @@ class NSZConverter {
             keys: this.keys,
             log: onLog,
             progress: onProgress,
+            nodelta,
         });
 
         onProgress(1.0, 'Done!');
