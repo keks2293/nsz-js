@@ -66,6 +66,12 @@ The `static/` folder contains downloaded/copied dependencies for browser use:
    - Do workarounds in the **consuming code** (e.g., `crypto/zstd.js`), not in the static files
    - Document any workarounds in `AGENTS.md` under "Workarounds" section
 
+### Source-first research
+
+When reverse-engineering or implementing behavior from an external tool/library:
+- **If the source is publicly available (GitHub, etc.) — read the source directly.** Don't guess, probe, or reverse-engineer from output files when the implementation is open source.
+- Example: to understand how `hacpack --plaintext` packs NCAs, read `nca.c` in the hacpack repo instead of trying to reconstruct the structure from a packed NCA.
+
 ### Workarounds
 
 When original files from npm don't work directly in the target environment:
