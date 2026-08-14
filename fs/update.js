@@ -153,6 +153,69 @@ async function rebuildCnmtNca(baseMeta, updateMeta, keys, log, mergedProgram = n
 }
 
 
+// Extract a specific section from a potentially-NCZ-compressed NCA.
+// For NCZ: streams through decompression but only buffers the requested section range.
+// For plain NCA: direct read.
+// Returns Uint8Array of the section data (NCA section bytes, decrypted).
+async function extractNcaSection(reader, ncaOffset, ncaSize, isNcz, keys, log) {
+    if (!isNcz) {
+        return await reader.read(ncaOffset, ncaSize);
+    }
+
+    // NCZ: stream decompression, buffer only [ncaOffset, ncaOffset + ncaSize]
+    const parsed = await parseNczSections(reader);
+    if (ncaOffset + ncaSize > parsed.ncaSize) {
+        throw new Error(`extractNcaSection: section range [${ncaOffset}, ${ncaOffset + ncaSize}) exceeds NCA size ${parsed.ncaSize}`);
+    }
+
+    const sectionBuffer = new Uint8Array(ncaSize);
+    let sectionFilled = 0;
+    const decomp = new NCZDecompressor(reader);
+    await decomp.decompress(
+        () => {},
+        (chunk, offset) => {
+            // Check if chunk overlaps with our target section
+            const chunkEnd = offset + chunk.length;
+            if (chunkEnd <= ncaOffset || offset >= ncaOffset + ncaSize) return; // no overlap
+
+            const startInChunk = Math.max(0, ncaOffset - offset);
+            const endInChunk = Math.min(chunk.length, ncaOffset + ncaSize - offset);
+            const data = chunk.subarray(startInChunk, endInChunk);
+            const targetOffset = Math.max(0, offset - ncaOffset);
+
+            sectionBuffer.set(data, targetOffset);
+            sectionFilled += data.length;
+        },
+        parsed,
+    );
+
+    if (sectionFilled !== ncaSize) {
+        throw new Error(`extractNcaSection: incomplete section data (${sectionFilled}/${ncaSize})`);
+    }
+
+    log('info', `Extracted NCA section [0x${ncaOffset.toString(16)}, 0x${(ncaOffset + ncaSize).toString(16)}) = ${ncaSize} bytes (streaming NCZ)`);
+    return sectionBuffer;
+}
+
+// Build a sparse NCA buffer containing only header (at 0..0xC00) + one or more sections
+// at their original NCA offsets. This allows mergeRomFS()/extractExefs() to work without
+// loading the entire ~4.4 GB NCA. The buffer is zero-filled between header and first
+// needed section, and between sections — only accessed regions are non-zero.
+// Returns a Uint8Array of size = max(sectionEndOffset) with sections placed at correct offsets.
+function buildSparseNcaBuffer(header, sections) {
+    // sections: [{ offset, data }, ...] — each section placed at its NCA offset
+    let maxEnd = NCA_HEADER_SIZE;
+    for (const s of sections) {
+        maxEnd = Math.max(maxEnd, s.offset + s.data.length);
+    }
+    const buf = new Uint8Array(maxEnd);
+    buf.set(header, 0);
+    for (const s of sections) {
+        buf.set(s.data, s.offset);
+    }
+    return buf;
+}
+
 async function decompressNCZ(nczReader) {
     const parsed = await parseNczSections(nczReader);
     const result = new Uint8Array(parsed.ncaSize);
@@ -307,52 +370,108 @@ export async function update(readers, output, options = {}) {
     let mergedProgram = null;
     const needsMerge = baseProgramEntry && updateProgramEntry && (hasBktrRomfs || (!updateHasRomfs && updateHasExefs));
     if (needsMerge) {
-        // Read base Program NCA (decompress if NCZ)
-        if (baseProgramEntry.src.name.toLowerCase().endsWith('.ncz')) {
-            log('info', 'Decompressing base Program NCA...');
+        const baseIsNcz = baseProgramEntry.src.name.toLowerCase().endsWith('.ncz');
+        const updateIsNcz = updateProgramEntry.src.name.toLowerCase().endsWith('.ncz');
+        const baseReader = new AdapterNCZReader(base.reader, baseProgramEntry.src.offset, baseProgramEntry.src.size);
+        const updateReader = new AdapterNCZReader(update.reader, updateProgramEntry.src.offset, updateProgramEntry.src.size);
+
+        // ── Extract base Program NCA header ──────────────────────────────────
+        log('info', `Reading base Program NCA header (${baseIsNcz ? 'from NCZ' : 'direct'})...`);
+        let baseHeaderRaw;
+        if (baseIsNcz) {
+            const parsed = await parseNczSections(baseReader);
+            baseHeaderRaw = new Uint8Array(NCA_HEADER_SIZE);
+            const decomp = new NCZDecompressor(baseReader);
+            await decomp.decompress(() => {}, (chunk, offset) => {
+                if (offset >= NCA_HEADER_SIZE) return;
+                const end = Math.min(offset + chunk.length, NCA_HEADER_SIZE);
+                baseHeaderRaw.set(chunk.subarray(0, end - offset), offset);
+            }, parsed);
         } else {
-            log('info', 'Reading base Program NCA...');
+            baseHeaderRaw = await base.reader.read(baseProgramEntry.src.offset, NCA_HEADER_SIZE);
         }
-        await new Promise(r => setTimeout(r, 0));
-        if (baseProgramEntry.src.name.toLowerCase().endsWith('.ncz')) {
-            const nczReader = new AdapterNCZReader(base.reader, baseProgramEntry.src.offset, baseProgramEntry.src.size);
-            baseProgramNcaData = await decompressNCZ(nczReader);
+        const baseHeaderDec = decryptNcaHeader(baseHeaderRaw, keys);
+        if (!baseHeaderDec) throw new Error('update: cannot decrypt base Program NCA header');
+
+        // ── Extract update Program NCA header ────────────────────────────────
+        log('info', `Reading update Program NCA header (${updateIsNcz ? 'from NCZ' : 'direct'})...`);
+        let updateHeaderRaw;
+        if (updateIsNcz) {
+            const parsed = await parseNczSections(updateReader);
+            updateHeaderRaw = new Uint8Array(NCA_HEADER_SIZE);
+            const decomp = new NCZDecompressor(updateReader);
+            await decomp.decompress(() => {}, (chunk, offset) => {
+                if (offset >= NCA_HEADER_SIZE) return;
+                const end = Math.min(offset + chunk.length, NCA_HEADER_SIZE);
+                updateHeaderRaw.set(chunk.subarray(0, end - offset), offset);
+            }, parsed);
         } else {
-            baseProgramNcaData = await base.reader.read(
-                baseProgramEntry.src.offset, baseProgramEntry.src.size
+            updateHeaderRaw = await update.reader.read(updateProgramEntry.src.offset, NCA_HEADER_SIZE);
+        }
+        const updateHeaderDec = decryptNcaHeader(updateHeaderRaw, keys);
+        if (!updateHeaderDec) throw new Error('update: cannot decrypt update Program NCA header');
+
+        // ── Extract only needed sections (streaming NCZ, skip unneeded sections) ──
+        // Base: needs RomFS section for BKTR merge or RomFS extraction
+        // Update: needs BKTR section (if hasBktrRomfs) + ExeFS section
+        const baseRomfsSec = baseHeaderDec.sections.find(s => s.fsType === 3);
+        const updateRomfsSec = updateHeaderDec.sections.find(s => s.fsType === 3 && s.cryptoType === 4);
+        const updateExefsSec = updateHeaderDec.sections.find(s => s.fsType === 2);
+
+        if (!baseRomfsSec) throw new Error('update: base Program NCA has no RomFS section');
+        if (!updateExefsSec) throw new Error('update: update Program NCA has no ExeFS section');
+
+        // Extract base RomFS section (skip ExeFS — saves ~3.3 GB)
+        log('info', `Extracting base RomFS section (0x${baseRomfsSec.offset.toString(16)}..0x${(baseRomfsSec.endOffset).toString(16)}) — skipping other sections...`);
+        await new Promise(r => setTimeout(r, 0));
+        const baseRomfsData = await extractNcaSection(
+            baseReader, baseRomfsSec.offset, baseRomfsSec.endOffset - baseRomfsSec.offset,
+            baseIsNcz, keys, log
+        );
+
+        // Extract update BKTR section (small, ~2 MB)
+        let updateBktrData = null;
+        if (hasBktrRomfs && updateRomfsSec) {
+            log('info', `Extracting update BKTR section (0x${updateRomfsSec.offset.toString(16)}..0x${(updateRomfsSec.endOffset).toString(16)})...`);
+            await new Promise(r => setTimeout(r, 0));
+            updateBktrData = await extractNcaSection(
+                updateReader, updateRomfsSec.offset, updateRomfsSec.endOffset - updateRomfsSec.offset,
+                updateIsNcz, keys, log
             );
         }
 
-        // Read update Program NCA (decompress if NCZ)
-        if (updateProgramEntry.src.name.toLowerCase().endsWith('.ncz')) {
-            log('info', 'Decompressing update Program NCA...');
-        } else {
-            log('info', 'Reading update Program NCA...');
-        }
+        // Extract update ExeFS section
+        log('info', `Extracting update ExeFS section (0x${updateExefsSec.offset.toString(16)}..0x${(updateExefsSec.endOffset).toString(16)})...`);
         await new Promise(r => setTimeout(r, 0));
-        if (updateProgramEntry.src.name.toLowerCase().endsWith('.ncz')) {
-            const nczReader = new AdapterNCZReader(update.reader, updateProgramEntry.src.offset, updateProgramEntry.src.size);
-            updateProgramNcaData = await decompressNCZ(nczReader);
-        } else {
-            updateProgramNcaData = await update.reader.read(
-                updateProgramEntry.src.offset, updateProgramEntry.src.size
-            );
-        }
+        const updateExefsData = await extractNcaSection(
+            updateReader, updateExefsSec.offset, updateExefsSec.endOffset - updateExefsSec.offset,
+            updateIsNcz, keys, log
+        );
 
+        // ── Build sparse NCA buffers for mergeRomFS()/extractExefs() ──────────
+        // These functions expect full NCA data at absolute offsets; we provide
+        // sparse buffers with only header + needed sections (zeros between).
+        log('info', 'Building sparse NCA buffers...');
+        baseProgramNcaData = buildSparseNcaBuffer(baseHeaderRaw, [{ offset: baseRomfsSec.offset, data: baseRomfsData }]);
+        const baseSaved = baseProgramEntry.entry.size - baseProgramNcaData.length;
+        const savedUnit = baseSaved > 1024 * 1024
+            ? `${(baseSaved / 1024 / 1024).toFixed(1)} MB`
+            : `${(baseSaved / 1024).toFixed(0)} KB`;
+        log('info', `Base sparse NCA: header + RomFS → ${baseProgramNcaData.length} bytes (skipped ExeFS, saved ${savedUnit})`);
+
+        const updateSections = [];
+        if (hasBktrRomfs && updateBktrData) {
+            updateSections.push({ offset: updateRomfsSec.offset, data: updateBktrData });
+        }
+        updateSections.push({ offset: updateExefsSec.offset, data: updateExefsData });
+        updateProgramNcaData = buildSparseNcaBuffer(updateHeaderRaw, updateSections);
+        log('info', `Update sparse NCA: header + ${updateSections.length} section(s) → ${updateProgramNcaData.length} bytes`);
+
+        // ── Merge RomFS / Extract sections ───────────────────────────────────
         let mergedRomfs;
         if (hasBktrRomfs) {
-            // Merge RomFS: base RomFS patched with BKTR delta.
-            //
-            // yanu extracts the update RomFS via hac2l ("--basenca base update --romfsdir ...",
-            // see sources/hac2l + yanu's unpack_all in yanu/update.rs: NcaReader exposes the
-            // merged BKTR RomFS starting at the IVFC level-5 offset) and re-packs it with
-            // hacPack (romfs_build(), sources/hacpack/romfs.c:506). hactool takes the same
-            // slice: "romfs_offset = ivfc_levels[IVFC_MAX_LEVEL-1].data_offset" (nca.c:1240).
-            // mergeRomFS() therefore returns mergedData = the level-5 data region only (NOT the
-            // whole virtual section incl. IVFC header + hash levels — that would be +1.26 MB too
-            // big, see DOC-REPACK.md). This data blob is what we re-pack below.
             log('info', 'Merging RomFS...');
-            await new Promise(r => setTimeout(r, 0)); // flush log before long-running merge
+            await new Promise(r => setTimeout(r, 0));
             const mergeResult = await mergeRomFS(baseProgramNcaData, updateProgramNcaData, {
                 keys,
                 baseTik: baseTikData,
@@ -361,26 +480,28 @@ export async function update(readers, output, options = {}) {
             mergedRomfs = mergeResult.mergedData;
             log('info', `Merged RomFS: ${mergedRomfs.length} bytes, ${mergeResult.relocEntries} reloc entries, ${mergeResult.subsectionEntries} subsection entries`);
         } else {
-            // ExeFS-only update: no RomFS section, use the base RomFS as-is
             log('info', 'Update has no RomFS section (ExeFS-only) — using base RomFS as-is...');
             mergedRomfs = await extractRomfs(baseProgramNcaData, keys, baseTikData);
             log('info', `Base RomFS: ${mergedRomfs.length} bytes`);
         }
 
-        // Extract ExeFS from the update Program NCA: the update always carries the
-        // full new executable (the base ExeFS is the old code and must not be used)
+        // Extract ExeFS from the update Program NCA
         log('info', 'Extracting ExeFS from update Program NCA...');
         await new Promise(r => setTimeout(r, 0));
         const exefsData = await extractExefs(updateProgramNcaData, keys, updateTikData);
         log('info', `ExeFS: ${exefsData.length} bytes`);
 
-        // Pack new Program NCA with IVFC-protected sections (no Control — yanu doesn't use it)
+        // Pack new Program NCA
         log('info', 'Packing merged Program NCA...');
         await new Promise(r => setTimeout(r, 0));
         const mergedNca = await packPlaintextProgramNca(exefsData, mergedRomfs, null, base.cnmt.titleId, keys, log);
         const hashHex = sha256(mergedNca);
         mergedProgram = { nca: mergedNca, hashHex, size: mergedNca.length, id: hashHex.slice(0, 32) };
         log('info', `Merged Program NCA: ${mergedProgram.size} bytes sha256=${mergedProgram.hashHex} contentId=${mergedProgram.id}`);
+
+        // Release sparse buffers immediately after use
+        baseProgramNcaData = null;
+        updateProgramNcaData = null;
     }
 
     // Rebuild the base CNMT NCA (program content entry = merged NCA when available)
