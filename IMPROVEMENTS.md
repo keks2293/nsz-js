@@ -249,3 +249,114 @@ Prioritized areas for improvement identified 2026-05-30.
 - ⏳ **SW: wait for 'active' before starting conversion** — `main.js:SWDownloader`, `download-worker.js`. Конвертер начинает писать сразу после `triggerDownload()`, до того как `fetch` event fired в SW и stream начал потребляться. Если пользователь жмёт "Отмена" в диалоге — десятки write уходят в пустоту (SW потерял stream, но error ещё не дошёл до конвертера). **Вариант**: SW шлёт `{type: 'active'}` при `fetch` event (iframe загрузился, stream потребляется). Конвертер ждёт этот сигнал перед стартом. Если пользователь отменяет — `fetch` не fire → `active` не приходит → конвертер не стартует. Требует MessageChannel для backpressure (PULL) чтобы остановить producer мгновенно при cancel — иначе write по-прежнему fire-and-forget.
 
 - ❌ **_decompressStream gap for first section** — Bug report claimed `_decompressStream` doesn't account for gap between `UNCOMPRESSABLE_HEADER_SIZE` (0x4000) and first real section. **Not a bug**: `getSections()` inserts FakeSection when `sections[0].offset > UNCOMPRESSABLE_HEADER_SIZE`. Python nsz's raw offset arithmetic is equivalent.
+
+## Streaming NCA Pack (2026-08-14)
+
+**Motivation**: `--update` BKTR merge pipeline currently loads both Program NCAs fully into memory (~4.4GB each = 8.8GB total). Memory usage is the bottleneck for large games. Simple NSZ→NSP is already streaming. Goal: stream NCA output to reduce memory usage for the update pipeline.
+
+**Current pipeline** (`fs/update.js`):
+1. Decompress both Program NCAs to full buffers (~4.4GB each)
+2. BKTR merge: `mergeRomFS(baseProgramNcaData, updateProgramNcaData)` → merged RomFS (~1.1GB)
+3. Extract ExeFS from update NCA
+4. `packPlaintextProgramNca(exefsData, romfsData, ...)`:
+   - `buildIvfcHashTree(romfsData)` — full RomFS in memory, 5 hash levels built bottom-up
+   - `buildPfs0HashTable(exefsData)` — full ExeFS in memory
+   - Allocate output `Uint8Array(ncaSize)` — ~4.4GB, assemble header+sections
+5. `sha256(nca)` — full NCA hash for CNMT rebuild
+
+**What is already streaming:**
+- NCZ decompression: `NCZDecompressor.decompress()` with `writeChunk` callback streams directly to output adapter
+- NSZ→NSP conversion: `fs/nsz-convert.js` calls NCZDecompressor streaming per-NCZ, writes directly to PFS0 output
+- Non-merged NCAs in update output: `copyRange()` or streamed NCZ decompression
+
+**Memory bottleneck**: only BKTR merge + NCA pack require full buffering.
+
+### Hashes Problem
+
+The core challenge: NCA hashes go **before** data, but depend **on** data:
+
+**IVFC tree (RomFS):**
+- Layout: IVFC header (0xE0, includes master hash) → level0 → level1 → ... → level4 → RomFS data
+- Level-0 hash = sha256 of all 0x4000-padded blocks of level-1
+- Level-1 hash = sha256 of all 0x4000-padded blocks of level-2
+- ...
+- Level-4 hash = sha256 of all 0x4000-padded blocks of RomFS data
+- Master hash (in IVFC header @ 0xC0) = sha256 of entire level-0 file (padded to 0x4000)
+- **Problem**: to write level-0 (position ~0xE0), need full level-1; to write level-1, need level-2; ...; to write level-4, need full RomFS data. All hashes computed from data that comes **after**.
+
+**PFS0 hash table (ExeFS):**
+- Layout: hash table → PFS0 data
+- Hash table = sha256 of each 0x10000 block of PFS0 data, padded to 0x200
+- Master hash (in FsHeader) = sha256 of raw hash table
+- **Problem**: hash table at start, data after.
+
+**NCA header:**
+- `section_hashes[i]` @ 0x280..0x2FF = sha256 of each section's FsHeader
+- FsHeaders themselves are computed from section hashes → no circular dependency here
+- **Not a problem**: FsHeaders built independently of section data.
+
+### Strategy Comparison
+
+**Option A: Two-pass (user's suggestion)**
+
+- **Pass 1**: stream merged RomFS data, compute all IVFC hashes (level4→level3→...→level0→master), discard data
+- **Pass 2**: stream merged RomFS data again, write: IVFC header (with master hash) → level0 → ... → level4 → RomFS data (with live hashing for verification)
+- **Pros**: simple logic, no seek-back needed, correct hashes from first write
+- **Cons**: double I/O on merged RomFS (~2.2GB extra read), requires BKTR merge to be re-run or output cached
+- **Memory**: BKTR merge still needs base RomFS in memory (~1.1GB), but merged RomFS never fully buffered
+
+**Option B: One-pass with buffered hashes (current)**
+
+- Compute IVFC tree fully in memory (`buildIvfcHashTree`), then write sequentially
+- **Pros**: single pass, simpler code
+- **Cons**: full RomFS + all 5 hash levels in memory simultaneously (~1.1GB + ~100KB overhead, manageable)
+- **Reality**: current code already does this, and memory usage is dominated by NCA inputs (~8.8GB), not the IVFC tree (~1.1GB)
+
+**Option C: One-pass with seek-back (for disk/FS adapters)**
+
+- Write NCA header with zero hashes, write data sections, compute hashes on-the-fly, seek back and patch header
+- **Pros**: single data read, true streaming
+- **Cons**: requires adapter to support seek-back (FS OK, blob/memory OK, SW download not OK)
+- **Complexity**: hash computation must be decoupled from write; IVFC levels must be buffered
+
+### Analysis
+
+The real memory optimization is **not** in IVFC/PFS0 streaming — it's in **selective NCZ decompression**:
+
+Currently (`fs/update.js:332-407`):
+- Fully decompresses `baseProgramNcaData` (~4.4GB): only needs base RomFS section (~1.1GB)
+- Fully decompresses `updateProgramNcaData` (~4.4GB): only needs update BKTR section (~2MB) + ExeFS section (~3.3GB)
+- **Wasted memory**: 8.8GB → could be 4.4GB (only buffer what BKTR merge actually needs)
+
+**Optimization opportunity** (low-hanging fruit):
+- Stream base Program NCA, decompress only base RomFS section (~1.1GB)
+- Stream update Program NCA, decompress only BKTR section (~2MB) + ExeFS section (~3.3GB)
+- Result: memory from 8.8GB → 4.4GB (50% reduction), no pipeline changes needed
+
+This is a **different optimization** than "stream NCA pack output", but achieves the goal (reduce memory usage) more directly.
+
+### Plan
+
+1. **Phase 1: Selective NCZ decompression for update pipeline** (highest impact)
+   - Modify `fs/update.js` to NOT fully decompress Program NCAs
+   - Instead: read NCA header → identify needed sections → decompress only those sections
+   - For BKTR merge: decompress base RomFS section + update BKTR section
+   - For ExeFS extraction: decompress update ExeFS section
+   - Expected: 8.8GB → 4.4GB memory reduction
+
+2. **Phase 2: Streaming NCA pack** (optional, lower impact)
+   - Only relevant if Phase 1 still leaves memory pressure
+   - Implement two-pass IVFC tree build for RomFS
+   - Implement seek-back for NCA header patching (disk adapters only)
+   - Or: keep current one-pass IVFC (1.1GB RomFS + ~100KB hash levels is manageable)
+
+3. **Phase 3: BKTR merge streaming** (complex, uncertain benefit)
+   - Two-pass BKTR merge: pass 1 reads base RomFS to index patch locations, pass 2 applies patches
+   - Requires base RomFS to be seekable or re-readable
+   - Complexity vs benefit unclear: base RomFS (~1.1GB) still needs to be accessed
+
+### Implementation Notes
+
+- Two-pass IVFC: hash computation is idempotent — same RomFS bytes → same hashes. Pass 1: stream bytes through SHA256 block hasher, build hash levels incrementally, store final hash levels (total ~100KB for 1.1GB RomFS: level4=1.1GB/0x4000*0x20 ≈ 7MB → level3 ≈ 44KB → level2 ≈ 480B → level1 ≈ 480B → level0 ≈ 480B). Actually level4 for 1.1GB RomFS = ceil(1.1GB/0x4000)*0x20 ≈ 7MB padded to 0x4000. Total hash levels ≈ 7MB. Manageable to cache.
+- For Phase 1: use existing `NCZDecompressor` with custom `writeChunk` that only writes requested section ranges. Parse NCA header first to get section offsets/sizes.
+
