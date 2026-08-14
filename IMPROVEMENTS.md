@@ -250,26 +250,37 @@ Prioritized areas for improvement identified 2026-05-30.
 
 - ❌ **_decompressStream gap for first section** — Bug report claimed `_decompressStream` doesn't account for gap between `UNCOMPRESSABLE_HEADER_SIZE` (0x4000) and first real section. **Not a bug**: `getSections()` inserts FakeSection when `sections[0].offset > UNCOMPRESSABLE_HEADER_SIZE`. Python nsz's raw offset arithmetic is equivalent.
 
-## Streaming NCA Pack (2026-08-14)
+## Streaming NCA Pack (2026-08-14) ✅ COMPLETED
 
-**Motivation**: `--update` BKTR merge pipeline currently loads both Program NCAs fully into memory (~4.4GB each = 8.8GB total). Memory usage is the bottleneck for large games. Simple NSZ→NSP is already streaming. Goal: stream NCA output to reduce memory usage for the update pipeline.
+**Motivation**: `--update` BKTR merge pipeline loads Program NCAs and buffers full output NCA (~699MB). Goal: stream NCA output to reduce memory usage.
 
-**Current pipeline** (`fs/update.js`):
-1. Decompress both Program NCAs to full buffers (~4.4GB each)
-2. BKTR merge: `mergeRomFS(baseProgramNcaData, updateProgramNcaData)` → merged RomFS (~1.1GB)
-3. Extract ExeFS from update NCA
-4. `packPlaintextProgramNca(exefsData, romfsData, ...)`:
-   - `buildIvfcHashTree(romfsData)` — full RomFS in memory, 5 hash levels built bottom-up
-   - `buildPfs0HashTable(exefsData)` — full ExeFS in memory
-   - Allocate output `Uint8Array(ncaSize)` — ~4.4GB, assemble header+sections
-5. `sha256(nca)` — full NCA hash for CNMT rebuild
+**✅ Phase 1: Selective NCZ decompression** (`fs/update.js`):
+- `extractNcaSection()`: streams NCZ decompression, buffers only requested [offset, size]
+- `buildSparseNcaBuffer()`: minimal NCA buffer (header + needed sections at correct offsets)
+- Base: loads only RomFS section, skips ExeFS (~29MB saved for Stardew Valley)
+- Verified: output byte-identical `01f0e396...` / 701767968 bytes
 
-**What is already streaming:**
-- NCZ decompression: `NCZDecompressor.decompress()` with `writeChunk` callback streams directly to output adapter
-- NSZ→NSP conversion: `fs/nsz-convert.js` calls NCZDecompressor streaming per-NCZ, writes directly to PFS0 output
-- Non-merged NCAs in update output: `copyRange()` or streamed NCZ decompression
+**✅ Phase 2: Streaming NCA pack** (`fs/nca-pack.js`, `fs/update.js`):
+- `packPlaintextProgramNcaStreaming(exefsData, romfsData, ..., outputAdapter, baseOffset)`:
+  - Computes IVFC/PFS0 hashes same as buffer version (inputs already in memory)
+  - Writes NCA to adapter via `write(offset, data)` instead of `new Uint8Array(ncaSize)`
+  - SHA256 hash computed incrementally via `SHA256.update()` (includes section padding zeros)
+  - `baseOffset` parameter for PFS0 integration (NCA at arbitrary output offset)
+- Integration into `--update` pipeline:
+  - PFS0 header built with placeholder names first (need offsets before streaming)
+  - Program NCA streamed at its PFS0 offset → get hash during write
+  - CNMT built with correct Program NCA hash → final PFS0 header with real names
+  - Seek-back write final PFS0 header at offset 0
+- Verified: Stardew Valley BKTR merge, output byte-identical vs buffer version
 
-**Memory bottleneck**: only BKTR merge + NCA pack require full buffering.
+**Memory savings** (Stardew Valley, BKTR merge):
+- Before: RomFS (~1.1GB) + ExeFS (~91MB) + NCA output (~699MB) = ~1.9GB
+- After: RomFS (~1.1GB) + ExeFS (~91MB) + streaming output (0MB buffered) = ~1.2GB
+- Reduction: ~40% for BKTR merge path
+
+**Remaining** (Phase 3, low priority):
+- BKTR merge streaming: NCZ-aware BKTR merge to avoid buffering base RomFS (~1.1GB)
+- Requires two-pass or seek-back on base NCZ (complex, uncertain benefit vs implementation cost)
 
 ### Hashes Problem
 
