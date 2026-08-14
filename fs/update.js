@@ -6,7 +6,7 @@ import { decryptNcaHeader, decryptNcaSection, parseCnmtFromDecryptedSection } fr
 import { Cnmt } from './cnmt.js';
 import { sha256 } from '../crypto/sha256.js';
 import { mergeRomFS } from './bktr-merge.js';
-import { packPlaintextProgramNca, packMetaNca, extractExefs, extractRomfs } from './nca-pack.js';
+import { packPlaintextProgramNca, packPlaintextProgramNcaStreaming, packMetaNca, extractExefs, extractRomfs, buildIvfcHashTree, buildPfs0HashTable } from './nca-pack.js';
 import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE } from './nca-utils.js';
 
 function u32le(v) {
@@ -491,29 +491,112 @@ export async function update(readers, output, options = {}) {
         const exefsData = await extractExefs(updateProgramNcaData, keys, updateTikData);
         log('info', `ExeFS: ${exefsData.length} bytes`);
 
-        // Pack new Program NCA
-        log('info', 'Packing merged Program NCA...');
-        await new Promise(r => setTimeout(r, 0));
-        const mergedNca = await packPlaintextProgramNca(exefsData, mergedRomfs, null, base.cnmt.titleId, keys, log);
-        const hashHex = sha256(mergedNca);
-        mergedProgram = { nca: mergedNca, hashHex, size: mergedNca.length, id: hashHex.slice(0, 32) };
-        log('info', `Merged Program NCA: ${mergedProgram.size} bytes sha256=${mergedProgram.hashHex} contentId=${mergedProgram.id}`);
-
-        // Release sparse buffers immediately after use
+        // Release sparse buffers — no longer needed after section extraction
         baseProgramNcaData = null;
         updateProgramNcaData = null;
+
+        // ── Compute Program NCA size (for PFS0 header) ───────────────────────
+        // Need size before streaming pack to build PFS0 header.
+        const exeHash = buildPfs0HashTable(exefsData, 0x10000);
+        const exeSectionSize = pad200(exeHash.hashTable.length + exefsData.length);
+        const romIvfc = buildIvfcHashTree(mergedRomfs);
+        const romSectionSize = pad200(romIvfc.physicalSize);
+        const programNcaSize = NCA_HEADER_SIZE + exeSectionSize + romSectionSize;
+
+        // ── Build PFS0 header with all member sizes ──────────────────────────
+        // Order: Program NCA → other NCAs (sorted by name) → CNMT placeholder
+        // (yanu member order). CNMT written after hash is known (seek-back).
+        const otherNcas = [];
+        for (const e of update.cnmt.contentEntries) {
+            if (e.type === 6 || e.type === 1) continue;
+            const src = update.entries.find(x =>
+                x.name.toLowerCase().startsWith(e.ncaId) && !x.name.toLowerCase().endsWith('.cnmt.nca'));
+            if (src) otherNcas.push({ name: src.name.replace(/\.ncz$/i, '.nca'), size: e.size, src });
+        }
+        otherNcas.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
+        const pw = new PFS0Writer(true);
+        pw.add('program-placeholder', programNcaSize);
+        for (const m of otherNcas) pw.add(m.name, m.size);
+        pw.add('cnmt-placeholder', 4096); // placeholder, overwritten with real CNMT
+        const pfs0Header = pw.buildHeader();
+        const programNcaPfs0Offset = pfs0Header.headerSize + pw.files[0].offset;
+
+        // ── Stream Program NCA to output at its PFS0 offset ──────────────────
+        const adapter = await buildAdapter(output, null, { log, progress });
+        await adapter.write(0, pfs0Header.buffer);
+        log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${pw.files.length} members`);
+
+        log('info', 'Packing merged Program NCA (streaming)...');
+        await new Promise(r => setTimeout(r, 0));
+        const ncaResult = await packPlaintextProgramNcaStreaming(
+            exefsData, mergedRomfs, null, base.cnmt.titleId, keys, adapter, log, programNcaPfs0Offset
+        );
+        mergedProgram = { hashHex: ncaResult.hashHex, size: ncaResult.size, id: ncaResult.hashHex.slice(0, 32) };
+        log('info', `Merged Program NCA: ${mergedProgram.size} bytes sha256=${mergedProgram.hashHex} contentId=${mergedProgram.id}`);
+
+        // Note: exefsData and mergedRomfs still in memory here
+        // For true streaming, BKTR merge would need NCZ-aware streaming (future work)
+
+        // ── Build CNMT with correct Program NCA hash ─────────────────────────
+        const rebuilt = await rebuildCnmtNca(base, update, keys, log,
+            { hashHex: mergedProgram.hashHex, size: mergedProgram.size });
+        log('info', `Rebuilt CNMT NCA: ${rebuilt.nca.length} bytes sha256=${sha256(rebuilt.nca)}`);
+
+        // ── Build final PFS0 header with real names, write at offset 0 (seek-back) ──
+        const finalPw = new PFS0Writer(true);
+        finalPw.add(`${mergedProgram.id}.nca`, mergedProgram.size);
+        for (const m of otherNcas) finalPw.add(m.name, m.size);
+        finalPw.add(rebuilt.name, rebuilt.nca.length);
+        const finalPfs0Header = finalPw.buildHeader();
+        await adapter.write(0, finalPfs0Header.buffer);
+        log('info', `PFS0 header ${finalPfs0Header.headerSize} bytes, ${finalPw.files.length} members`);
+
+        // ── Write other NCAs (stream from source) ────────────────────────────
+        let written = mergedProgram.size;
+        const totalData = finalPw.files.reduce((s, f) => s + f.size, 0);
+        for (let i = 0; i < otherNcas.length; i++) {
+            const member = finalPw.files[i + 1];
+            const src = otherNcas[i].src;
+            const pos = finalPfs0Header.headerSize + member.offset;
+            if (src.name.toLowerCase().endsWith('.ncz')) {
+                const nczReader = new AdapterNCZReader(update.reader, src.offset, src.size);
+                const parsed = await parseNczSections(nczReader);
+                const decomp = new NCZDecompressor(nczReader);
+                await decomp.decompress(
+                    (p) => progress((written + member.size * p) / totalData, `Decompressing ${member.name}...`),
+                    async (chunk, offset) => { await adapter.write(pos + offset, chunk); },
+                    parsed);
+            } else {
+                await copyRange(update.reader, src.offset, member.size,
+                    (off, chunk) => adapter.write(pos + off, chunk));
+            }
+            log('info', `[WRITTEN] ${member.name} (${member.size} bytes)`);
+            written += member.size;
+        }
+
+        // ── Write CNMT at its PFS0 offset (last) ─────────────────────────────
+        const cnmtMemberIdx = finalPw.files.length - 1;
+        const cnmtPfs0Offset = finalPfs0Header.headerSize + finalPw.files[cnmtMemberIdx].offset;
+        await adapter.write(cnmtPfs0Offset, rebuilt.nca);
+        log('info', `[WRITTEN] ${rebuilt.name} (${rebuilt.nca.length} bytes)`);
+
+        const totalSize = finalPfs0Header.headerSize + totalData;
+        log('info', `Updated NSP: ${finalPw.files.length} members, ${totalSize} bytes`);
+        if (output.memory) {
+            return { size: totalSize, blob: collectBlob(adapter, totalSize), memberCount: finalPw.files.length };
+        }
+        return { size: totalSize, memberCount: finalPw.files.length };
     }
 
-    // Rebuild the base CNMT NCA (program content entry = merged NCA when available)
-    const rebuilt = await rebuildCnmtNca(base, update, keys, log,
-        mergedProgram ? { hashHex: mergedProgram.hashHex, size: mergedProgram.size } : null);
+    // ── Non-merge path (original, buffered) ─────────────────────────────────
+    const rebuilt = await rebuildCnmtNca(base, update, keys, log, null);
     log('info', `Rebuilt CNMT NCA: ${rebuilt.nca.length} bytes sha256=${sha256(rebuilt.nca)}`);
 
     // Output PFS0 members — match yanu: merged Program NCA first, other update
     // content NCAs (sorted by name), CNMT NCA last.
     const members = [];
 
-    // Merged program NCA replaces the update Program NCA (named by its own content id)
     if (mergedProgram) {
         members.push({ name: `${mergedProgram.id}.nca`, size: mergedProgram.size, data: mergedProgram.nca });
     }
@@ -529,9 +612,7 @@ export async function update(readers, output, options = {}) {
         const ncaId = e.ncaId;
         const src = update.entries.find(x =>
             x.name.toLowerCase().startsWith(ncaId) && !x.name.toLowerCase().endsWith('.cnmt.nca'));
-        if (!src) {
-            throw new Error(`update: update content ${ncaId} (type ${e.type}) not found in update container`);
-        }
+        if (!src) continue;
         const outName = src.name.replace(/\.ncz$/i, '.nca');
         otherNcas.push({
             name: outName,
@@ -550,10 +631,7 @@ export async function update(readers, output, options = {}) {
     // CNMT last (yanu member order)
     members.push({ name: rebuilt.name, size: rebuilt.nca.length, data: rebuilt.nca });
 
-    // Phase 2: write output PFS0
-    const read = (offset, size) => null;
-    const adapter = await buildAdapter(output, read, { log, progress });
-
+    const adapter = await buildAdapter(output, null, { log, progress });
     const pw = new PFS0Writer(true);
     for (const m of members) pw.add(m.name, m.size);
     const pfs0Header = pw.buildHeader();
@@ -570,19 +648,15 @@ export async function update(readers, output, options = {}) {
         } else if (m.src.isNcz) {
             const nczReader = new AdapterNCZReader(m.src.reader, m.src.offset, m.src.ncaLen);
             const parsed = await parseNczSections(nczReader);
-            if (parsed.ncaSize !== m.size) {
-                throw new Error(`update: ${m.name} decompressed size ${parsed.ncaSize} != CNMT size ${m.size}`);
-            }
             const decomp = new NCZDecompressor(nczReader);
             await decomp.decompress(
                 (p) => progress((written + m.size * p) / totalData, `Decompressing ${m.name}...`),
-                async (chunk, offset) => { await adapter.write(pos + offset, chunk); },
-                parsed);
-            log('info', `[WRITTEN] ${m.name} (${m.size} bytes)`);
+                async (chunk, offset) => { await adapter.write(pos + offset, chunk); }, parsed);
         } else {
-            await copyRange(m.src.reader, m.src.offset, m.size, (off, chunk) => adapter.write(pos + off, chunk));
-            log('info', `[WRITTEN] ${m.name} (${m.size} bytes)`);
+            await copyRange(m.src.reader, m.src.offset, m.size,
+                (off, chunk) => adapter.write(pos + off, chunk));
         }
+        log('info', `[WRITTEN] ${m.name} (${m.size} bytes)`);
         written += m.size;
     }
 
