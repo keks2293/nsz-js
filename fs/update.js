@@ -6,7 +6,7 @@ import { decryptNcaHeader, decryptNcaSection, parseCnmtFromDecryptedSection } fr
 import { Cnmt } from './cnmt.js';
 import { sha256 } from '../crypto/sha256.js';
 import { mergeRomFS } from './bktr-merge.js';
-import { packPlaintextProgramNca, packPlaintextProgramNcaStreaming, packMetaNca, extractExefs, extractRomfs, buildIvfcHashTree, buildPfs0HashTable } from './nca-pack.js';
+import { preparePlaintextProgramNca, writePlaintextProgramNca, packPlaintextProgramNcaStreaming, packMetaNca, extractExefs, extractRomfs, buildIvfcHashTree, buildPfs0HashTable } from './nca-pack.js';
 import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE } from './nca-utils.js';
 
 function u32le(v) {
@@ -497,24 +497,26 @@ export async function update(readers, output, options = {}) {
         baseProgramNcaData = null;
         updateProgramNcaData = null;
 
-        // ── Compute Program NCA size (for PFS0 header) ───────────────────────
-        const exeHash = buildPfs0HashTable(exefsData, 0x10000);
-        const exeSectionSize = pad200(exeHash.hashTable.length + exefsData.length);
-        const romIvfc = buildIvfcHashTree(mergedRomfs);
-        const romSectionSize = pad200(romIvfc.physicalSize);
-        const programNcaSize = NCA_HEADER_SIZE + exeSectionSize + romSectionSize;
+        // ── Prepare Program NCA and learn its real contentId (no writes) ───
+        // Emulators require the shipped NCA filename to be `<contentId>.nca`
+        // (Switch looks up files by the content hash recorded in CNMT). The
+        // NCA hash is deterministic, so we compute it up front — this lets us
+        // build the PFS0 header with real names before streaming anything, no
+        // seek-back needed.
+        log('info', 'Preparing merged Program NCA (hash precompute)...');
+        const preparedProgram = await preparePlaintextProgramNca(
+            exefsData, mergedRomfs, null, base.cnmt.titleId, keys, log
+        );
+        mergedProgram = { hashHex: preparedProgram.hashHex, size: preparedProgram.size, id: preparedProgram.hashHex.slice(0, 32) };
+        log('info', `Merged Program NCA: ${mergedProgram.size} bytes sha256=${mergedProgram.hashHex} contentId=${mergedProgram.id}`);
 
-        // ── Build PFS0 header (Program NCA first) with fixed-length placeholders ──
-        // PFS0 file order doesn't matter to Switch. Writing Program NCA first
-        // lets us stream it (get hash), then write the other NCAs and CNMT.
-        //
-        // Placeholders match real name lengths exactly (32 hex + ext):
-        //   Program NCA: 36 chars = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.nca"
-        //   CNMT NCA:    40 chars = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.cnmt.nca"
-        // This ensures string table size — and therefore header size — is identical
-        // between placeholder and final header, enabling in-place patch at offset 0.
-        //
-        // Order: Program NCA → other NCAs (sorted by name) → CNMT (yanu member order)
+        // ── Build CNMT with correct Program NCA hash ─────────────────────────
+        const rebuilt = await rebuildCnmtNca(base, update, keys, log,
+            { hashHex: mergedProgram.hashHex, size: mergedProgram.size });
+        log('info', `Rebuilt CNMT NCA: ${rebuilt.nca.length} bytes sha256=${sha256(rebuilt.nca)}`);
+
+        // ── Build PFS0 header with real names (no seek-back needed) ─────────
+        // Order: Program NCA → other NCAs (sorted by name) → CNMT last (yanu layout)
         const otherNcas = [];
         for (const e of update.cnmt.contentEntries) {
             if (e.type === 6 || e.type === 1) continue;
@@ -525,35 +527,24 @@ export async function update(readers, output, options = {}) {
         otherNcas.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
         const finalPw = new PFS0Writer(true);
-        finalPw.add('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.nca', programNcaSize);
+        finalPw.add(`${mergedProgram.id}.nca`, mergedProgram.size);
         for (const m of otherNcas) finalPw.add(m.name, m.size);
-        finalPw.add('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.cnmt.nca', 4096);
+        finalPw.add(rebuilt.name, rebuilt.nca.length);
 
-        // ── Write PFS0 header at offset 0 (before data) ──────────────────────
-        // Placeholder names will be replaced after hash known — header size stays same
-        // (Program NCA name: 32 hex chars + ".nca" = 36 bytes, placeholder same length).
+        // ── Write PFS0 header at offset 0 (final, no patching needed) ─────────
         const adapter = await buildAdapter(output, null, { log, progress });
         const pfs0Header = finalPw.buildHeader();
         await adapter.write(0, pfs0Header.buffer);
-        log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${finalPw.files.length} members (placeholder names)`);
+        log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${finalPw.files.length} members`);
 
         // ── Stream Program NCA at its PFS0 offset ─────────────────────────────
         const programNcaPfs0Offset = pfs0Header.headerSize + finalPw.files[0].offset;
 
         log('info', 'Packing merged Program NCA (streaming)...');
         await new Promise(r => setTimeout(r, 0));
-        const ncaResult = await packPlaintextProgramNcaStreaming(
-            exefsData, mergedRomfs, null, base.cnmt.titleId, keys, adapter, log, programNcaPfs0Offset
-        );
-        mergedProgram = { hashHex: ncaResult.hashHex, size: ncaResult.size, id: ncaResult.hashHex.slice(0, 32) };
-        log('info', `Merged Program NCA: ${mergedProgram.size} bytes sha256=${mergedProgram.hashHex} contentId=${mergedProgram.id}`);
+        await writePlaintextProgramNca(preparedProgram, adapter, log, programNcaPfs0Offset);
 
-        // ── Build CNMT with correct Program NCA hash ─────────────────────────
-        const rebuilt = await rebuildCnmtNca(base, update, keys, log,
-            { hashHex: mergedProgram.hashHex, size: mergedProgram.size });
-        log('info', `Rebuilt CNMT NCA: ${rebuilt.nca.length} bytes sha256=${sha256(rebuilt.nca)}`);
-
-        // ── Write other NCAs (stream from source) ────────────────────────────
+        // ── Write other NCAs (stream from source, sorted by name) ────────────
         let written = mergedProgram.size;
         const totalData = finalPw.files.reduce((s, f) => s + f.size, 0);
         for (let i = 0; i < otherNcas.length; i++) {
@@ -576,23 +567,11 @@ export async function update(readers, output, options = {}) {
             written += member.size;
         }
 
-        // ── Write CNMT at its PFS0 offset (last) ─────────────────────────────
+        // ── Write CNMT last (matches yanu member order) ───────────────────────
         const cnmtMemberIdx = finalPw.files.length - 1;
         const cnmtPfs0Offset = pfs0Header.headerSize + finalPw.files[cnmtMemberIdx].offset;
         await adapter.write(cnmtPfs0Offset, rebuilt.nca);
         log('info', `[WRITTEN] ${rebuilt.name} (${rebuilt.nca.length} bytes)`);
-
-        // ── Patch PFS0 header with real member names (seek-back to 0) ─────────
-        const realPw = new PFS0Writer(true);
-        realPw.add(`${mergedProgram.id}.nca`, mergedProgram.size);
-        for (const m of otherNcas) realPw.add(m.name, m.size);
-        realPw.add(rebuilt.name, rebuilt.nca.length);
-        const realHeader = realPw.buildHeader();
-        if (realHeader.headerSize !== pfs0Header.headerSize) {
-            throw new Error(`update: PFS0 header size mismatch after name patch (${realHeader.headerSize} vs ${pfs0Header.headerSize})`);
-        }
-        await adapter.write(0, realHeader.buffer);
-        log('info', `PFS0 header patched with real names (${realHeader.headerSize} bytes, ${realPw.files.length} members)`);
 
         const totalSize = pfs0Header.headerSize + totalData;
         log('info', `Updated NSP: ${finalPw.files.length} members, ${totalSize} bytes`);
@@ -606,18 +585,12 @@ export async function update(readers, output, options = {}) {
     const rebuilt = await rebuildCnmtNca(base, update, keys, log, null);
     log('info', `Rebuilt CNMT NCA: ${rebuilt.nca.length} bytes sha256=${sha256(rebuilt.nca)}`);
 
-    // Output PFS0 members — match yanu: merged Program NCA first, other update
-    // content NCAs (sorted by name), CNMT NCA last.
     const members = [];
 
     if (mergedProgram) {
         members.push({ name: `${mergedProgram.id}.nca`, size: mergedProgram.size, data: mergedProgram.nca });
     }
 
-    // Other update content NCAs (manual/publicdata) — decompressed to .nca,
-    // sorted by name (this places the manual NCA right after the Program NCA,
-    // matching yanu's processing order — the manual is "attached" to Program).
-    // With a BKTR merge the Program NCA is replaced above, so type 1 is skipped.
     const otherNcas = [];
     for (const e of update.cnmt.contentEntries) {
         if (e.type === 6) continue;
@@ -628,14 +601,9 @@ export async function update(readers, output, options = {}) {
         if (!src) continue;
         const outName = src.name.replace(/\.ncz$/i, '.nca');
         otherNcas.push({
-            name: outName,
-            size: e.size,
-            src: {
-                reader: update.reader,
-                offset: src.offset,
-                ncaLen: src.size,
-                isNcz: src.name.toLowerCase().endsWith('.ncz'),
-            },
+            name: outName, size: e.size,
+            src: { reader: update.reader, offset: src.offset, ncaLen: src.size,
+                   isNcz: src.name.toLowerCase().endsWith('.ncz') },
         });
     }
     otherNcas.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));

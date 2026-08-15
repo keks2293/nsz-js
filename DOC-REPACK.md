@@ -452,6 +452,13 @@ The output NSP contains:
 - Base `.tik` + `.cert` (for the Application)
 - Update `.tik` + `.cert` (for the update Program NCA, if present)
 
+> **Member names are NOT replaceable.** Theory: replace the hash in the PFS0 member name with a
+> fixed name ("program.nca"). Tested on emulator installs — disproven: emulators match the filename
+> against the CNMT's content hash, so members MUST keep their real `<contentId>.nca` /
+> `<contentId>.cnmt.nca` names. Hence the merged Program NCA's sha256 is computed in advance
+> (`preparePlaintextProgramNca()` — deterministic, depends only on exefs/romfs/keys) so the PFS0
+> header is built once with real names and written at offset 0, no seek-back.
+
 ### Member order (yanu NSP sorting)
 
 **yanu does not sort the NSP members.** It has no ordering logic — it passes a directory of
