@@ -2,7 +2,7 @@ import { PFS0, PFS0Writer } from './pfs0.js';
 import { buildAdapter, collectBlob, copyRange } from './adapter.js';
 import { XCIReader } from './xci.js';
 import { NCZDecompressor, AdapterNCZReader, parseNczSections } from './ncz.js';
-import { decryptNcaHeader, readCnmtFromMeta } from './nca.js';
+import { decryptNcaHeader, readCnmtFromMeta, FsType } from './nca.js';
 
 function stem(name) {
     const dot = name.lastIndexOf('.');
@@ -53,53 +53,67 @@ export async function mergeNSP(readers, output, options = {}) {
         throw new Error('mergeNSP: nodelta requires keys (--keys / keys file) to read CNMT metadata');
     }
 
-    // Collect delta fragment ncaIds from all inputs' CNMTs
-    const deltaFrags = nodelta && keys
-        ? new Set()
-        : null;
+    // Collect delta fragment ncaIds when nodelta is enabled
+    const deltaFrags = nodelta && keys ? new Set() : null;
 
+    // Phase 1: parse CNMTs to collect delta fragments (if nodelta) and gather entries
+    const allEntries = [];
+    for (let i = 0; i < readers.length; i++) {
+        const r = readers[i];
+        const { kind, entries } = await openContainer(r);
+        allEntries.push({ inputIndex: i, reader: r.reader, entries, kind });
+        log('info', `Reading ${r.name}: ${entries.length} entries (${kind})`);
+
+        if (!deltaFrags) continue;
+
+        for (const e of entries) {
+            const lower = e.name.toLowerCase();
+            if (!lower.endsWith('.cnmt.nca')) continue;
+            let header = null;
+            try {
+                const raw = await r.reader.read(e.offset, Math.min(e.size, 0xC00));
+                header = decryptNcaHeader(raw, keys);
+            } catch (_e) {}
+            if (!header || header.contentType !== 1) continue;
+            let cnmt = null;
+            try {
+                cnmt = await readCnmtFromMeta(r.reader, e, header);
+            } catch (_e) {}
+            if (!cnmt) continue;
+
+            for (const content of cnmt.contentEntries) {
+                if (content.type === 6) {
+                    deltaFrags.add(content.ncaId);
+                }
+            }
+        }
+    }
+
+    // Phase 2: build member list
     const members = [];
     const seenNames = new Set();
     let totalDataSize = 0;
 
-    for (let i = 0; i < readers.length; i++) {
-        const r = readers[i];
-        const { kind, entries } = await openContainer(r);
-        log('info', `Reading ${r.name}: ${entries.length} entries (${kind})`);
-
-        // Collect delta fragment ncaIds from this input's CNMTs
-        if (deltaFrags) {
-            for (const e of entries) {
-                const lower = e.name.toLowerCase();
-                if (!lower.endsWith('.cnmt.nca')) continue;
-                let header = null;
-                try {
-                    const raw = await r.reader.read(e.offset, Math.min(e.size, 0xC00));
-                    header = decryptNcaHeader(raw, keys);
-                } catch (_e) {}
-                if (!header || header.contentType !== 1) continue;
-                let cnmt = null;
-                try {
-                    cnmt = await readCnmtFromMeta(r.reader, e, header);
-                } catch (_e) {}
-                if (!cnmt) continue;
-                for (const content of cnmt.contentEntries) {
-                    if (content.type === 6) deltaFrags.add(content.ncaId);
-                }
-            }
-        }
+    for (const inputInfo of allEntries) {
+        const i = inputInfo.inputIndex;
+        const rReader = inputInfo.reader;
+        const entries = inputInfo.entries;
 
         for (const f of entries) {
             const isNcz = f.name.toLowerCase().endsWith('.ncz');
             const outputName = isNcz ? f.name.slice(0, -4) + '.nca' : f.name;
+            const ncaStem = stem(outputName);
+
             if (seenNames.has(outputName)) continue;
-            if (deltaFrags && deltaFrags.has(stem(f.name))) {
+
+            if (deltaFrags && deltaFrags.has(ncaStem)) {
                 log('info', `[nodelta] excluding delta fragment ${outputName}`);
                 continue;
             }
+
             seenNames.add(outputName);
             if (isNcz) {
-                const nczReader = new AdapterNCZReader(r.reader, f.offset, f.size);
+                const nczReader = new AdapterNCZReader(rReader, f.offset, f.size);
                 const parsed = await parseNczSections(nczReader);
                 const { ncaSize, sections } = parsed;
                 log('info', `[DECOMPRESS] ${f.name} -> ${outputName} (${formatBytes(ncaSize)})`);

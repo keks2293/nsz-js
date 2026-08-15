@@ -1,6 +1,6 @@
 import { openSync, fstatSync, readSync, readFileSync } from 'node:fs';
-import { PFS0 } from './fs/pfs0.js';
-import { NCZDecompressor, AdapterNCZReader, parseNczSections } from './fs/ncz.js';
+import { PFS0 } from '../fs/pfs0.js';
+import { NCZDecompressor, AdapterNCZReader, parseNczSections } from '../fs/ncz.js';
 
 // Real-pipeline benchmark: decompress a real .nsz (all NCZ members) with the
 // output DISCARDED (dev-null semantics) — no decompressed bytes hit the disk,

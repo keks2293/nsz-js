@@ -144,8 +144,11 @@ function createAesXts(key) {
         encCipher.setAutoPadding(false);
         const decCipher = nodeCrypto.createDecipheriv('aes-128-ecb', xts.k1, null);
         decCipher.setAutoPadding(false);
+        const encDataCipher = nodeCrypto.createCipheriv('aes-128-ecb', xts.k1, null);
+        encDataCipher.setAutoPadding(false);
         xts._encTweak = (tweakBytes) => new Uint8Array(encCipher.update(tweakBytes));
         xts._decData = (block) => new Uint8Array(decCipher.update(block));
+        xts._encData = (block) => new Uint8Array(encDataCipher.update(block));
     }
     return xts;
 }
