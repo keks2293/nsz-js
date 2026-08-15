@@ -254,24 +254,34 @@ Prioritized areas for improvement identified 2026-05-30.
 
 **Motivation**: `--update` BKTR merge pipeline loads Program NCAs and buffers full output NCA (~699MB). Goal: stream NCA output to reduce memory usage.
 
-**✅ Phase 1: Selective NCZ decompression** (`fs/update.js`):
+**✅ Phase 1: Selective NCZ decompression + early stop** (`fs/update.js`):
 - `extractNcaSection()`: streams NCZ decompression, buffers only requested [offset, size]
+- **Early stop**: throws `SECTION_COMPLETE` error to abort NCZ decompression once past target section
+  - For base Program NCZ where RomFS (~889MB) precedes ExeFS (~30MB): skips decompressing trailing ExeFS blocks
+  - Saves CPU (not memory — NCZ is sequential anyway)
 - `buildSparseNcaBuffer()`: minimal NCA buffer (header + needed sections at correct offsets)
 - Base: loads only RomFS section, skips ExeFS (~29MB saved for Stardew Valley)
-- Verified: output byte-identical `01f0e396...` / 701767968 bytes
+- Verified: NSZ and NSP inputs both produce byte-identical `01f0e396...` / 701767968 bytes
 
 **✅ Phase 2: Streaming NCA pack** (`fs/nca-pack.js`, `fs/update.js`):
-- `packPlaintextProgramNcaStreaming(exefsData, romfsData, ..., outputAdapter, baseOffset)`:
-  - Computes IVFC/PFS0 hashes same as buffer version (inputs already in memory)
-  - Writes NCA to adapter via `write(offset, data)` instead of `new Uint8Array(ncaSize)`
-  - SHA256 hash computed incrementally via `SHA256.update()` (includes section padding zeros)
-  - `baseOffset` parameter for PFS0 integration (NCA at arbitrary output offset)
-- Integration into `--update` pipeline:
-  - PFS0 header built with placeholder names first (need offsets before streaming)
-  - Program NCA streamed at its PFS0 offset → get hash during write
-  - CNMT built with correct Program NCA hash → final PFS0 header with real names
-  - Seek-back write final PFS0 header at offset 0
-- Verified: Stardew Valley BKTR merge, output byte-identical vs buffer version
+- `preparePlaintextProgramNca(exefsData, romfsData, ..., keys)` + `writePlaintextProgramNca(prepared, adapter, baseOffset)`:
+  - Theory: replace the hash in the PFS0 member name with a fixed name ("program.nca") — tested on
+    emulator installs and **disproven**: emulators match the filename against the CNMT's content hash,
+    so members MUST keep the real `<contentId>.nca` / `<contentId>.cnmt.nca` names
+  - `prepare` computes IVFC/PFS0 hashes AND the full NCA SHA256 **without writing** (the Program NCA
+    hash is deterministic — depends only on exefs/romfs/keys), so the real `<contentId>.nca` name is
+    known BEFORE the PFS0 header is written
+  - `write` streams the prepared NCA via `write(offset, data)` (bytes identical to what `prepare` hashed)
+  - (earlier `packPlaintextProgramNcaStreaming()` = prepare + write is superseded — update.js calls
+    prepare + write directly)
+- Integration into `--update` pipeline (fully streaming, no seek-back):
+  - PFS0 header built ONCE at start with real names → write at offset 0 → done, never touched again
+  - Sequential writes only: PFS0 header → Program NCA (stream) → other NCAs (stream, sorted by name)
+    → CNMT (build+write). All writes position >= previous write.
+  - **Fully SW-ready**: FileSystemWritableFileStream requires sequential writes only — now fully
+    compatible. No seek-back, no close+reopen, no header patching.
+- Verified: Stardew Valley BKTR merge, output byte-identical to the previously-working NSP
+  (`01f0e396...` / 701767968 bytes / 4 members, all member data IDENTICAL)
 
 **Memory savings** (Stardew Valley, BKTR merge):
 - Before: RomFS (~1.1GB) + ExeFS (~91MB) + NCA output (~699MB) = ~1.9GB
@@ -358,7 +368,16 @@ This is a **different optimization** than "stream NCA pack output", but achieves
 2. **Phase 2: Streaming NCA pack** (optional, lower impact)
    - Only relevant if Phase 1 still leaves memory pressure
    - Implement two-pass IVFC tree build for RomFS
-   - Implement seek-back for NCA header patching (disk adapters only)
+   - `writeBackend` splits into **two strategies** by adapter capability:
+     - **seekable** (`fd` file/CLI, memory/Blob): 1-pass stream with on-the-fly hash, then
+       patch PFS0 header at offset 0 with real `<contentId>.nca` names (Blob: just `write(0, header)`
+       at the end — arbitrary-offset writes allowed)
+     - **sequential-only** (SW `FileSystemWritableFileStream`): 2-pass source — pass 1 computes the
+       Program NCA hash (name is deterministic: depends only on exefs/romfs/keys), pass 2 writes
+       sequentially. No seek-back possible
+   - The NCA hash — and therefore the `<contentId>.nca` name — fundamentally depends on the full
+     data: buffer it (current), or seek-back patch (seekable adapters), or re-read the source
+     (sequential-only adapters). No way around it
    - Or: keep current one-pass IVFC (1.1GB RomFS + ~100KB hash levels is manageable)
 
 3. **Phase 3: BKTR merge streaming** (complex, uncertain benefit)
