@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'fs';
-import { PFS0 } from './fs/pfs0.js';
-import { AesCtr } from './crypto/aes-ops.mjs';
+import { PFS0 } from '../fs/pfs0.js';
+import { AesCtr } from '../crypto/aes-ops.mjs';
 
 const args = process.argv.slice(2);
 const NSZ_PATH = args[0];

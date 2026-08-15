@@ -59,15 +59,40 @@ async function* decompressNodeStream(readChunk) {
     const { createZstdDecompress } = await import('node:zlib');
     const decompressor = createZstdDecompress({ highWaterMark: 1024 * 1024 });
     const outIt = decompressor[Symbol.asyncIterator]();
+    let feedError = null;
+    let aborted = false;
+    // 'drain' wait must also resolve when the stream is destroyed (consumer
+    // exited early) or errors out, otherwise feed deadlocks on backpressure
+    // and nobody is consuming output anymore.
+    const waitDrain = () => new Promise((resolve, reject) => {
+        if (aborted) return resolve();
+        const onDrain = () => { cleanup(); resolve(); };
+        const onError = (e) => { cleanup(); reject(e); };
+        const onClose = () => { cleanup(); resolve(); };
+        const cleanup = () => {
+            decompressor.removeListener('drain', onDrain);
+            decompressor.removeListener('error', onError);
+            decompressor.removeListener('close', onClose);
+        };
+        decompressor.once('drain', onDrain);
+        decompressor.once('error', onError);
+        decompressor.once('close', onClose);
+    });
     const feed = (async () => {
-        while (true) {
-            const chunk = await readChunk();
-            if (!chunk || !chunk.byteLength) break;
-            if (!decompressor.write(chunk)) {
-                await new Promise(res => decompressor.once('drain', res));
+        try {
+            while (!aborted) {
+                const chunk = await readChunk();
+                if (!chunk || !chunk.byteLength) break;
+                if (!decompressor.write(chunk)) {
+                    await waitDrain();
+                    if (aborted) return;
+                }
             }
+            if (!aborted) decompressor.end();
+        } catch (e) {
+            feedError = e;
+            decompressor.destroy(e);
         }
-        decompressor.end();
     })();
     try {
         while (true) {
@@ -77,8 +102,12 @@ async function* decompressNodeStream(readChunk) {
                 yield new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
             }
         }
-    } finally {
         await feed;
+        if (feedError) throw feedError;
+    } finally {
+        aborted = true;
+        if (!decompressor.destroyed) decompressor.destroy();
+        await feed.catch(() => {});
     }
 }
 

@@ -26,7 +26,7 @@ python3 test_aes_ctr.py
 ---
 
 ### test_vector.mjs (Node.js)
-**Location:** `/test_vector.mjs`
+**Location:** `scripts/test_vector.mjs`
 **Purpose:** AES-CTR test vector verification matching Python nsz
 **What it tests:**
 - AES-CTR keystream matches Python output
@@ -35,7 +35,7 @@ python3 test_aes_ctr.py
 
 **How to run:**
 ```bash
-node test_vector.mjs
+node scripts/test_vector.mjs
 ```
 
 **Expected output:**
@@ -46,7 +46,7 @@ Result: ✅ PASS
 ---
 
 ### test_aesctr.mjs (Node.js)
-**Location:** `/test_aesctr.mjs`
+**Location:** `scripts/test_aesctr.mjs`
 **Purpose:** AES-CTR with explicit seek and encrypt
 **What it tests:**
 - AES-CTR seek to specific offset
@@ -54,7 +54,7 @@ Result: ✅ PASS
 
 **How to run:**
 ```bash
-node test_aesctr.mjs
+node scripts/test_aesctr.mjs
 ```
 
 **Expected output:** Shows encrypted zstd magic matching `874786d3`
@@ -76,7 +76,7 @@ node test_aes_manual.cjs
 ---
 
 ### test_aes128.mjs (Node.js)
-**Location:** `/test_aes128.mjs`
+**Location:** `scripts/test_aes128.mjs`
 **Purpose:** Regression vectors for the software AES-128 primitives (`crypto/aes128.js`)
 **What it tests:**
 - `AesEcb.encrypt` single-block, `encryptBlock` with caller-provided `out` (in-place) and without (fresh alloc)
@@ -89,7 +89,7 @@ Fixed vectors are byte-identical to the pre-optimization reference.
 
 **How to run:**
 ```bash
-node test_aes128.mjs
+node scripts/test_aes128.mjs
 ```
 
 **Expected output:** `8 passed, 0 failed`
@@ -97,27 +97,27 @@ node test_aes128.mjs
 ---
 
 ### bench_aes128.mjs (Node.js — Micro-benchmark)
-**Location:** `/bench_aes128.mjs`
+**Location:** `scripts/bench_aes128.mjs`
 **Purpose:** In-memory throughput of the software AES primitives (NO disk I/O)
-**Measures (best-of-5, MB/s, `node bench_aes128.mjs [mib]`):**
+**Measures (best-of-5, MB/s, `node scripts/bench_aes128.mjs [mib]`):**
 - AES-CTR software js-fallback keystream (browser path)
 - AES-XTS software
 - AES-128-CTR via `node:crypto` (reference for the Node/webcrypto path)
 
 **How to run:**
 ```bash
-node bench_aes128.mjs 64
+node scripts/bench_aes128.mjs 64
 ```
 
 ---
 
 ### bench_real_nsz.mjs (Node.js — Real-pipeline benchmark)
-**Location:** `/bench_real_nsz.mjs`
+**Location:** `scripts/bench_real_nsz.mjs`
 **Purpose:** Decompress a real `.nsz` (all `.ncz` members) with the output **discarded** (dev-null) so the SSD is not worn. Reports total MiB, wall time, MB/s (best of N).
 
 **How to run:**
 ```bash
-node bench_real_nsz.mjs path/to/file.nsz [runs]
+node scripts/bench_real_nsz.mjs path/to/file.nsz [runs]
 ```
 
 Reference `Little Nightmares II` (5.02 GiB NCZ): ~684 MB/s best-of-3 on the Node path (WebCrypto/native zstd dominate).
@@ -125,7 +125,7 @@ Reference `Little Nightmares II` (5.02 GiB NCZ): ~684 MB/s best-of-3 on the Node
 ---
 
 ### bench_aes.mjs (Node.js — Benchmark)
-**Location:** `/bench_aes.mjs`
+**Location:** `scripts/bench_aes.mjs`
 **Purpose:** AES-CTR throughput benchmark
 **What it measures:**
 - Encrypt throughput (MB/s) for large contiguous data
@@ -134,7 +134,7 @@ Reference `Little Nightmares II` (5.02 GiB NCZ): ~684 MB/s best-of-3 on the Node
 
 **How to run:**
 ```bash
-node bench_aes.mjs
+node scripts/bench_aes.mjs
 ```
 
 **Output:**
@@ -162,7 +162,7 @@ AES-CTR seek+decrypt 500MB (500 seeks): 481ms (1039 MB/s)
 ## 3. Conversion & Analysis Tests
 
 ### test_convert.mjs (Node.js)
-**Location:** `/test_convert.mjs`
+**Location:** `scripts/test_convert.mjs`
 **Purpose:** Full NSZ to NSP conversion pipeline
 **What it tests:**
 - PFS0 parsing
@@ -171,7 +171,7 @@ AES-CTR seek+decrypt 500MB (500 seeks): 481ms (1039 MB/s)
 
 **How to run:**
 ```bash
-node test_convert.mjs path/to/file.nsz
+node scripts/test_convert.mjs path/to/file.nsz
 ```
 
 **Prerequisites:**
@@ -180,7 +180,7 @@ node test_convert.mjs path/to/file.nsz
 ---
 
 ### test_decompress.mjs (Node.js)
-**Location:** `/test_decompress.mjs`
+**Location:** `scripts/test_decompress.mjs`
 **Purpose:** Compare decompressed output against reference NSP
 **What it tests:**
 - NCZ decompression
@@ -189,7 +189,7 @@ node test_convert.mjs path/to/file.nsz
 
 **How to run:**
 ```bash
-node test_decompress.mjs input.nsz [working.nsp]
+node scripts/test_decompress.mjs input.nsz [working.nsp]
 ```
 
 When `working.nsp` is provided, finds and reports the first mismatching byte.
@@ -197,7 +197,7 @@ When `working.nsp` is provided, finds and reports the first mismatching byte.
 ---
 
 ### test_ticket_keys.mjs (Node.js)
-**Location:** `/test_ticket_keys.mjs`
+**Location:** `scripts/test_ticket_keys.mjs`
 **Purpose:** Analyze ticket keys and AES-CTR decryption in NSZ files
 **What it tests:**
 - NCZSECTN parsing
@@ -208,7 +208,7 @@ When `working.nsp` is provided, finds and reports the first mismatching byte.
 
 **How to run:**
 ```bash
-node test_ticket_keys.mjs input.nsz [working.nsp]
+node scripts/test_ticket_keys.mjs input.nsz [working.nsp]
 ```
 
 Useful for debugging key derivation and verifying section decryption manually.
@@ -216,7 +216,7 @@ Useful for debugging key derivation and verifying section decryption manually.
 ---
 
 ### test-ncz.mjs (Node.js)
-**Location:** `/test-ncz.mjs`
+**Location:** `scripts/test-ncz.mjs`
 **Purpose:** NCZ decompressor component tests
 **What it tests:**
 - AES-CTR encrypt produces correct bytes
@@ -226,7 +226,7 @@ Useful for debugging key derivation and verifying section decryption manually.
 
 **How to run:**
 ```bash
-node test-ncz.mjs
+node scripts/test-ncz.mjs
 ```
 
 Tests with hardcoded paths skip gracefully when files are not present.
@@ -308,7 +308,7 @@ Expected keystream (48 bytes): e95fed2b7d0afca982d145a0ddea1c84799cd6049be13c145
 
 **Run the test:**
 ```bash
-node test_vector.mjs
+node scripts/test_vector.mjs
 ```
 
 ---
@@ -318,28 +318,28 @@ node test_vector.mjs
 ### Self-contained (no external files needed):
 ```bash
 # AES-CTR test vector (section 5)
-node test_vector.mjs
+node scripts/test_vector.mjs
 
 # AES-CTR with seek + encrypt
-node test_aesctr.mjs
+node scripts/test_aesctr.mjs
 
 # AES-CTR manual (uses Node crypto)
 node test_aes_manual.cjs
 
 # NCZ component tests (skips file-dependent tests)
-node test-ncz.mjs
+node scripts/test-ncz.mjs
 ```
 
 ### Require NSZ file input:
 ```bash
 # Full conversion pipeline
-node test_convert.mjs path/to/file.nsz
+node scripts/test_convert.mjs path/to/file.nsz
 
 # Decompression comparison against reference NSP
-node test_decompress.mjs input.nsz [working.nsp]
+node scripts/test_decompress.mjs input.nsz [working.nsp]
 
 # Ticket key and section analysis
-node test_ticket_keys.mjs input.nsz [working.nsp]
+node scripts/test_ticket_keys.mjs input.nsz [working.nsp]
 ```
 
 ### Browser tests:

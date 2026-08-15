@@ -10,6 +10,7 @@ import { convertXCZ as convertXCZFile } from './fs/xcz-convert.js';
 import { extractContentHashMap } from './fs/cnmt-hashes.js';
 import { mergeNSP as mergeNSPFile } from './fs/merge.js';
 import { splitNSP as splitNSPFile } from './fs/split.js';
+import { update as updateFile } from './fs/update.js';
 
 class FileDescriptorReader extends DataReader {
     constructor(fd, baseOffset = 0, totalLength = null) {
@@ -56,6 +57,7 @@ async function main() {
     let rmSource = false;
     let mergeMode = false;
     let splitMode = false;
+    let updateMode = false;
     let nodelta = false;
     const positionals = [];
 
@@ -73,6 +75,8 @@ async function main() {
             mergeMode = true;
         } else if (args[i] === '--split') {
             splitMode = true;
+        } else if (args[i] === '--update') {
+            updateMode = true;
         } else if (args[i] === '--nodelta' || args[i] === '-n') {
             nodelta = true;
         } else if (args[i] === '--overwrite' || args[i] === '-w') {
@@ -92,6 +96,7 @@ async function main() {
         console.log('Usage:');
         console.log('  node nsz-cli.js <input> [keys.txt] [options]        convert .nsz -> .nsp, .xcz -> .xci');
         console.log('  node nsz-cli.js --merge <nsp|nsz|xci|xcz> <nsp|nsz|xci|xcz> [...] [options] merge NSPs/NSZs/XCIs/XCZs into one .nsp (base+update+dlc)');
+        console.log('  node nsz-cli.js --update <base> <update> [options]   physically apply update to base: one patched program NCA, single .nsp (requires --keys)');
         console.log('  node nsz-cli.js --split <nsp> [keys.txt] [options]  split a merged NSP into one .nsp per title');
         console.log('');
         console.log('Input formats:');
@@ -106,11 +111,16 @@ async function main() {
         console.log('  --fix-padding, -p    Re-pad PFS0 header to 0x20 boundary [convert] (default: reuse input string-table size, matching Python nsz)');
         console.log('  --keys <file>        Keys file [split] (required for --split CNMT parsing; used by convert --verify for CNMT hash checks)');
         console.log('  -n, --nodelta        Exclude delta-fragment NCAs [merge]: drop NCAs referenced as DeltaFragment (ContentInfo type 6) in CNMTs (requires --keys)');
+        console.log('  --update             Apply update to base physically: output a single .nsp with one patched program NCA');
         console.log('');
     }
 
     if (mergeMode && splitMode) {
         console.error('Error: --merge and --split are mutually exclusive.');
+        process.exit(1);
+    }
+    if (updateMode && (mergeMode || splitMode)) {
+        console.error('Error: --update is mutually exclusive with --merge and --split.');
         process.exit(1);
     }
 
@@ -128,6 +138,23 @@ async function main() {
             }
         }
         await mergeNSPs(positionals, outputDir, overwrite, rmSource, nodelta, keysPath);
+        return;
+    }
+
+    if (updateMode) {
+        if (positionals.length !== 2) {
+            console.error('Error: --update requires exactly two inputs (base + update).');
+            printUsage();
+            process.exit(1);
+        }
+        for (const p of positionals) {
+            const ext = path.extname(p).toLowerCase();
+            if (ext !== '.nsp' && ext !== '.nsz' && ext !== '.xci' && ext !== '.xcz') {
+                console.error(`Error: --update inputs must be .nsp/.nsz/.xci/.xcz files: ${p}`);
+                process.exit(1);
+            }
+        }
+        await updateNSPs(positionals, outputDir, overwrite, rmSource, keysPath);
         return;
     }
 
@@ -226,7 +253,7 @@ async function mergeNSPs(inputPaths, outputDir, overwrite, rmSource, nodelta, ke
     if (nodelta) {
         keys = await loadKeys(keysPath);
         if (!keys) {
-            console.error('Error: --nodelta requires a keys file (--keys <path> or ./static/prod.keys) to read CNMT metadata.');
+            console.error(`Error: --nodelta requires a keys file (--keys <path> or ./static/prod.keys) to read CNMT metadata.`);
             process.exit(1);
         }
     }
@@ -262,6 +289,66 @@ async function mergeNSPs(inputPaths, outputDir, overwrite, rmSource, nodelta, ke
         console.log(`Output: ${outPath} (${formatBytes(result.size)})`);
         console.log(`Members: ${result.memberCount} (deduplicated by name)`);
         if (nodelta && keys) console.log('Delta fragments: excluded (--nodelta)');
+
+        if (rmSource) {
+            for (const p of inputPaths) {
+                fs.unlinkSync(p);
+                console.log(`Deleted source: ${p}`);
+            }
+        }
+    } finally {
+        for (const fd of fds) {
+            try { fs.closeSync(fd); } catch {}
+        }
+    }
+}
+async function updateNSPs(inputPaths, outputDir, overwrite, rmSource, keysPath) {
+
+    console.log('=== UPDATE ===');
+    const baseStem = path.basename(inputPaths[0], path.extname(inputPaths[0]));
+    const outName = `${baseStem}_updated.nsp`;
+    const outPath = outputDir ? path.join(outputDir, outName) : path.join(path.dirname(inputPaths[0]), outName);
+
+    if (!overwrite && fs.existsSync(outPath)) {
+        console.error(`Error: ${outPath} already exists. Use -w/--overwrite to overwrite.`);
+        process.exit(1);
+    }
+
+    const keys = await loadKeys(keysPath);
+    if (!keys) {
+        console.error('Error: --update requires a keys file (--keys <path> or ./static/prod.keys) to decrypt CNMT metadata.');
+        process.exit(1);
+    }
+
+    const fds = [];
+    try {
+        const readers = [];
+        for (const p of inputPaths) {
+            const st = fs.statSync(p);
+            const fd = fs.openSync(p, 'r');
+            fds.push(fd);
+            readers.push({ name: p, reader: new FileDescriptorReader(fd, 0, st.size) });
+        }
+
+        const outputFd = fs.openSync(outPath, 'w');
+        fds.push(outputFd);
+        let result;
+        try {
+            result = await updateFile(readers, { fd: outputFd }, {
+                log: (level, msg) => console.log(msg),
+                progress: (p, msg) => {},
+                keys,
+            });
+        } catch (e) {
+            fs.closeSync(outputFd);
+            try { fs.unlinkSync(outPath); } catch {}
+            throw e;
+        }
+
+        console.log('');
+        console.log('=== DONE ===');
+        console.log(`Output: ${outPath} (${formatBytes(result.size)})`);
+        console.log(`Members: ${result.memberCount}`);
 
         if (rmSource) {
             for (const p of inputPaths) {

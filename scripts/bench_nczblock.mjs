@@ -5,7 +5,7 @@
 // output DISCARDED (dev-null) so no bytes hit the SSD. Reports best of N runs
 // in MB/s. Run: node bench_nczblock.mjs [runs]
 import { zstdCompressSync } from 'node:zlib';
-import { NCZDecompressor, BufferReader } from './fs/ncz.js';
+import { NCZDecompressor, BufferReader } from '../fs/ncz.js';
 
 const RUNS = Number(process.argv[2] || 5);
 const BLOCK_EXP = 14;           // 16 KiB per block

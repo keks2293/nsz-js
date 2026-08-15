@@ -1,4 +1,4 @@
-import { AesEcb, AesCtrJS, AesXts } from './crypto/aes128.js';
+import { AesEcb, AesCtrJS, AesXts } from '../crypto/aes128.js';
 
 // Regression vectors for the software AES-128 primitives (js-fallback AES-CTR
 // keystream, ECB block ops, XTS sector decrypt). Run: node test_aes128.mjs

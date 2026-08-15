@@ -89,6 +89,7 @@ nsz-js/
 ├── static/                 # Static dependencies for browser (offline use)
 │   ├── zstddec.mjs         # WASM-based zstd decompression
 │   └── prod.keys           # Nintendo Switch keys file
+├── scripts/                 # Comparison, analysis, debugging, and benchmark scripts
 ├── test_*.mjs              # Test suites
 ├── test_browser.html       # Browser tests
 ├── nsz-convert-ref.py      # Python reference implementation
@@ -142,16 +143,92 @@ To update dependencies: `npm install zstddec@x.x.x` then copy files to `static/`
 
 ### Test Files
 
-- **test_vector.mjs** - AES-CTR keystream test vector verification (self-contained)
-- **test_aesctr.mjs** - AES-CTR seek + encrypt test (self-contained)
+- **scripts/test_vector.mjs** - AES-CTR keystream test vector verification (self-contained)
+- **scripts/test_aesctr.mjs** - AES-CTR seek + encrypt test (self-contained)
 - **test_aes_manual.cjs** - Standalone AES-CTR test using Node.js crypto (self-contained)
-- **bench_aes.mjs** - AES-CTR throughput benchmark (encrypt/decrypt/seek MB/s)
-- **test-ncz.mjs** - NCZ decompressor component tests (file-dependent tests skip gracefully)
-- **test_convert.mjs** - Full NSZ→NSP conversion pipeline (requires NSZ file)
-- **test_decompress.mjs** - Byte-level decompression comparison against reference NSP
-- **test_ticket_keys.mjs** - Ticket key and section analysis tool
+- **scripts/bench_aes.mjs** - AES-CTR throughput benchmark (encrypt/decrypt/seek MB/s)
+- **scripts/test-ncz.mjs** - NCZ decompressor component tests (file-dependent tests skip gracefully)
+- **scripts/test_convert.mjs** - Full NSZ→NSP conversion pipeline (requires NSZ file)
+- **scripts/test_decompress.mjs** - Byte-level decompression comparison against reference NSP
+- **scripts/test_ticket_keys.mjs** - Ticket key and section analysis tool
 - **test_aes_ctr.py** - Python reference script for AES-CTR verification
 - **test_browser.html** - AES-CTR keystream test for browser (open in browser)
+
+### Scripts Directory (scripts/)
+
+The `scripts/` directory contains 54 comparison, analysis, debugging, and benchmarking scripts used during development and reverse-engineering. All scripts are run via Node.js and require either command-line arguments or predefined file paths.
+
+| Prefix | Category | Description | Key Scripts |
+|--------|----------|-------------|-------------|
+| `analyze_` | Analysis | Analyze NSP/NSZ structure and crypto | `analyze_yanu3.mjs`, `analyze_romfs.mjs` |
+| `bench_` | Benchmarks | Performance testing of crypto and decompression | `bench_aes.mjs`, `bench_aes128.mjs`, `bench_nczblock.mjs`, `bench_real_nsz.mjs` |
+| `bktr_` | BKTR Crypto | BKTR encryption probing and verification | `bktr_key_probe3.mjs`, `bktr_full_probe.mjs`, `bktr_layout_probe.mjs`, `bktr_fsheader_probe.mjs`, `bktr_fsheader_compare.mjs`, `bktr_superblock_probe.mjs`, `bktr_sec0_probe.mjs`, `bktr_compare_probe.mjs`, `bktr_compare_merge.mjs`, `bktr_facts_probe.mjs`, `bktr_verify_hashes.mjs`, `bktr_verify_merged.mjs` |
+| `check_` | Inspection | Inspect file structure, crypto properties, sizes | `check_cnmt_nca.mjs`, `check_cnmt_sizes.mjs`, `check_ncz.mjs`, `check_new.mjs`, `check_romfs_header.mjs`, `check_romfs_sizes.mjs`, `check_merged_size.mjs` |
+| `compare_` | Comparison | Advanced file comparisons | `compare_nsp.mjs`, `compare_with_yanu.mjs`, `compare_program_nca.mjs`, `compare_merged_nca.mjs`, `diff_romfs.mjs` |
+| `dbg_` | Debugging | Debugging decompression, streaming, and conversion | `dbg_decomp2.mjs`, `dbg_stream4.mjs` |
+| `debug_` | Debugging | CNMT debugging | `debug_cnmt2.mjs` |
+| `dump_` | Extraction | Dump and display file contents | `dump_base_cnmt.mjs`, `dump_cnmt.mjs`, `dump_fsheader.mjs` |
+| `hexdump_` | Hex Dump | Hexadecimal dumps | `hexdump_cnmt.mjs` |
+| `inspect_` | Inspection | Detailed file inspection | `inspect_base_romfs.mjs`, `inspect_entries.mjs`, `inspect_yanu.mjs` |
+| `repro_` | Reproduction | Reproduce bugs or specific issues | `repro_stream3.mjs` |
+| `test_` | Tests | Component and integration tests | `test-ncz.mjs`, `test_aes128.mjs`, `test_aesctr.mjs`, `test_convert.mjs`, `test_decompress.mjs`, `test_vector.mjs`, `test_ticket_keys.mjs`, `test_merge_ncz.mjs`, `test_update_e2e.mjs` |
+| `verify_` | Verification | Verify conversions, hashes, and merged outputs | `verify_update.mjs`, `verify_updated_output.mjs`, `verify_merged_nca.mjs`, `verify_ivfc_output.mjs` |
+
+#### Key Probe Scripts
+
+**Comparison tools:**
+- `compare_nsp.mjs <file1.nsp> <file2.nsp>` - Compare PFS0 headers of two NSP files
+- `compare_with_yanu.mjs <our.nsp> <yanu.nsp>` - Detailed comparison of our output vs reference
+- `compare_program_nca.mjs <our.nsp> <ref.nsp>` - Compare program NCA structure and crypto
+- `compare_merged_nca.mjs <merged.nsp> <ref.nsp>` - Compare merged NCA files
+- `diff_romfs.mjs <nspA> <nspB> [maxRanges]` - Byte-level diff of the level-5 (RomFS) data region of two Program NCAs (needs `static/prod.keys`)
+
+**BKTR crypto:**
+- `bktr_key_probe3.mjs` - Probe BKTR key derivation (final iteration)
+- `bktr_layout_probe.mjs` - Analyze BKTR layout
+- `bktr_fsheader_probe.mjs` - Probe BKTR FS header
+- `bktr_fsheader_compare.mjs` - Compare BKTR FS headers (base/update/yanu)
+- `bktr_full_probe.mjs` - Full BKTR analysis
+- `bktr_superblock_probe.mjs` - Probe BKTR superblock
+- `bktr_sec0_probe.mjs` - Verify section 0 (ExeFS) decryption
+- `bktr_compare_probe.mjs` - Compare BKTR probes
+- `bktr_compare_merge.mjs` - Compare BKTR in merged files
+- `bktr_facts_probe.mjs` - Dump BKTR facts
+- `bktr_verify_hashes.mjs` - Verify BKTR hashes
+- `bktr_verify_merged.mjs` - Verify BKTR in merged output
+
+**Analysis tools:**
+- `analyze_yanu3.mjs [keys] [nsz]` - Extended yanu analysis (final iteration)
+- `analyze_romfs.mjs <nsp> [outputJson]` - Analyze level-5 RomFS: header, file table walk, last file, blob area, trailing gap (needs `static/prod.keys`)
+
+**Inspection tools:**
+- `check_cnmt_nca.mjs [keys] [nsz]` - Inspect CNMT NCA section crypto
+- `inspect_base_romfs.mjs [keys] [base_nsp]` - Inspect base ROMFS
+- `inspect_yanu.mjs [keys] [nsz]` - Inspect yanu NSZ structure
+
+**Debugging tools:**
+- `dbg_decomp2.mjs` - Debug NCZ decompression (final iteration)
+- `dbg_stream4.mjs` - Debug streaming decompression (final iteration)
+- `debug_cnmt2.mjs` - Debug CNMT NCA structure
+
+**Benchmarks:**
+- `bench_aes.mjs` - AES-CTR benchmark
+- `bench_aes128.mjs` - AES-128 benchmark
+- `bench_nczblock.mjs` - NCZ block benchmark
+- `bench_real_nsz.mjs` - Real NSZ file benchmark
+
+**Verification:**
+- `verify_update.mjs` - Verify update conversion
+- `verify_updated_output.mjs` - Verify updated NSP output
+- `verify_merged_nca.mjs` - Verify merged NCA output
+- `verify_ivfc_output.mjs <nsp> [expectedMasterHash]` - Verify the packed Program NCA's IVFC hash tree against the stored update hashes (ALL CHECKS PASS output)
+
+**Tests:**
+- `test-ncz.mjs` - NCZ decompressor tests
+- `test_convert.mjs` - Conversion tests
+- `test_decompress.mjs` - Decompression tests
+- `test_merge_ncz.mjs` - NCZ merge tests
+- `test_update_e2e.mjs` - Update end-to-end tests
 
 ## File Format Support
 
