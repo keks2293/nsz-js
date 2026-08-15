@@ -750,9 +750,16 @@ export async function extractRomfs(ncaData, keys, tikData = null) {
 // For disk/CLI: adapter must support write(offset, data) for seek-back header patch.
 // For SW/memory: adapter handles offset-based writes (Blob assembly, etc).
 
-export async function packPlaintextProgramNcaStreaming(exefsData, romfsData, controlData, titleId, keys, outputAdapter, log, baseOffset = 0) {
+// Prepares a plaintext Program NCA and returns its full NCA hash WITHOUT writing
+// anything. The hash is deterministic (depends only on exefsData, romfsData,
+// titleId and keys) — this lets callers learn the real `<contentId>.nca` name
+// before building the PFS0 header, so no seek-back is needed.
+//
+// Returns: { data, hashHex, size } where `data` holds everything needed by
+// `writePlaintextProgramNca()`.
+export async function preparePlaintextProgramNca(exefsData, romfsData, controlData, titleId, keys, log) {
     const _log = typeof log === 'function' ? log : () => {};
-    _log('info', '----> Creating Program NCA (streaming):');
+    _log('info', '----> Preparing Program NCA:');
 
     // ── Pass 1: Compute hashes (same as buffer version) ────────────────────
     _log('info', '  Computing ExeFS PFS0 hash table...');
@@ -763,7 +770,10 @@ export async function packPlaintextProgramNcaStreaming(exefsData, romfsData, con
 
     _log('info', '  Computing IVFC hash tree (5 levels + data)...');
     const romIvfc = buildIvfcHashTree(romfsData);
-    const romSectionSize = pad200(romIvfc.physicalSize);
+    // Pad RomFS data level to 0x4000 (IVFC_HASH_BLOCK_SIZE) to match Nintendo's canonical
+    // layout (base NCA data level is 0x4000-aligned) and hacpack (romfs_build pads to
+    // IVFC_HASH_BLOCK_SIZE). pad200 left it 0x200-aligned.
+    const romSectionSize = pad4000(romIvfc.physicalSize);
 
     // ── Section layout ─────────────────────────────────────────────────────
     const sec0Start = NCA_HEADER_SIZE;
@@ -813,51 +823,77 @@ export async function packPlaintextProgramNcaStreaming(exefsData, romfsData, con
     const xts = new AesXts(hdrKey);
     const encHeader = xts.encrypt(header);
 
-    // ── Pass 2: Write NCA to output adapter ───────────────────────────────
-    _log('info', '  Writing NCA to output adapter (streaming)...');
-
-    // Create a streaming SHA256 for NCA hash
+    // ── Compute full NCA hash (sha256 over header + all section bytes) ─────
     const ncaHasher = new SHA256();
-
-    // Write header (at baseOffset)
-    await outputAdapter.write(baseOffset, encHeader);
     ncaHasher.update(encHeader);
-
-    // Write ExeFS section: hash_table + PFS0 data
-    await outputAdapter.write(baseOffset + sec0Start, exeHtablePadded);
     ncaHasher.update(exeHtablePadded);
-
-    await outputAdapter.write(baseOffset + sec0Start + exePfs0Offset, exefsData);
     ncaHasher.update(exefsData);
 
     // Hash ExeFS section padding (zeros between ExeFS data end and RomFS start)
     const exePaddingSize = exeSectionSize - (exePfs0Offset + exefsData.length);
     if (exePaddingSize > 0) {
-        const zeros = new Uint8Array(exePaddingSize);
-        ncaHasher.update(zeros);
+        ncaHasher.update(new Uint8Array(exePaddingSize));
     }
 
-    // Write RomFS section: IVFC levels concatenated
-    let romPos = sec1Start;
-    for (let lvl = 0; lvl < romIvfc.levelFiles.length; lvl++) {
-        const levelData = romIvfc.levelFiles[lvl];
-        await outputAdapter.write(baseOffset + romPos, levelData);
+    // Hash RomFS section: IVFC levels concatenated
+    for (const levelData of romIvfc.levelFiles) {
         ncaHasher.update(levelData);
-        romPos += levelData.length;
     }
 
     // Hash RomFS section trailing padding (zeros after RomFS data to align to 0x200)
     const romPaddingSize = romSectionSize - romIvfc.physicalSize;
     if (romPaddingSize > 0) {
-        const zeros = new Uint8Array(romPaddingSize);
-        ncaHasher.update(zeros);
+        ncaHasher.update(new Uint8Array(romPaddingSize));
     }
 
     _log('info', '  Calculating NCA hash...');
     const hashHex = ncaHasher.hex();
-    _log('info', '  ----> Created Program NCA: ' + ncaSize + ' bytes sha256=' + hashHex);
+    _log('info', '  ----> Prepared Program NCA: ' + ncaSize + ' bytes sha256=' + hashHex);
 
-    return { hashHex, size: ncaSize };
+    return {
+        data: {
+            encHeader, exeHtablePadded, exePfs0Offset, exefsData, romIvfc,
+            sec0Start, exePaddingSize, romPaddingSize,
+        },
+        hashHex, size: ncaSize,
+    };
+}
+
+// Writes a previously prepared plaintext Program NCA to the output adapter.
+// The bytes written are byte-identical to what `preparePlaintextProgramNca`
+// hashed, so `prepared.hashHex` remains valid.
+export async function writePlaintextProgramNca(prepared, outputAdapter, log, baseOffset = 0) {
+    const _log = typeof log === 'function' ? log : () => {};
+    const { encHeader, exeHtablePadded, exePfs0Offset, exefsData, romIvfc,
+            sec0Start, romPaddingSize } = prepared.data;
+    _log('info', '  Writing NCA to output adapter (streaming)...');
+
+    // Write header (at baseOffset)
+    await outputAdapter.write(baseOffset, encHeader);
+
+    // Write ExeFS section: hash_table + PFS0 data
+    await outputAdapter.write(baseOffset + sec0Start, exeHtablePadded);
+    await outputAdapter.write(baseOffset + sec0Start + exePfs0Offset, exefsData);
+
+    // Write RomFS section: IVFC levels concatenated
+    let romPos = sec0Start + exeHtablePadded.length + exefsData.length + prepared.data.exePaddingSize;
+    for (let lvl = 0; lvl < romIvfc.levelFiles.length; lvl++) {
+        const levelData = romIvfc.levelFiles[lvl];
+        await outputAdapter.write(baseOffset + romPos, levelData);
+        romPos += levelData.length;
+    }
+    if (romPaddingSize > 0) {
+        await outputAdapter.write(baseOffset + romPos, new Uint8Array(romPaddingSize));
+    }
+}
+
+export async function packPlaintextProgramNcaStreaming(exefsData, romfsData, controlData, titleId, keys, outputAdapter, log, baseOffset = 0) {
+    const _log = typeof log === 'function' ? log : () => {};
+    _log('info', '----> Creating Program NCA (streaming):');
+    const prepared = await preparePlaintextProgramNca(exefsData, romfsData, controlData, titleId, keys, log);
+    await writePlaintextProgramNca(prepared, outputAdapter, log, baseOffset);
+    _log('info', '  ----> Created Program NCA: ' + prepared.size + ' bytes sha256=' + prepared.hashHex);
+    return { hashHex: prepared.hashHex, size: prepared.size };
 }
 
 export async function extractControl(updateNcaData, keys) {
