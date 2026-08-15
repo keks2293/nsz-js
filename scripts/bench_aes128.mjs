@@ -1,6 +1,6 @@
 import { randomFillSync } from 'node:crypto';
 import { createDecipheriv } from 'node:crypto';
-import { AesEcb, AesCtrJS, AesXts } from './crypto/aes128.js';
+import { AesEcb, AesCtrJS, AesXts } from '../crypto/aes128.js';
 
 // Micro-benchmark of the software AES primitives (in-memory, NO disk I/O).
 // Run: node bench_aes128.mjs [mib]

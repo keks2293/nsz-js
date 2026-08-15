@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 import fs from 'fs';
-import { KeysParser } from './keys.js';
-import { PFS0 } from './fs/pfs0.js';
-import { decryptNcaHeader, readCnmtFromMeta } from './fs/nca.js';
+import { KeysParser } from '../keys.js';
+import { PFS0 } from '../fs/pfs0.js';
+import { decryptNcaHeader, readCnmtFromMeta } from '../fs/nca.js';
 
 function stem(name) {
     const dot = name.lastIndexOf('.');
@@ -97,9 +97,9 @@ async function main() {
         console.log('Usage: node inspect_entries.mjs <file.nsp|file.nsz> [...]');
         process.exit(1);
     }
-    const keyText = fs.readFileSync('./static/prod.keys', 'utf-8');
+    const keyText = fs.readFileSync('../static/prod.keys', 'utf-8');
     const keys = KeysParser.parse(keyText);
-    console.log('Keys loaded from ./static/prod.keys');
+    console.log('Keys loaded from ../static/prod.keys');
     for (const f of args) await inspectFile(f, keys);
 }
 

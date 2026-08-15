@@ -5,11 +5,11 @@
  */
 
 import fs from 'fs';
-import { NCZDecompressor } from './fs/ncz.js';
-import { AesCtr } from './crypto/aes-ops.mjs';
-import { ZstdDecompressor } from './crypto/zstd.js';
-import { PFS0 } from './fs/pfs0.js';
-import { sha256 } from './crypto/sha256.js';
+import { NCZDecompressor } from '../fs/ncz.js';
+import { AesCtr } from '../crypto/aes-ops.mjs';
+import { ZstdDecompressor } from '../crypto/zstd.js';
+import { PFS0 } from '../fs/pfs0.js';
+import { sha256 } from '../crypto/sha256.js';
 
 let passed = 0;
 let failed = 0;

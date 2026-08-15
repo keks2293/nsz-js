@@ -6,6 +6,7 @@ import { extractContentHashMap } from './fs/cnmt-hashes.js';
 import { convertNSZ } from './fs/nsz-convert.js';
 import { convertXCZ } from './fs/xcz-convert.js';
 import { mergeNSP } from './fs/merge.js';
+import { update } from './fs/update.js';
 import { splitNSP as splitNSPFile } from './fs/split.js';
 
 class FileSliceReader extends DataReader {
@@ -124,6 +125,34 @@ class NSZConverter {
 
         onProgress(1.0, 'Done!');
         const outputName = files[0].name.replace(/\.(nsp|nsz|xci|xcz)$/i, '') + '_merged.nsp';
+        onLog('success', `Output: ${outputName} (${this.formatBytes(result.size)}), ${result.memberCount} members`);
+        return { blob: result.blob || null, name: outputName, size: result.size, memberCount: result.memberCount, writable: !!writable };
+    }
+
+    async updateNSPs(files, options = {}) {
+        const { onProgress = () => {}, onLog = () => {}, writable = null } = options;
+        onLog('info', `Updating ${files.length} NSPs...`);
+        await this.init();
+        if (!this.keys || !this.keys.header_key) {
+            throw new Error('Keys are required to update (decrypt CNMT metadata). Load keys first.');
+        }
+        if (files.length !== 2) {
+            throw new Error('Update requires exactly two files (base + update).');
+        }
+
+        const readers = files.map((f) => ({
+            name: f.name,
+            reader: new FileSliceReader(f, 0, f.size),
+        }));
+
+        const result = await update(readers, writable ? { writable } : { memory: true }, {
+            keys: this.keys,
+            log: onLog,
+            progress: onProgress,
+        });
+
+        onProgress(1.0, 'Done!');
+        const outputName = files[0].name.replace(/\.(nsp|nsz|xci|xcz)$/i, '') + '_updated.nsp';
         onLog('success', `Output: ${outputName} (${this.formatBytes(result.size)}), ${result.memberCount} members`);
         return { blob: result.blob || null, name: outputName, size: result.size, memberCount: result.memberCount, writable: !!writable };
     }

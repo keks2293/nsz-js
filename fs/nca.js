@@ -158,8 +158,10 @@ export function decryptNcaHeader(raw, keys = null) {
         : (keys.header_key instanceof Uint8Array ? keys.header_key : new Uint8Array(keys.header_key));
     if (headerKey.length !== 32) return null;
     const arr = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
-    const xts = new AesXts(headerKey);
     const len = Math.min(0xC00, arr.length);
+    // Header is ALWAYS XTS-encrypted (hacPack encrypts unconditionally).
+    // cryptoType byte = keygen index, NOT "no encryption".
+    const xts = new AesXts(headerKey);
     const decrypted = xts.decrypt(arr.subarray(0, len), 0);
     return NCAHeader.parse(decrypted, keys);
 }

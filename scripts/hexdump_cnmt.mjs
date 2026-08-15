@@ -1,0 +1,15 @@
+import fs from 'fs';
+import { PFS0 } from '../fs/pfs0.js';
+const ours = fs.readFileSync('/tmp/update_e2e_out.nsp');
+const files = new PFS0(ours).getFiles();
+const cf = files.find(f => f.name.endsWith('.cnmt.nca'));
+console.log('CNMT file:', cf.name, cf.size, 'offset', cf.offset);
+const raw = ours.subarray(cf.offset, cf.offset + cf.size);
+const d = (o,n)=>Array.from(raw.subarray(o,o+n)).map(b=>b.toString(16).padStart(2,'0')).join(' ');
+console.log('hdr[0x200..0x220]:', d(0x200,0x20));
+console.log('hdr[0x240..0x260]:', d(0x240,0x20));
+console.log('hdr[0x280..0x2a0]:', d(0x280,0x20));
+console.log('hdr[0x400..0x460]:', d(0x400,0x60));
+console.log('hdr[0x440..0x448]:', d(0x440,0x8));
+console.log('hdr[0x448..0x450]:', d(0x448,0x8));
+console.log('total size:', raw.length);

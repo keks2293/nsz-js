@@ -4,6 +4,9 @@ Prioritized areas for improvement identified 2026-05-30.
 
 ## High Impact
 
+- ✅ **`--update` merged Program NCA — fully implemented, matches yanu** — `fs/update.js`, `fs/nca-pack.js`, `fs/bktr-merge.js`. Full pipeline: BKTR table parse/decrypt → AesCtrEx patch decrypt (ctrVal BE) → merged RomFS → ExeFS PFS0 extraction → plaintext Program NCA pack → CNMT rebuild → NSP assembly. Verified on Stardew Valley v0+v1310720: 701,767,968 B / 4 members, Program NCA contentId=01f0e396…, all tests pass. See `DOC-REPACK.md` for full documentation (yanu/hacpack pipeline reference, NCA layout, IVFC hash tree, header encryption, CNMT rebuild, merge strategies, key files, test/verification details).
+  - **NCA pack modes** — `fs/nca-pack.js` `packNca()` dispatcher for all hacpack ncatypes. Yanu uses only PROGRAM(--plaintext/CRYPT_NONE sections) and META(CRYPT_CTR section). CONTROL/DATA/MANUAL/PUBLICDATA are RomFS-only stubs (copied as-is from update, not rebuilt).
+
 - ❌ **PFS0-offset variant: `sectionStart || 0x20` and `allowRawPfs0` — not used** — considered a `0x20` default when the PFS0 offset field is `0`, plus an `allowRawPfs0` option probing offset 0. Rejected because the field at FsHeader+`0x40` is the PFS0 region **Offset** from `HierarchicalSha256Data.LayerRegions` (region 1; Size at `0x48`) and the section hash table verifies PFS0 bytes starting exactly at that offset — on a valid NCA it cannot be wrong (MasterHash mismatch otherwise). `sectionStart == 0` is a legitimate value meaning "PFS0 at section offset 0"; masking it with `|| 0x20` would mislocate such files, and neither Python nsz nor nscb_rust has any `0x20`/offset-0 fallback (see "Format Research" below).
 
 - ✅ **`PFS0Writer` fixPadding double-padding + namesLen off-by-one** — `fs/pfs0.js`. Two bugs in `PFS0Writer.buildHeader()`:
@@ -33,6 +36,10 @@ Prioritized areas for improvement identified 2026-05-30.
 - ❌ **Manual `%`→`&` for power-of-2 in aes128.js** — `crypto/aes128.js`. V8 TurboFan strength-reduces `% 4`, `% 16` to `& 3`, `& 15` automatically. Manual replacement gave < 6% on full AES block — not worth readability loss. **Keeping `%`/`Math.floor` for readability.**
 
 ## Format Research (2026-08-02)
+
+- ✅ **IVFC header level_headers offsets fixed** — `fs/nca-pack.js` `buildIvfcHashTree()`. Each level header: `logical_offset(u64)@+0x00, hash_data_size(u64)@+0x08, block_size(u32)@+0x14`. Previously all offsets were shifted by +8 bytes causing every header to read as garbage. Fixed.
+
+- ✅ **NCA pack modes abstraction** — `fs/nca-pack.js` added `NCA_TYPE` enum (PROGRAM/META/CONTROL/DATA/MANUAL/PUBLICDATA) matching hacpack `main.c` `--ncatype`. Added `packNca()` dispatcher routing by mode. `packMetaNca` extracted from `update.js` as standalone. Yanu uses only PROGRAM(--plaintext, CRYPT_NONE sections, XTS header, zero sig) and META (PFS0, CRYPT_CTR section, XTS header, zero sig) — other modes CONTROL/DATA/MANUAL/PUBLICDATA are RomFS-only stubs (not used by yanu's --update).
 
 - **PFS0 offset in meta-NCA sections: spec field, not heuristics** — how to locate the inner PFS0 in a decrypted meta-NCA section:
   - Per switchbrew, the field at FsHeader+`0x40` is the PFS0 filesystem region **Offset** from `HierarchicalSha256Data.LayerRegions` (region 1; Size at `0x48`). The section hash table verifies PFS0 bytes starting exactly at that offset — on a valid NCA the field cannot be wrong (MasterHash mismatch otherwise).

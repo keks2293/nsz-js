@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { zstdCompressSync } from 'node:zlib';
 import { randomBytes } from 'node:crypto';
-import { PFS0Writer, PFS0 } from './fs/pfs0.js';
-import { BufferReader } from './fs/ncz.js';
-import { mergeNSP } from './fs/merge.js';
-import { AesCtr } from './crypto/aes-ops.mjs';
-import { AesEcb } from './crypto/aes128.js';
+import { PFS0Writer, PFS0 } from '../fs/pfs0.js';
+import { BufferReader } from '../fs/ncz.js';
+import { mergeNSP } from '../fs/merge.js';
+import { AesCtr } from '../crypto/aes-ops.mjs';
+import { AesEcb } from '../crypto/aes128.js';
 
 function ascii(str) {
     return new TextEncoder().encode(str);

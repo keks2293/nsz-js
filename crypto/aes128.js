@@ -294,6 +294,7 @@ class AesXts {
         const aesDec = new AesEcb(this.k1);
         this._encTweak = (tweakBytes) => aesEnc.encryptBlock(tweakBytes);
         this._decData = (block) => aesDec.decryptBlock(block);
+        this._encData = (block) => new AesEcb(this.k1).encryptBlock(block);
     }
 
     decrypt(data, startSector = 0) {
@@ -312,6 +313,29 @@ class AesXts {
                 for (let j = 0; j < BLOCK_SIZE; j++) xored[j] = block[j] ^ tweak[j];
                 const decrypted = this._decData(xored);
                 for (let j = 0; j < BLOCK_SIZE; j++) result[offset + i + j] = decrypted[j] ^ tweak[j];
+                gf128MulIn(tweak);
+            }
+            sector++;
+        }
+        return result;
+    }
+
+    encrypt(data, startSector = 0) {
+        const result = new Uint8Array(data.length);
+        const xored = new Uint8Array(BLOCK_SIZE);
+        let sector = startSector;
+
+        for (let offset = 0; offset < data.length; offset += SECTOR_SIZE) {
+            const chunkSize = Math.min(SECTOR_SIZE, data.length - offset);
+            const chunk = data.subarray(offset, offset + chunkSize);
+            const tweakBytes = getTweakBytes(sector);
+            const tweak = this._encTweak(tweakBytes);
+
+            for (let i = 0; i + BLOCK_SIZE <= chunk.length; i += BLOCK_SIZE) {
+                const block = chunk.subarray(i, i + BLOCK_SIZE);
+                for (let j = 0; j < BLOCK_SIZE; j++) xored[j] = block[j] ^ tweak[j];
+                const encrypted = this._encData(xored);
+                for (let j = 0; j < BLOCK_SIZE; j++) result[offset + i + j] = encrypted[j] ^ tweak[j];
                 gf128MulIn(tweak);
             }
             sector++;

@@ -29,3 +29,6 @@ out/
 # opencode agent artifacts
 .mimocode/
 .playwright-mcp/
+
+# External source references
+sources/
