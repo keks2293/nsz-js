@@ -6,7 +6,7 @@ import { decryptNcaHeader, decryptNcaSection, parseCnmtFromDecryptedSection } fr
 import { Cnmt } from './cnmt.js';
 import { sha256 } from '../crypto/sha256.js';
 import { mergeRomFS } from './bktr-merge.js';
-import { preparePlaintextProgramNca, writePlaintextProgramNca, packPlaintextProgramNcaStreaming, packMetaNca, extractExefs, extractRomfs, buildIvfcHashTree, buildPfs0HashTable } from './nca-pack.js';
+import { preparePlaintextProgramNca, writePlaintextProgramNca, packPlaintextProgramNcaStreaming, packMetaNca, extractExefs, extractRomfs, buildIvfcHashTree, buildPfs0HashTable, processNpdmAcid } from './nca-pack.js';
 import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE } from './nca-utils.js';
 
 function u32le(v) {
@@ -504,6 +504,13 @@ export async function update(readers, output, options = {}) {
         await new Promise(r => setTimeout(r, 0));
         const exefsData = await extractExefs(updateProgramNcaData, keys, updateTikData);
         log('info', `ExeFS: ${exefsData.length} bytes`);
+
+        // hacpack parity: zero the ACID signature + key in main.npdm by default
+        // (hacpack's --nozeronpdmsig / --nozeroacidkey → keepNpdmAcidSig / keepNpdmAcidKey)
+        processNpdmAcid(exefsData, {
+            keepSig: options.keepNpdmAcidSig === true,
+            keepKey: options.keepNpdmAcidKey === true,
+        }, log);
 
         // Release sparse buffers — no longer needed after section extraction
         baseProgramNcaData = null;

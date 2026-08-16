@@ -1,7 +1,7 @@
 import { AesXts, AesCtr } from '../crypto/aes-ops.mjs';
 import { AesEcb } from '../crypto/aes128.js';
 import { sha256, SHA256 } from '../crypto/sha256.js';
-import { PFS0Writer } from './pfs0.js';
+import { PFS0, PFS0Writer } from './pfs0.js';
 import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE } from './nca-utils.js';
 
 // Yanu update pipeline uses only:
@@ -659,6 +659,40 @@ export async function extractRomfs(ncaData, keys, tikData = null) {
     c.seek(sectionOffset);
     const decrypted = await c.decrypt(raw);
     return decrypted;
+}
+
+// ── NPDM ACID zeroing (hacpack parity) ───────────────────────────────────────
+// When packing a Program NCA, hacpack (The-4n, v1.36) zeros the ACID
+// signature + key in main.npdm by default: signature[0x100] + modulus[0x100]
+// starting at acid_offset (NPDM header field at +0x78). Its opt-out flags
+// --nozeronpdmsig / --nozeroacidkey keep them. We mirror that: zero both by
+// default, keep either via opts.keepSig / opts.keepKey.
+// The ACID is not enforced for plaintext/dev NCAs (integrity comes from the
+// IVFC hash trees), so zeroing is harmless and matches the reference output.
+export function processNpdmAcid(exefsData, opts = {}, log = () => {}) {
+    const _log = typeof log === 'function' ? log : () => {};
+    const { keepSig = false, keepKey = false } = opts;
+    if (keepSig && keepKey) return exefsData;
+
+    const pfs0 = new PFS0(exefsData);
+    const npdm = pfs0.getFiles().find(f => f.name === 'main.npdm');
+    if (!npdm) {
+        _log('warn', 'processNpdmAcid: main.npdm not found in ExeFS — skipping');
+        return exefsData;
+    }
+
+    const view = new DataView(exefsData.buffer, exefsData.byteOffset);
+    const acidOffset = view.getUint32(npdm.offset + 0x78, true);
+    const sigStart = npdm.offset + acidOffset;
+    if (!keepSig) {
+        exefsData.fill(0, sigStart, sigStart + 0x100);
+        _log('info', `  Zeroed ACID signature in main.npdm (0x${acidOffset.toString(16)}..0x${(acidOffset + 0x100).toString(16)})`);
+    }
+    if (!keepKey) {
+        exefsData.fill(0, sigStart + 0x100, sigStart + 0x200);
+        _log('info', `  Zeroed ACID key in main.npdm (0x${(acidOffset + 0x100).toString(16)}..0x${(acidOffset + 0x200).toString(16)})`);
+    }
+    return exefsData;
 }
 
 // ── Streaming NCA pack ───────────────────────────────────────────────────────
