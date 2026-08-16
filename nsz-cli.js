@@ -59,6 +59,8 @@ async function main() {
     let splitMode = false;
     let updateMode = false;
     let nodelta = false;
+    let keepNpdmAcidSig = false;
+    let keepNpdmAcidKey = false;
     const positionals = [];
 
     for (let i = 0; i < args.length; i++) {
@@ -83,6 +85,10 @@ async function main() {
             overwrite = true;
         } else if (args[i] === '--rm-source') {
             rmSource = true;
+        } else if (args[i] === '--keep-npdm-acid-sig') {
+            keepNpdmAcidSig = true;
+        } else if (args[i] === '--keep-npdm-acid-key') {
+            keepNpdmAcidKey = true;
         } else if ((args[i] === '-o' || args[i] === '--output') && i + 1 < args.length) {
             outputDir = args[++i];
         } else if (!args[i].startsWith('-')) {
@@ -112,6 +118,8 @@ async function main() {
         console.log('  --keys <file>        Keys file [split] (required for --split CNMT parsing; used by convert --verify for CNMT hash checks)');
         console.log('  -n, --nodelta        Exclude delta-fragment NCAs [merge]: drop NCAs referenced as DeltaFragment (ContentInfo type 6) in CNMTs (requires --keys)');
         console.log('  --update             Apply update to base physically: output a single .nsp with one patched program NCA');
+        console.log('  --keep-npdm-acid-sig Keep the original ACID signature in main.npdm [--update] (hacpack --nozeronpdmsig); zeroed by default');
+        console.log('  --keep-npdm-acid-key Keep the original ACID key in main.npdm [--update] (hacpack --nozeroacidkey); zeroed by default');
         console.log('');
     }
 
@@ -154,7 +162,7 @@ async function main() {
                 process.exit(1);
             }
         }
-        await updateNSPs(positionals, outputDir, overwrite, rmSource, keysPath);
+        await updateNSPs(positionals, outputDir, overwrite, rmSource, keysPath, keepNpdmAcidSig, keepNpdmAcidKey);
         return;
     }
 
@@ -302,7 +310,7 @@ async function mergeNSPs(inputPaths, outputDir, overwrite, rmSource, nodelta, ke
         }
     }
 }
-async function updateNSPs(inputPaths, outputDir, overwrite, rmSource, keysPath) {
+async function updateNSPs(inputPaths, outputDir, overwrite, rmSource, keysPath, keepNpdmAcidSig, keepNpdmAcidKey) {
 
     console.log('=== UPDATE ===');
     const baseStem = path.basename(inputPaths[0], path.extname(inputPaths[0]));
@@ -338,6 +346,8 @@ async function updateNSPs(inputPaths, outputDir, overwrite, rmSource, keysPath) 
                 log: (level, msg) => console.log(msg),
                 progress: (p, msg) => {},
                 keys,
+                keepNpdmAcidSig,
+                keepNpdmAcidKey,
             });
         } catch (e) {
             fs.closeSync(outputFd);
