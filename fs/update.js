@@ -7,7 +7,7 @@ import { Cnmt } from './cnmt.js';
 import { sha256 } from '../crypto/sha256.js';
 import { mergeRomFS } from './bktr-merge.js';
 import { FileRangeSource, NczStreamSource, ViewRangeSource, SparseNcaView } from './range-source.js';
-import { preparePlaintextProgramNca, writePlaintextProgramNca, packProgramNcaStream, extractExefsStream, packMetaNca, extractExefs, extractRomfs, buildIvfcHashTree, buildPfs0HashTable } from './nca-pack.js';
+import { preparePlaintextProgramNca, writePlaintextProgramNca, packProgramNcaStream, extractExefsStream, createExefsAcidFilter, packMetaNca, extractExefs, extractRomfs, processNpdmAcid } from './nca-pack.js';
 import { AesXts } from '../crypto/aes-ops.mjs';
 import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE } from './nca-utils.js';
 
@@ -474,23 +474,20 @@ export async function update(readers, output, options = {}) {
         // seek-back; the contentId comes from re-reading the written NCA.
         const outRead = await buildRead(output);
         if (hasBktrRomfs && outRead !== null) {
-            log('info', 'Streaming update (seekable output): ExeFS buffered, RomFS streamed via BKTR merge...');
+            log('info', 'Streaming update (seekable output): ExeFS + RomFS streamed via BKTR merge (no data buffer)...');
             await new Promise(r => setTimeout(r, 0));
 
-            const exefsData = await extractExefs(updateInput, keys, updateTikData);
-            log('info', `ExeFS: ${exefsData.length} bytes`);
-            processNpdmAcid(exefsData, {
-                keepSig: options.keepNpdmAcidSig === true,
-                keepKey: options.keepNpdmAcidKey === true,
-            }, log);
-
+            // Precompute section data sizes from the update header (no buffering).
             const hdrKey = typeof keys.header_key === 'string' ? hexToBytes(keys.header_key) : keys.header_key;
             const updateDecBytes = new AesXts(hdrKey).decrypt(updateHeaderRaw, 0);
             const updateRomfsSecIdx = updateHeaderDec.sections.indexOf(updateRomfsSec);
             const updateRomfsFsHdr = updateDecBytes.subarray(0x400 + updateRomfsSecIdx * 0x200, 0x400 + (updateRomfsSecIdx + 1) * 0x200);
             const romfsDataSize = Number(new DataView(updateRomfsFsHdr.buffer, updateRomfsFsHdr.byteOffset + 0x98, 8).getBigUint64(0, true));
-            const programSize = programNcaSize(exefsData.length, romfsDataSize);
-            log('info', `Program NCA (streaming): exefs=${exefsData.length} romfs=${romfsDataSize} total=${programSize}`);
+            const updateExefsSecIdx = updateHeaderDec.sections.indexOf(updateExefsSec);
+            const updateExefsFsHdr = updateDecBytes.subarray(0x400 + updateExefsSecIdx * 0x200, 0x400 + (updateExefsSecIdx + 1) * 0x200);
+            const exefsSize = Number(new DataView(updateExefsFsHdr.buffer, updateExefsFsHdr.byteOffset + 0x48, 8).getBigUint64(0, true));
+            const programSize = programNcaSize(exefsSize, romfsDataSize);
+            log('info', `Program NCA (streaming): exefs=${exefsSize} romfs=${romfsDataSize} total=${programSize}`);
 
             const adapter = await buildAdapter(output, outRead, { log, progress });
 
@@ -519,18 +516,22 @@ export async function update(readers, output, options = {}) {
 
             const programNcaPfs0Offset = pfs0Header.headerSize + placeholderPw.files[0].offset;
 
-            // Stream the Program NCA (ExeFS from buffer, RomFS via BKTR merge) → contentId.
-            const exefsBuf = exefsData;
-            const exefsChunk = 0x100000;
+            // Stream the Program NCA (ExeFS + RomFS via BKTR merge) → contentId.
+            // ExeFS is streamed (never buffered); the ACID zeroing is applied as a
+            // filter over the stream (createExefsAcidFilter).
+            const acidFilter = createExefsAcidFilter({
+                keepSig: options.keepNpdmAcidSig === true,
+                keepKey: options.keepNpdmAcidKey === true,
+            }, log);
             const { hashHex: contentId } = await packProgramNcaStream({
                 adapter, ncaOffset: programNcaPfs0Offset,
-                exefsSize: exefsBuf.length, romfsDataSize,
+                exefsSize, romfsDataSize,
                 titleId: base.cnmt.titleId, keys,
                 streamExefs: async (emit) => {
-                    for (let off = 0; off < exefsBuf.length; off += exefsChunk) {
-                        const n = Math.min(exefsChunk, exefsBuf.length - off);
-                        await emit(exefsBuf.subarray(off, off + n), off);
-                    }
+                    await extractExefsStream(updateInput, keys, updateTikData, async (chunk, off) => {
+                        await acidFilter(chunk, off);
+                        await emit(chunk, off);
+                    });
                 },
                 streamRomfs: async (emit) => {
                     await mergeRomFS(baseInput, updateInput, {
@@ -618,6 +619,13 @@ export async function update(readers, output, options = {}) {
         await new Promise(r => setTimeout(r, 0));
         const exefsData = await extractExefs(updateInput, keys, updateTikData);
         log('info', `ExeFS: ${exefsData.length} bytes`);
+
+        // hacpack parity: zero the ACID signature + key in main.npdm by default
+        // (hacpack's --nozeronpdmsig / --nozeroacidkey → keepNpdmAcidSig / keepNpdmAcidKey)
+        processNpdmAcid(exefsData, {
+            keepSig: options.keepNpdmAcidSig === true,
+            keepKey: options.keepNpdmAcidKey === true,
+        }, log);
 
         // Release the NCA sources — and, for a .nsz update, the buffered sections
         // the sparse view references — no longer needed after merge + extraction.
