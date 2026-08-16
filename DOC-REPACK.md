@@ -199,16 +199,30 @@ Our `--update` implementation in `fs/update.js` attempts to reproduce the **same
 5. ✅ **Rebuild CNMT NCA** — matches hacpack's meta NCA creation
 6. ✅ **Assemble output NSP** — PFS0 with all members
 
-### Current difference vs yanu output (Stardew Valley v0+v1310720)
+### Current difference vs reference output (STORM SWITCH BOX, Stardew Valley v0+v1310720)
 
-| Metric | Yanu | Our | Note |
+| Metric | Reference | Our | Note |
 |--------|------|-----|------|
-| Merged Program NCA size | 699,123,712 B | 699,121,152 B | −2,560 B |
+| Merged Program NCA size | 699,123,712 B | 699,123,712 B | identical (RomFS data level padded to 0x4000) |
 | Merged RomFS (IVFC Level 5) | 606,401,860 B | 606,401,864 B | +4 B (re-pack artifact, see below) |
-| ExeFS PFS0 size | 91,409,104 B | 91,409,120 B | +16 B |
-| CNMT NCA | `ee048d85...` | `7107f145...` | Different hash |
+| ExeFS PFS0 size | 91,409,104 B | 91,409,120 B | +16 B (PFS0 string-table alignment; absorbed by 0x200 section padding → 0 B to total) |
+| Top-level NSP PFS0 | 272 B | 288 B | +16 B (PFS0 string-table alignment; the **only** total-size difference) |
+| main.npdm ACID | zeroed (`0x80..0x280`) | original (update NCA) | ACID key pair variants (see below; no size/functional impact) |
+| CNMT NCA | `ee048d85...` | `931aec3a...` | Different hash |
 
-Both are valid, installable NCAs with correct structure (IVFC tree, FsHeaders, section hashes). Our merged RomFS is the exact level-5 data region of the update NCA (byte-identical to the update's declared IVFC data, verified via hash chain level4→level5, a full RomFS table walk, and `scripts/analyze_romfs.mjs`/`scripts/diff_romfs.mjs`). The +4 B vs yanu is a **padding/alignment artifact**, not a content difference: all 3,554 file entries, every blob size, and all table sizes are identical. The gap between the blob area and `dir_hash_table_ofs` holds real data (a ~512-byte tail of `manifest.txt` — its blob is truncated and the file list continues there) followed by zero padding; Nintendo aligns `dir_hash_table_ofs` to 8 (0x2421f048 → 7 pad bytes) while hacPack `romfs_build()` aligns to 4 (0x2421f044 → 3 pad bytes). Removing our 4 pad bytes reproduces yanu byte-for-byte.
+**PFS0 string-table alignment (one root cause, two instances):** our `PFS0Writer` (fs/pfs0.js) aligns the **whole** PFS0 header to 0x20, while hacpack aligns only the **string table** (`pfs0.c:121`, `(stringtable_offset + 0x1f) & ~0x1f`). It manifests in two PFS0s: the **top-level NSP** PFS0 (container header, not 0x200-rounded → the +16 B shows up in the total) and the **ExeFS** PFS0 (inside the Program NCA, whose section is 0x200-rounded → the +16 B is absorbed, 0 B to total). Both match Python nsz and Nintendo's original update NCA (`sts=0x30`); we keep our variant.
+
+**main.npdm ACID key pair (three variants — no size or functional impact):** the `main.npdm` in the Program NCA ExeFS embeds the **ACID** (Application ID) at `acid_offset=0x80` (confirmed by `scripts/analyze_npdm.mjs`): `signature[0x100]` (`0x80..0x180`) + `modulus[0x100]` (`0x180..0x280`) — the ACID's RSA-2048 key pair, i.e. the title's **cryptographic authorization block** (for eShop titles, signed with Nintendo's ACID private key). All variants are the same 0x200 bytes (no size impact), and the ACID is **not enforced** for plaintext/dev NCAs — integrity comes from the IVFC hash trees, not the ACID — so there is no functional impact either. Only the 0x200 bytes of content differ:
+
+| Variant | signature (`0x80..0x180`) | modulus (`0x180..0x280`) | Pair |
+|---|---|---|---|
+| Reference (STORM SWITCH BOX) | zeroed | zeroed | invalid |
+| yanu/hacpack (documented invocation above: no `--nosignncasig2`, no `--acidsigprivatekey`) | original | replaced with the selfgen key (`rsa_keys.h`, `0xbd 0x54 0x73…`) by `npdm_process()` (`npdm.c`) | invalid (signature does not match the modulus) |
+| **Ours** | original | original (`main.npdm` copied verbatim from the update NCA) | **valid** (signature matches the modulus — the title's real ACID) |
+
+Why repacks invalidate or replace the ACID: a repack has no ACID private key (can't re-sign), and the original ACID is tied to the source title's titlekey — meaningless for the new **plaintext** NCA. We keep the original: it matches the source NCA byte-for-byte, is the only *valid* variant, and the update shares the base's titleId (no foreign title data). No reason to corrupt a valid block.
+
+Both are valid, installable NCAs with correct structure (IVFC tree, FsHeaders, section hashes). Our merged RomFS is the exact level-5 data region of the update NCA (byte-identical to the update's declared IVFC data, verified via hash chain level4→level5, a full RomFS table walk, and `scripts/analyze_romfs.mjs`/`scripts/diff_romfs.mjs`). The +4 B vs the reference is a **padding/alignment artifact**, not a content difference: all 3,554 file entries, every blob size, and all table sizes are identical. The gap between the blob area and `dir_hash_table_ofs` holds real data (a ~512-byte tail of `manifest.txt` — its blob is truncated and the file list continues there) followed by zero padding; Nintendo aligns `dir_hash_table_ofs` to 8 (0x2421f048 → 7 pad bytes) while hacPack `romfs_build()` aligns to 4 (0x2421f044 → 3 pad bytes). Removing our 4 pad bytes reproduces the reference byte-for-byte.
 
 Our implementation does all four steps in a single `update()` function in `fs/update.js`.
 
@@ -468,10 +482,10 @@ yanu's processing order is fixed by `update_nsp()` (`crates/hac/src/utils/update
 
 | # | Member | contentId | Type |
 |---|--------|-----------|------|
-| 1 | Program | `01f0e396…` | Program |
+| 1 | Program | `7c3bbb53…` | Program |
 | 2 | Manual | `99636bbd…` | Manual (attached after Program) |
 | 3 | Control | `af613c75…` | Control |
-| 4 | CNMT | `7107f145…` | Meta |
+| 4 | CNMT | `931aec3a…` | Meta |
 
 The Manual/Control members are **the same physical NCAs** as in the update (identical
 contentIds/hashes) — we do not rebuild them. The order is produced in `fs/update.js` by:
@@ -645,14 +659,14 @@ This anomaly is present **identically in both** the original update and yanu's r
 
 ```
 Input:  base.nsp (877 MB) + update.nsz (667 MB compressed)
-Output: 701,767,968 B / 4 members
-  - Merged Program NCA: 699,121,152 B (contentId=01f0e396…)
-  - CNMT NCA: 7107f145… (type 0x80, v1310720, 3 contents)
+Output: 701,770,528 B / 4 members (Δ +16 B vs yanu = top-level PFS0 string-table alignment)
+  - Merged Program NCA: 699,123,712 B (contentId=7c3bbb53…)
+  - CNMT NCA: 931aec3a… (type 0x80, v1310720, 3 contents)
   - Control NCA: 2,476,032 B (af613c75…)
   - Manual NCA: 166,400 B (99636bbd…)
 
 CNMT entries:
-  type=1 ncaId=01f0e396… size=699121152 (merged Program)
+  type=1 ncaId=7c3bbb53… size=699123712 (merged Program)
   type=3 ncaId=af613c75… size=2476032 (Control)
   type=5 ncaId=99636bbd… size=166400 (PublicData)
 

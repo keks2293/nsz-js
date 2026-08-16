@@ -318,7 +318,10 @@ export async function packPlaintextProgramNca(exefsData, romfsData, controlData,
     // ── Section 1: RomFS (IVFC) ────────────────────────────────────────────
     _log('info', '  Building IVFC hash tree (5 levels + data)...');
     const romIvfc = buildIvfcHashTree(romfsData);
-    const romSectionSize = pad200(romIvfc.physicalSize);
+    // Pad RomFS data level to 0x4000 (IVFC_HASH_BLOCK_SIZE) to match Nintendo's canonical
+    // layout (base NCA data level is 0x4000-aligned) and hacpack (romfs_build pads to
+    // IVFC_HASH_BLOCK_SIZE). pad200 left it 0x200-aligned.
+    const romSectionSize = pad4000(romIvfc.physicalSize);
 
     _log('info', '  RomFS: levels=' + romIvfc.levelFiles.length + ', total=' + romIvfc.physicalSize + ' B, section=' + romSectionSize + ' B');
 
