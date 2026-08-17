@@ -247,16 +247,21 @@ export function lookupTitlekeyFromDatabase(rightsId, titlekeysMap) {
 }
 
 export function deriveTitlekeyFromKeyArea(decHeader, keys) {
-    // Key area is at NCA header offset 0x300-0x340
+    // Encrypted key area (4 x 16B) at NCA header offset 0x300-0x340.
+    // hactool (nca.c:683-686, 532): kaek = key_area_keys[master_key][kaek_ind]
+    // (header crypto_type 0,1 -> master key 0, 2 -> mk1, 3 -> mk2; kaek_ind
+    // 0/1/2 = application/ocean/system), key area decrypted with AES-128-ECB,
+    // titlekey = decrypted entry [2] (bytes 32-48) for CTR-encrypted sections.
     const keyArea = decHeader.subarray(0x300, 0x340);
-    if (keyArea.length < 0x20) return null;
-    // For has_rights_id=false: key_area_key_3 at offset 0x20 (bytes 32-48)
-    const titlekey = keyArea.subarray(0x20, 0x30);
-    // Check if all zeros or all same byte (encrypted key area for has_rights_id=true)
-    const first = titlekey[0];
-    const allSame = titlekey.every(b => b === first);
-    if (allSame) return null; // Encrypted key area, can't derive
-    return titlekey;
+    if (keyArea.length < 0x40) return null;
+    const cryptoType = decHeader[0x206];
+    const kaekInd = decHeader[0x207];
+    const mk = cryptoType <= 1 ? 0 : cryptoType - 1;
+    const kakHex = (keys.keyAreaKeys && keys.keyAreaKeys[mk] && (keys.keyAreaKeys[mk][kaekInd] || keys.keyAreaKeys[mk][0])) || null;
+    if (!kakHex) return null;
+    const kak = hexToBytes(kakHex);
+    const unwrapped = new AesEcb(kak).decrypt(keyArea);
+    return unwrapped.subarray(0x20, 0x30);
 }
 
 // Extract titlekey from a tik file.

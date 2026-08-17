@@ -574,10 +574,17 @@ export async function packMetaNca(cnmtData, pfs0FileName, titleId, keys, log) {
 //    Our code: not implemented
 
 function deriveTitlekey(decHeader, keys) {
-    if (!keys || !keys.titlekek_02) return null;
-    const titlekek = typeof keys.titlekek_02 === 'string' ? hexToBytes(keys.titlekek_02) : keys.titlekek_02;
-    const keyArea = decHeader.subarray(0x100, 0x300);
-    return new AesEcb(titlekek).decrypt(keyArea.subarray(0x20, 0x30));
+    if (!keys) return null;
+    // Encrypted key area (4 x 16B) at 0x300-0x340, AES-128-ECB with kaek
+    // = key_area_keys[master_key][kaek_ind]; titlekey = entry [2] (hactool nca.c:683-686, 532).
+    const cryptoType = decHeader[0x206];
+    const kaekInd = decHeader[0x207];
+    const mk = cryptoType <= 1 ? 0 : cryptoType - 1;
+    const kakHex = keys.keyAreaKeys && keys.keyAreaKeys[mk] && (keys.keyAreaKeys[mk][kaekInd] || keys.keyAreaKeys[mk][0]);
+    if (!kakHex) return null;
+    const kak = typeof kakHex === 'string' ? hexToBytes(kakHex) : kakHex;
+    const unwrapped = new AesEcb(kak).decrypt(decHeader.subarray(0x300, 0x340));
+    return unwrapped.subarray(0x20, 0x30);
 }
 
 export async function extractExefs(ncaData, keys, tikData = null) {
