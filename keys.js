@@ -36,11 +36,8 @@ class KeysParser {
                     if (!titlekekSourceHex) throw new Error('Missing titlekek_source in keys file');
                     const titlekekSource = this.hexToBytes(titlekekSourceHex);
 
-                    const dec = new Uint8Array(16);
-                    for (let j = 0; j < 16; j++) {
-                        dec[j] = masterKey[j] ^ titlekekSource[j];
-                    }
-                    derived.titleKeks[i] = this.bytesToHex(dec);
+                    // hactool (pki.c:435-436): titlekek = AES-128-ECB-decrypt(master_key, titlekek_source)
+                    derived.titleKeks[i] = this.bytesToHex(new AesEcb(masterKey).decrypt(titlekekSource));
 
                     const applicationSource = this.hexToBytes(keys.key_area_key_application_source);
                     derived.keyAreaKeys[i][0] = this.deriveKeyAreaKey(masterKey, applicationSource, keys);

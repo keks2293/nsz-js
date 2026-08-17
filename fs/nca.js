@@ -66,9 +66,10 @@ export class NCAHeader {
         const mk = masterKey < 0 ? 0 : masterKey;
 
         // Decrypt key block to get titleKeyDec
+        // hactool (nca.c:685): kaek = key_area_keys[master_key][kaek_ind]
         let titleKeyDec = null;
         if (keys) {
-            const kakHex = keys.keyAreaKeys?.[mk]?.[0];
+            const kakHex = keys.keyAreaKeys?.[mk]?.[keyIndex] || keys.keyAreaKeys?.[mk]?.[0];
             if (kakHex) {
                 const kak = typeof kakHex === 'string'
                     ? KeysParser_hexToBytes(kakHex)

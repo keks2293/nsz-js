@@ -284,7 +284,9 @@ export function deriveTitlekeyFromKeyArea(decHeader, keys) {
 // check and do NOT reject the dummy tickets — the key at 0x180 is real.
 export function extractTitlekeyFromTik(tikData, keys, expectedRightsId = null) {
     if (!tikData || tikData.length < 0x2B0) return null;
-    const titlekek = keys.titlekek_02 || keys.titlekek_source;
+    // Scene/prod tickets carry the mk2 titlekey. (Falling back to titlekek_SOURCE
+    // here is wrong — the source is a 16-byte seed, not a key.)
+    const titlekek = keys.titlekek_02;
     if (!titlekek) return null;
 
     // If expectedRightsId provided, verify against tik rights_id at 0x2A0 (yanu offset).
