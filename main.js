@@ -93,11 +93,15 @@ async function main() {
     const progressSpeed = document.getElementById('progressSpeed');
     const progressTime = document.getElementById('progressTime');
     const noDeltaBtn = document.getElementById('noDeltaBtn');
+    const keepAcidSigBtn = document.getElementById('keepAcidSigBtn');
+    const keepAcidKeyBtn = document.getElementById('keepAcidKeyBtn');
 
     let fixPadding = false;
     let overwrite = false;
     let verify = false;
     let noDeltas = false;
+    let keepAcidSig = false;
+    let keepAcidKey = false;
     let mode = 'convert';
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     let downloadMode = isMobile ? 'sw' : 'fsa';
@@ -118,10 +122,13 @@ async function main() {
         const verifyVisible = mode === 'convert';
         const overwriteVisible = downloadMode === 'fsa';
         const noDeltaVisible = mode === 'merge';
+        const keepAcidVisible = mode === 'update';
         fixPaddingBtn.classList.toggle('hidden', !fixVisible);
         verifyBtn.classList.toggle('hidden', !verifyVisible);
         overwriteBtn.classList.toggle('hidden', !overwriteVisible);
         noDeltaBtn.classList.toggle('hidden', !noDeltaVisible);
+        keepAcidSigBtn.classList.toggle('hidden', !keepAcidVisible);
+        keepAcidKeyBtn.classList.toggle('hidden', !keepAcidVisible);
     }
 
     updateOptionsVisibility();
@@ -361,6 +368,16 @@ async function main() {
     noDeltaBtn.addEventListener('click', () => {
         noDeltas = !noDeltas;
         noDeltaBtn.classList.toggle('on', noDeltas);
+    });
+
+    keepAcidSigBtn.addEventListener('click', () => {
+        keepAcidSig = !keepAcidSig;
+        keepAcidSigBtn.classList.toggle('on', keepAcidSig);
+    });
+
+    keepAcidKeyBtn.addEventListener('click', () => {
+        keepAcidKey = !keepAcidKey;
+        keepAcidKeyBtn.classList.toggle('on', keepAcidKey);
     });
 
     document.querySelectorAll('.pill[data-mode]').forEach(btn => {
@@ -777,6 +794,8 @@ async function main() {
                 onProgress,
                 onLog: addLog,
                 writable,
+                keepNpdmAcidSig: keepAcidSig,
+                keepNpdmAcidKey: keepAcidKey,
             });
             if (writable) {
                 await writable.close();

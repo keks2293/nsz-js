@@ -749,14 +749,17 @@
                                      <b>Fix Padding</b> — Fixes PFS0 padding to match the nxdumptool/no-intro standard.<br>
                                      <b>Overwrite</b> — Continue even if a file with same name exists.<br>
                                      <b>Verify</b> — Verify SHA-256 hash after conversion. Slower, rarely needed.<br>
-                                      <b>No Deltas</b> — Merge: exclude delta-fragment NCAs (needs keys to detect them).
-                                  </div>
+                                      <b>No Deltas</b> — Merge: exclude delta-fragment NCAs (needs keys to detect them).<br>
+                                      <b>Keep ACID Sig / Key</b> — Update: keep the original ACID signature/key in main.npdm (hacpack --nozeronpdmsig/--nozeroacidkey). Zeroed by default.
+                                   </div>
                                   <div class="pills" id="optionsButtons">
                                       <button class="pill" id="fixPaddingBtn" title="Fixes PFS0 padding to match the nxdumptool/no-intro standard.">Fix Padding</button>
                                       <button class="pill" id="overwriteBtn" title="Continue even if file with same name exists.">Overwrite</button>
                                       <button class="pill" id="verifyBtn" title="Verify SHA-256 hash after conversion. Slower, rarely needed.">Verify</button>
-                                      <button class="pill" id="noDeltaBtn" title="Merge: exclude delta-fragment NCAs (needs keys to detect them).">No Deltas</button>
-                                  </div>
+                                       <button class="pill" id="noDeltaBtn" title="Merge: exclude delta-fragment NCAs (needs keys to detect them).">No Deltas</button>
+                                       <button class="pill" id="keepAcidSigBtn" title="Update: keep the original ACID signature in main.npdm (hacpack --nozeronpdmsig). Zeroed by default.">Keep ACID Sig</button>
+                                       <button class="pill" id="keepAcidKeyBtn" title="Update: keep the original ACID key in main.npdm (hacpack --nozeroacidkey). Zeroed by default.">Keep ACID Key</button>
+                                   </div>
                             </div>
                         </div>
                         <div class="actions">
