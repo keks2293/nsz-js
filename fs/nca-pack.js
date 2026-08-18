@@ -154,6 +154,127 @@ export function buildPfs0HashTable(pfs0Data, hashBlock) {
     };
 }
 
+// ── Streaming IVFC hash tree ─────────────────────────────────────────────────
+// Incremental equivalent of buildIvfcHashTree(): feed the romfs data in order via
+// update(chunk); finalize() then yields the 5 hash levels (write order H5..H1),
+// the IVFC header, the master hash and the physical size — WITHOUT ever holding
+// the data. Only level-1 (H1, ~size/0x200000) + one 0x4000 block buffer is kept.
+export class StreamingIvfcHasher {
+    constructor(dataSize) {
+        this.blockSize = 0x4000;
+        this.hashSize = 0x20;
+        this.dataSize = dataSize;
+        const numBlocks = Math.ceil(dataSize / this.blockSize);
+        this.h1 = new Uint8Array(numBlocks * this.hashSize);
+        this.buf = new Uint8Array(this.blockSize);
+        this.bufLen = 0;
+        this.blockIdx = 0;
+    }
+    update(chunk) {
+        let off = 0;
+        while (off < chunk.length) {
+            const space = this.blockSize - this.bufLen;
+            const n = Math.min(space, chunk.length - off);
+            this.buf.set(chunk.subarray(off, off + n), this.bufLen);
+            this.bufLen += n;
+            off += n;
+            if (this.bufLen === this.blockSize) {
+                this.h1.set(hexToBytes(sha256(this.buf)), this.blockIdx * this.hashSize);
+                this.blockIdx++;
+                this.buf.fill(0); // zero before next block (last partial block must hash real+zeros)
+                this.bufLen = 0;
+            }
+        }
+    }
+    finalize() {
+        if (this.bufLen > 0) {
+            this.h1.set(hexToBytes(sha256(this.buf)), this.blockIdx * this.hashSize);
+            this.blockIdx++;
+        }
+        // Build H1..H5 (each level = sha256 of 0x4000 blocks of the previous, padded level).
+        const levels = [];
+        let current = this.h1;
+        for (let i = 0; i < 5; i++) {
+            const paddedSize = pad4000(current.length);
+            const padded = new Uint8Array(paddedSize);
+            padded.set(current);
+            levels.push(padded);
+            const numBlocks = Math.ceil(padded.length / this.blockSize);
+            const next = new Uint8Array(numBlocks * this.hashSize);
+            for (let b = 0; b < numBlocks; b++) {
+                next.set(hexToBytes(sha256(padded.subarray(b * this.blockSize, (b + 1) * this.blockSize))), b * this.hashSize);
+            }
+            current = next;
+        }
+        // levels = [H1, H2, H3, H4, H5]; write order = [H5, H4, H3, H2, H1]
+        const hashLevels = [levels[4], levels[3], levels[2], levels[1], levels[0]];
+        const dataSizes = [levels[4].length, levels[3].length, levels[2].length, levels[1].length, levels[0].length, this.dataSize];
+        const masterHash = hexToBytes(sha256(levels[4]));
+        const ivfcHeader = this._buildHeader(dataSizes, masterHash);
+        const physicalSize = dataSizes.reduce((a, b) => a + b, 0);
+        return { hashLevels, dataSizes, masterHash, ivfcHeader, physicalSize };
+    }
+    _buildHeader(dataSizes, masterHash) {
+        const ivfcHeader = new Uint8Array(0xE0);
+        const v = new DataView(ivfcHeader.buffer);
+        v.setUint32(0, 0x43465649, true); // "IVFC"
+        v.setUint32(4, 0x20000, true);    // id
+        v.setUint32(8, 0x20, true);       // master_hash_size
+        v.setUint32(12, 7, true);         // num_levels (matches buildIvfcHashTree)
+        let cumulativeOffset = 0;
+        for (let lvl = 0; lvl < 6; lvl++) {
+            const base = 0x10 + lvl * 0x18;
+            v.setBigUint64(base + 0x00, BigInt(cumulativeOffset), true);
+            v.setBigUint64(base + 0x08, BigInt(dataSizes[lvl]), true);
+            v.setUint32(base + 0x10, 0x0E, true);
+            cumulativeOffset += dataSizes[lvl];
+        }
+        ivfcHeader.set(masterHash, 0xC0);
+        return ivfcHeader;
+    }
+}
+
+// ── Streaming PFS0 hash table ────────────────────────────────────────────────
+// Incremental equivalent of buildPfs0HashTable(): feed the PFS0 data in order via
+// update(chunk); finalize() yields the (padded) hash table + master hash. The last
+// partial block is hashed as-is (NO zero-padding), matching buildPfs0HashTable.
+export class StreamingPfs0Hasher {
+    constructor(hashBlock = 0x10000) {
+        this.hashBlock = hashBlock;
+        this.hashSize = 0x20;
+        this.buf = new Uint8Array(hashBlock);
+        this.bufLen = 0;
+        this.hashes = [];
+    }
+    update(chunk) {
+        let off = 0;
+        while (off < chunk.length) {
+            const space = this.hashBlock - this.bufLen;
+            const n = Math.min(space, chunk.length - off);
+            this.buf.set(chunk.subarray(off, off + n), this.bufLen);
+            this.bufLen += n;
+            off += n;
+            if (this.bufLen === this.hashBlock) {
+                this.hashes.push(hexToBytes(sha256(this.buf)));
+                this.buf.fill(0);
+                this.bufLen = 0;
+            }
+        }
+    }
+    finalize() {
+        if (this.bufLen > 0) {
+            this.hashes.push(hexToBytes(sha256(this.buf.subarray(0, this.bufLen))));
+        }
+        const hashTable = new Uint8Array(this.hashes.length * this.hashSize);
+        for (let i = 0; i < this.hashes.length; i++) hashTable.set(this.hashes[i], i * this.hashSize);
+        const paddedSize = pad200(hashTable.length);
+        const padded = new Uint8Array(paddedSize);
+        padded.set(hashTable);
+        const masterHash = hexToBytes(sha256(hashTable)); // raw (unpadded) hash table
+        return { hashTable: padded, rawHashSize: hashTable.length, masterHash };
+    }
+}
+
 // ── FsHeader builders ────────────────────────────────────────────────────────
 // nca_fs_header_t layout (from nca.h):
 //   version(u16) @0x00, fs_type(u8) @0x02, hash_type(u8=2/3) @0x03,
@@ -587,12 +708,23 @@ function deriveTitlekey(decHeader, keys) {
     return unwrapped.subarray(0x20, 0x30);
 }
 
+// Accept either a full NCA buffer (Uint8Array) or an NcaInput
+// { headerRaw: Uint8Array(0xC00), source: RangeSource }.
+function ncaHeaderRaw(nca) {
+    if (nca && nca.source) return nca.headerRaw;
+    return nca.subarray(0, NCA_HEADER_SIZE);
+}
+async function ncaRead(nca, offset, length) {
+    if (nca && nca.source) return await nca.source.read(offset, length);
+    return nca.subarray(offset, offset + length);
+}
+
 export async function extractExefs(ncaData, keys, tikData = null) {
     const hdrKey = typeof keys.header_key === 'string'
         ? hexToBytes(keys.header_key)
         : new Uint8Array(keys.header_key);
     const xts = new AesXts(hdrKey);
-    const decHeader = xts.decrypt(ncaData.subarray(0, NCA_HEADER_SIZE), 0);
+    const decHeader = xts.decrypt(ncaHeaderRaw(ncaData), 0);
 
     let titlekey = null;
     if (tikData && tikData.length >= 0x190) {
@@ -614,7 +746,7 @@ export async function extractExefs(ncaData, keys, tikData = null) {
     const mediaOffset = Number(new DataView(decHeader.buffer, decHeader.byteOffset + 0x240, 4).getUint32(0, true));
     const sectionOffset = mediaOffset * 0x200;
 
-    const raw = ncaData.subarray(sectionOffset, sectionOffset + sectionStart + sectionSize);
+    const raw = await ncaRead(ncaData, sectionOffset, sectionStart + sectionSize);
 
     if (!titlekey || sectionSize === 0) {
         return raw.subarray(sectionStart, sectionStart + sectionSize);
@@ -626,12 +758,67 @@ export async function extractExefs(ncaData, keys, tikData = null) {
     return decrypted.subarray(sectionStart, sectionStart + sectionSize);
 }
 
+// Streaming variant of extractExefs(): feeds the ExeFS PFS0 data (section
+// [sectionStart, sectionStart+sectionSize)) in order to onChunk(chunk, offInData)
+// instead of returning one big buffer. Only transient decrypt chunks are kept.
+export async function extractExefsStream(ncaData, keys, tikData, onChunk) {
+    const hdrKey = typeof keys.header_key === 'string'
+        ? hexToBytes(keys.header_key)
+        : new Uint8Array(keys.header_key);
+    const xts = new AesXts(hdrKey);
+    const decHeader = xts.decrypt(ncaHeaderRaw(ncaData), 0);
+
+    let titlekey = null;
+    if (tikData && tikData.length >= 0x190) {
+        const titlekek = typeof keys.titlekek_02 === 'string' ? hexToBytes(keys.titlekek_02) : keys.titlekek_02;
+        titlekey = new AesEcb(titlekek).decrypt(tikData.subarray(0x180, 0x190));
+    }
+    if (!titlekey) {
+        titlekey = deriveTitlekey(decHeader, keys);
+    }
+
+    const exeFsFsHdr = decHeader.subarray(0x400, 0x600);
+    const sectionCtrRaw = exeFsFsHdr.subarray(0x140, 0x148);
+    const sectionCtrRev = new Uint8Array(8);
+    for (let i = 0; i < 8; i++) sectionCtrRev[i] = sectionCtrRaw[7 - i];
+
+    const sectionStart = Number(new DataView(exeFsFsHdr.buffer, exeFsFsHdr.byteOffset + 0x40, 8).getBigUint64(0, true));
+    const sectionSize = Number(new DataView(exeFsFsHdr.buffer, exeFsFsHdr.byteOffset + 0x48, 8).getBigUint64(0, true));
+
+    const mediaOffset = Number(new DataView(decHeader.buffer, decHeader.byteOffset + 0x240, 4).getUint32(0, true));
+    const sectionOffset = mediaOffset * 0x200;
+
+    if (!titlekey || sectionSize === 0) {
+        // Plaintext: read + emit raw, in order.
+        let done = 0;
+        while (done < sectionSize) {
+            const n = Math.min(0x100000, sectionSize - done);
+            const raw = await ncaRead(ncaData, sectionOffset + sectionStart + done, n);
+            await onChunk(raw, done);
+            done += n;
+        }
+        return sectionSize;
+    }
+
+    const c = new AesCtr(titlekey, sectionCtrRev);
+    c.seek(sectionOffset + sectionStart);
+    let done = 0;
+    while (done < sectionSize) {
+        const n = Math.min(0x100000, sectionSize - done);
+        const cipher = await ncaRead(ncaData, sectionOffset + sectionStart + done, n);
+        const dec = await c.decrypt(cipher);
+        await onChunk(dec, done);
+        done += n;
+    }
+    return sectionSize;
+}
+
 export async function extractRomfs(ncaData, keys, tikData = null) {
     const hdrKey = typeof keys.header_key === 'string'
         ? hexToBytes(keys.header_key)
         : new Uint8Array(keys.header_key);
     const xts = new AesXts(hdrKey);
-    const decHeader = xts.decrypt(ncaData.subarray(0, NCA_HEADER_SIZE), 0);
+    const decHeader = xts.decrypt(ncaHeaderRaw(ncaData), 0);
 
     let titlekey = null;
     if (tikData && tikData.length >= 0x190) {
@@ -659,7 +846,7 @@ export async function extractRomfs(ncaData, keys, tikData = null) {
     const sectionOffset = mediaOffset * 0x200;
     const mediaSize = mediaEnd * 0x200 - sectionOffset;
 
-    const raw = ncaData.subarray(sectionOffset, sectionOffset + mediaSize);
+    const raw = await ncaRead(ncaData, sectionOffset, mediaSize);
     if (!titlekey || mediaSize === 0) return raw;
 
     const c = new AesCtr(titlekey, sectionCtrRev);
@@ -826,6 +1013,115 @@ export async function packPlaintextProgramNcaStreaming(exefsData, romfsData, con
     await writePlaintextProgramNca(prepared, outputAdapter, log, baseOffset);
     _log('info', '  ----> Created Program NCA: ' + prepared.size + ' bytes sha256=' + prepared.hashHex);
     return { hashHex: prepared.hashHex, size: prepared.size };
+}
+
+// ── Fully streaming Program NCA pack (seekable output, no data buffer) ─────────
+// Avoids holding the NCA (or the romfs/exefs data) as a single ArrayBuffer — the
+// payload is written straight to the output adapter via streamExefs/streamRomfs,
+// feeding StreamingPfs0Hasher / StreamingIvfcHasher. The hash metadata (PFS0 htable,
+// IVFC levels) and the NCA header precede the data in each section, so they are
+// written with seek-back. Finally the written NCA is re-read from the output and
+// hashed to obtain the contentId — byte-identical to preparePlaintextProgramNca.
+//
+// streamExefs(stream)  : calls stream(chunk, offInExefsData) over the ExeFS PFS0 data
+// streamRomfs(stream)  : calls stream(chunk, offInRomfsData) over the merged RomFS data
+// Returns { hashHex, size }.
+export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romfsDataSize, titleId, keys, streamExefs, streamRomfs, log }) {
+    const _log = typeof log === 'function' ? log : () => {};
+
+    // ── Layout (from sizes only) ───────────────────────────────────────────
+    const exeHtableSize = pad200(Math.ceil(exefsSize / 0x10000) * 0x20);
+    const exeSectionSize = pad200(exeHtableSize + exefsSize);
+    const sec0Start = NCA_HEADER_SIZE;
+    const sec1Start = sec0Start + exeSectionSize;
+    const sec0DataOff = sec0Start + exeHtableSize;
+    const h1 = pad4000(Math.ceil(romfsDataSize / 0x4000) * 0x20);
+    const h2 = pad4000(Math.ceil(h1 / 0x4000) * 0x20);
+    const h3 = pad4000(Math.ceil(h2 / 0x4000) * 0x20);
+    const h4 = pad4000(Math.ceil(h3 / 0x4000) * 0x20);
+    const h5 = pad4000(Math.ceil(h4 / 0x4000) * 0x20);
+    const hashLevelsSize = h1 + h2 + h3 + h4 + h5;
+    const sec1DataOff = sec1Start + hashLevelsSize;
+    const romSectionSize = pad4000(hashLevelsSize + romfsDataSize);
+    const ncaSize = sec1Start + romSectionSize;
+    const exePaddingSize = exeSectionSize - (exeHtableSize + exefsSize);
+    const romPaddingSize = romSectionSize - (hashLevelsSize + romfsDataSize);
+    _log('info', `  Streaming NCA layout: ExeFS=0x${exeSectionSize.toString(16)} (htable 0x${exeHtableSize.toString(16)}), RomFS=0x${romSectionSize.toString(16)} (levels 0x${hashLevelsSize.toString(16)}), total=0x${ncaSize.toString(16)}`);
+
+    const pfs0 = new StreamingPfs0Hasher(0x10000);
+    const ivfc = new StreamingIvfcHasher(romfsDataSize);
+
+    // ── Stream ExeFS data → output + PFS0 hasher ───────────────────────────
+    _log('info', '  Streaming ExeFS (PFS0 data) → output...');
+    await streamExefs(async (chunk, off) => {
+        await adapter.write(ncaOffset + sec0DataOff + off, chunk);
+        pfs0.update(chunk);
+    });
+    const exeHash = pfs0.finalize();
+
+    // ── Stream RomFS data → output + IVFC hasher ───────────────────────────
+    _log('info', '  Streaming RomFS (BKTR data) → output...');
+    await streamRomfs(async (chunk, off) => {
+        await adapter.write(ncaOffset + sec1DataOff + off, chunk);
+        ivfc.update(chunk);
+    });
+    const romIvfc = ivfc.finalize();
+
+    // ── Section paddings (zeros) ───────────────────────────────────────────
+    if (exePaddingSize > 0) await adapter.write(ncaOffset + sec0DataOff + exefsSize, new Uint8Array(exePaddingSize));
+    if (romPaddingSize > 0) await adapter.write(ncaOffset + sec1DataOff + romfsDataSize, new Uint8Array(romPaddingSize));
+
+    // ── Build NCA header (identical to preparePlaintextProgramNca) ─────────
+    const sec0End = sec0Start + exeSectionSize;
+    const sec1End = sec1Start + romSectionSize;
+    const header = buildNcaHeader(titleId, [
+        { offset: sec0Start, endOffset: sec0End, size: exeSectionSize },
+        { offset: sec1Start, endOffset: sec1End, size: romSectionSize },
+    ], keys);
+    const exeFsHeader = buildPfs0FsHeader(0x01);
+    {
+        const ev = new DataView(exeFsHeader.buffer);
+        exeFsHeader.set(exeHash.masterHash, 0x08);
+        ev.setUint32(0x28, 0x10000, true);
+        ev.setUint32(0x2C, 2, true);
+        ev.setBigUint64(0x38, BigInt(exeHash.rawHashSize), true);
+        ev.setBigUint64(0x40, BigInt(exeHtableSize), true);
+        ev.setBigUint64(0x48, BigInt(exefsSize), true);
+    }
+    header.set(exeFsHeader, 0x400);
+    const romFsHeader = buildRomfsFsHeader(0x01);
+    romFsHeader.set(romIvfc.ivfcHeader, 0x08);
+    header.set(romFsHeader, 0x600);
+    header.set(hexToBytes(sha256(header.subarray(0x400, 0x600))), 0x280);
+    header.set(hexToBytes(sha256(header.subarray(0x600, 0x800))), 0x2A0);
+    writeU64LE(header, 0x208, ncaSize);
+    const hdrKey = typeof keys.header_key === 'string' ? hexToBytes(keys.header_key)
+        : (keys.header_key instanceof Uint8Array ? keys.header_key : new Uint8Array(keys.header_key));
+    const encHeader = new AesXts(hdrKey).encrypt(header);
+
+    // ── Seek-back: header + PFS0 htable + IVFC levels ──────────────────────
+    _log('info', '  Writing header + hash tables (seek-back)...');
+    await adapter.write(ncaOffset, encHeader);
+    await adapter.write(ncaOffset + sec0Start, exeHash.hashTable);
+    let lvOff = 0;
+    for (const lvl of romIvfc.hashLevels) {
+        await adapter.write(ncaOffset + sec1Start + lvOff, lvl);
+        lvOff += lvl.length;
+    }
+
+    // ── Re-read NCA from output → contentId (sha256) ───────────────────────
+    _log('info', '  Re-reading NCA from output → contentId...');
+    const h = new SHA256();
+    let roff = 0;
+    while (roff < ncaSize) {
+        const n = Math.min(0x1000000, ncaSize - roff);
+        const part = await adapter.read(ncaOffset + roff, n);
+        h.update(part);
+        roff += n;
+    }
+    const hashHex = h.hex();
+    _log('info', `  ----> Program NCA (streaming): ${ncaSize} bytes sha256=${hashHex}`);
+    return { hashHex, size: ncaSize };
 }
 
 export async function extractControl(updateNcaData, keys) {
