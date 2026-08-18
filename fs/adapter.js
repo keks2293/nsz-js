@@ -48,7 +48,11 @@ async function buildRead(output) {
             return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
         };
     }
-    if (output.writable && typeof output.writable.seek === 'function') {
+    // NOTE: the File System Access API's FileSystemWritableFileStream has seek()
+    // but NO read() (MDN: only write/seek/truncate), so FSA outputs can't be read
+    // back — they return null here and use the buffered path. Only a writable that
+    // exposes BOTH seek() and read() is usable for the re-read contentId pass.
+    if (output.writable && typeof output.writable.seek === 'function' && typeof output.writable.read === 'function') {
         return async (offset, length) => {
             await output.writable.seek(offset);
             const stream = await output.writable.read();
