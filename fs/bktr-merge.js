@@ -1,29 +1,42 @@
-import { AesXts } from '../crypto/aes-ops.mjs';
+import { AesXts, AesCtr } from '../crypto/aes-ops.mjs';
 import { decryptNcaHeader } from './nca.js';
+import { BufferRangeSource } from './range-source.js';
 import { hexToBytes } from './nca-utils.js';
 import {
     parseBktrHeader,
-    decryptBktrTable,
+    decryptBktrTableData,
     parseRelocationBlock,
     parseSubsectionBlock,
     findSubsectionEntry,
     subEntryIdx,
-    decryptPatchRegion,
-    decryptBaseRomfs,
+    decryptPatchRegionData,
     extractTitlekeyFromTik,
     deriveTitlekeyFromKeyArea,
     lookupTitlekeyFromDatabase,
 } from './bktr.js';
 
+// Accept either a full NCA buffer (Uint8Array) or an NcaInput:
+// { headerRaw: Uint8Array(0xC00), source: RangeSource } where
+// source.read(offset, length) serves NCA ciphertext by absolute offset.
+function toNcaInput(nca) {
+    if (nca && typeof nca.subarray === 'function' && !nca.source) {
+        return { headerRaw: nca.subarray(0, 0xC00), source: new BufferRangeSource(nca) };
+    }
+    return nca;
+}
+
 const BKTR_HEADER_OFFSET = 0x100;
 
 export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
-    const { keys, baseTitlekey: providedBaseTitlekey, updateTitlekey: providedUpdateTitlekey, baseTik, updateTik, titlekeysFile } = options;
+    const { keys, onChunk, baseTitlekey: providedBaseTitlekey, updateTitlekey: providedUpdateTitlekey, baseTik, updateTik, titlekeysFile } = options;
 
     if (!keys) throw new Error('BKTR: keys required');
 
-    const baseHeader = decryptNcaHeader(baseNcaData.subarray(0, 0xc00), keys);
-    const updateHeader = decryptNcaHeader(updateNcaData.subarray(0, 0xc00), keys);
+    baseNcaData = toNcaInput(baseNcaData);
+    updateNcaData = toNcaInput(updateNcaData);
+
+    const baseHeader = decryptNcaHeader(baseNcaData.headerRaw, keys);
+    const updateHeader = decryptNcaHeader(updateNcaData.headerRaw, keys);
     if (!baseHeader || !updateHeader) throw new Error('BKTR: failed to decrypt NCA headers');
 
     const baseRomfsSec = baseHeader.sections.find(s => s.fsType === 3);
@@ -41,8 +54,8 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
     // Decrypt NCA headers
     const hdrKey = typeof keys.header_key === 'string' ? hexToBytes(keys.header_key) : keys.header_key;
     const xts = new AesXts(hdrKey);
-    const updateDecHeader = xts.decrypt(updateNcaData.subarray(0, 0xc00), 0);
-    const baseDecHeader = xts.decrypt(baseNcaData.subarray(0, 0xc00), 0);
+    const updateDecHeader = xts.decrypt(updateNcaData.headerRaw, 0);
+    const baseDecHeader = xts.decrypt(baseNcaData.headerRaw, 0);
 
     // Update FsHeader
     const updateFsHdr = updateDecHeader.subarray(0x400 + updateRomfsSecIdx * 0x200, 0x400 + updateRomfsSecIdx * 0x200 + 0x200);
@@ -94,14 +107,16 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
         || deriveTitlekeyFromKeyArea(baseDecHeader, keys);
     if (!baseTitlekey) throw new Error('BKTR: cannot get base titlekey (provide titlekeysFile or valid baseTik)');
 
-    // Decrypt BKTR tables
-    const relocTableBuf = await decryptBktrTable(
-        updateNcaData, updateTitlekey, updateNonce,
-        updateRomfsSec.offset + relocHeader.offset, relocHeader.size
+    // Decrypt BKTR tables (read only the table ranges from the update source)
+    const relocAbsOffset = updateRomfsSec.offset + relocHeader.offset;
+    const subAbsOffset = updateRomfsSec.offset + subHeader.offset;
+    const relocTableBuf = await decryptBktrTableData(
+        await updateNcaData.source.read(relocAbsOffset, relocHeader.size),
+        updateTitlekey, updateNonce, relocAbsOffset
     );
-    const subTableBuf = await decryptBktrTable(
-        updateNcaData, updateTitlekey, updateNonce,
-        updateRomfsSec.offset + subHeader.offset, subHeader.size
+    const subTableBuf = await decryptBktrTableData(
+        await updateNcaData.source.read(subAbsOffset, subHeader.size),
+        updateTitlekey, updateNonce, subAbsOffset
     );
 
     const relocBlock = parseRelocationBlock(relocTableBuf);
@@ -109,10 +124,29 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
     if (relocBlock.entries.length === 0) throw new Error('BKTR: no relocation entries');
     if (subBlock.entries.length === 0) throw new Error('BKTR: no subsection entries');
 
-    // Decrypt base romfs
-    const baseRomfsDecrypted = await decryptBaseRomfs(
-        baseNcaData, baseRomfsSecMeta, baseDecHeader, baseTitlekey
-    );
+    // Pre-register the base romfs ranges (in strictly increasing order) so an
+    // NCZ stream source can serve them in ONE sequential decompression pass
+    // without buffering the whole base romfs section. File/buffer sources
+    // ignore registration.
+    for (let i = 0; i < relocBlock.entries.length; i++) {
+        const e = relocBlock.entries[i];
+        if (e.isPatch) continue;
+        const nextVirt = i + 1 < relocBlock.entries.length
+            ? relocBlock.entries[i + 1].virtOffset : relocBlock.totalSize;
+        baseNcaData.source.registerRange(baseRomfsSecMeta.offset + e.physOffset, nextVirt - e.virtOffset);
+    }
+
+    // Base romfs is decrypted IN PLACE, per relocation entry, directly into
+    // `merged` (chunked, transient 16 MB) from the source's ciphertext — no
+    // full-image buffer (the old approach decrypted the whole ~850 MB section
+    // up front and it lived alongside `merged` for the entire merge).
+    // Counter base = section offset (AesCtr counter = absolute section byte / 16).
+    const baseFsHdr = baseDecHeader.subarray(0x400 + baseRomfsSecMeta.secIdx * 0x200, 0x400 + baseRomfsSecMeta.secIdx * 0x200 + 0x200);
+    const baseSectionCtrRaw = baseFsHdr.subarray(0x140, 0x148);
+    const baseNonce = new Uint8Array(8);
+    for (let j = 0; j < 8; j++) baseNonce[j] = baseSectionCtrRaw[7 - j];
+    const baseCtr = new AesCtr(baseTitlekey, baseNonce);
+    const BASE_DECRYPT_CHUNK = 0x1000000; // 16 MB
 
     // Build merged RomFS.
     //
@@ -126,16 +160,24 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
     // hacPack (romfs_build()), which expects just the data blob — see hactool nca.c:1240
     // ("romfs_offset = ivfc_levels[IVFC_MAX_LEVEL-1].data_offset").
     // So mergedData = merged.subarray(dataLevelOffset, dataLevelOffset + dataLevelSize).
-    const merged = new Uint8Array(relocBlock.totalSize);
+    // Streaming mode: when an onChunk(chunk, romfsDataOffset) callback is given, only the
+    // level-5 DATA region [dataLevelOffset, dataLevelOffset+dataLevelSize) is emitted through
+    // the callback and the full virtual-image buffer is NOT allocated. Buffered mode (no
+    // onChunk) builds `merged` as before (used by verification scripts).
+    const streaming = typeof onChunk === 'function';
+    const totalSize = relocBlock.totalSize;
+    const merged = streaming ? null : new Uint8Array(totalSize);
+    const dataStart = dataLevelOffset;
+    const dataEnd = dataLevelOffset + dataLevelSize;
     let pos = 0;
     let entryIdx = 0;
 
-    while (pos < merged.length && entryIdx < relocBlock.entries.length) {
+    while (pos < totalSize && entryIdx < relocBlock.entries.length) {
         const entry = relocBlock.entries[entryIdx];
         const nextVirt = entryIdx + 1 < relocBlock.entries.length
             ? relocBlock.entries[entryIdx + 1].virtOffset
-            : merged.length;
-        const chunkEnd = Math.min(nextVirt, merged.length);
+            : totalSize;
+        const chunkEnd = Math.min(nextVirt, totalSize);
         const readSize = chunkEnd - pos;
 
         if (entry.isPatch) {
@@ -157,24 +199,52 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
                     : Infinity;
                 const remainingInSub = nextSubOff - currentPhys;
                 const remainingToWrite = chunkEnd - writePos;
-                const readLen = Math.min(remainingInSub, remainingToWrite);
+                // Cap at 16 MB so the decrypted `chunk` buffer stays small even for
+                // large patch entries (the counter is absolute, so chunking is safe).
+                const readLen = Math.min(remainingInSub, remainingToWrite, BASE_DECRYPT_CHUNK);
 
                 const fileOffset = updateRomfsSec.offset + currentPhys;
-                const chunk = await decryptPatchRegion(
-                    updateNcaData, updateTitlekey, secureValue, subEntry, fileOffset, readLen
+                const chunk = await decryptPatchRegionData(
+                    await updateNcaData.source.read(fileOffset, readLen),
+                    updateTitlekey, secureValue, subEntry, fileOffset
                 );
-                merged.set(chunk, writePos);
+                if (streaming) {
+                    const a = Math.max(writePos, dataStart);
+                    const b = Math.min(writePos + readLen, dataEnd);
+                    if (b > a) await onChunk(chunk.subarray(a - writePos, b - writePos), a - dataStart);
+                } else {
+                    merged.set(chunk, writePos);
+                }
 
                 writePos += readLen;
                 currentPhys += readLen;
             }
         } else {
-            // Copy from base romfs
+            // Copy from base romfs: read the ciphertext range from the source
+            // and decrypt it straight into merged (no full-image buffer).
             const baseOffset = entry.physOffset + (pos - entry.virtOffset);
-            if (baseOffset + readSize > baseRomfsDecrypted.length) {
+            if (baseOffset + readSize > baseRomfsSecMeta.size) {
                 throw new Error(`BKTR: base read OOB at 0x${baseOffset.toString(16)}`);
             }
-            merged.set(baseRomfsDecrypted.subarray(baseOffset, baseOffset + readSize), pos);
+            // Read the base ciphertext in 16 MB chunks (not the whole entry) so the
+            // transient `cipher` buffer stays small even for large unpatched entries.
+            // FileRangeSource reads from the container; NczStreamSource serves a view
+            // of its (already-buffered) registered range.
+            let done = 0;
+            while (done < readSize) {
+                const n = Math.min(BASE_DECRYPT_CHUNK, readSize - done);
+                const cipher = await baseNcaData.source.read(baseRomfsSecMeta.offset + baseOffset + done, n);
+                baseCtr.seek(baseRomfsSecMeta.offset + baseOffset + done);
+                const dec = await baseCtr.decrypt(cipher);
+                if (streaming) {
+                    const a = Math.max(pos + done, dataStart);
+                    const b = Math.min(pos + done + n, dataEnd);
+                    if (b > a) await onChunk(dec.subarray(a - (pos + done), b - (pos + done)), a - dataStart);
+                } else {
+                    merged.set(dec, pos + done);
+                }
+                done += n;
+            }
         }
 
         pos = chunkEnd;
@@ -182,8 +252,9 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
     }
 
     return {
-        mergedData: merged.subarray(dataLevelOffset, dataLevelOffset + dataLevelSize),
+        mergedData: streaming ? null : merged.subarray(dataLevelOffset, dataLevelOffset + dataLevelSize),
         dataOffset: dataLevelOffset,
+        dataLevelSize,
         relocEntries: relocBlock.entries.length,
         subsectionEntries: subBlock.entries.length,
     };
