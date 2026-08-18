@@ -30,8 +30,12 @@ export function parseBktrHeader(fsHdr, offset) {
     };
 }
 
-// Decrypt BKTR table region using AES-ECB with custom counter (AesCtr.seek gives wrong counter for some reason)
-export async function decryptBktrTable(ncaData, titlekey, nonce, absOffset, size) {
+// Decrypt BKTR table ciphertext using AES-ECB with custom counter
+// (AesCtr.seek gives wrong counter for BKTR tables, hence manual counter).
+// cipher = the table region bytes; absOffset = their absolute NCA offset
+// (used for the per-16-byte-block counter, exactly as hactool does).
+export async function decryptBktrTableData(cipher, titlekey, nonce, absOffset) {
+    const size = cipher.length;
     const result = new Uint8Array(size);
     const aes = new AesEcb(titlekey);
     const counter = new Uint8Array(16);
@@ -41,7 +45,6 @@ export async function decryptBktrTable(ncaData, titlekey, nonce, absOffset, size
         const chunkEnd = Math.min(pos + 16, size);
         const fileOffsetForBlock = absOffset + pos;
 
-        // Build counter exactly as hactool does
         counter.set(nonce, 0);
         const blockIndex = Math.floor(fileOffsetForBlock / 16);
         let tmp = blockIndex;
@@ -51,7 +54,7 @@ export async function decryptBktrTable(ncaData, titlekey, nonce, absOffset, size
         }
 
         const keystream = aes.encryptBlock(counter);
-        const rawBlock = ncaData.subarray(fileOffsetForBlock, fileOffsetForBlock + chunkEnd - pos);
+        const rawBlock = cipher.subarray(pos, chunkEnd);
         for (let i = 0; i < chunkEnd - pos; i++) {
             result[pos + i] = rawBlock[i] ^ keystream[i];
         }
@@ -60,6 +63,11 @@ export async function decryptBktrTable(ncaData, titlekey, nonce, absOffset, size
     }
 
     return result;
+}
+
+// Decrypt a BKTR table region located at absOffset within a full NCA buffer.
+export async function decryptBktrTable(ncaData, titlekey, nonce, absOffset, size) {
+    return decryptBktrTableData(ncaData.subarray(absOffset, absOffset + size), titlekey, nonce, absOffset);
 }
 
 // Parse relocation block per hactool bktr.h bktr_relocation_block_t
@@ -179,7 +187,8 @@ export function buildAesCtrExCounter(sectionCtr, ctrVal, fileOffset) {
 //   ctr[0:4] = FsHeader.secure_value BE (FsHeader[0x144:0x148], u32 LE → BE)
 //   ctr[4:8] = subEntry.ctrVal BE (generation from BKTR entry, u32 LE → BE)
 //   ctr[8:16] = fileOffset/16 BE
-export async function decryptPatchRegion(ncaData, titlekey, secureValue, subEntry, fileOffset, size) {
+export async function decryptPatchRegionData(cipher, titlekey, secureValue, subEntry, fileOffset) {
+    const size = cipher.length;
     const result = new Uint8Array(size);
     let pos = 0;
     const counter = new Uint8Array(16);
@@ -210,7 +219,7 @@ export async function decryptPatchRegion(ncaData, titlekey, secureValue, subEntr
         }
 
         const keystream = aes.encryptBlock(counter);
-        const rawBlock = ncaData.subarray(fileOffsetForBlock, fileOffsetForBlock + chunkEnd - pos);
+        const rawBlock = cipher.subarray(pos, chunkEnd);
         for (let i = 0; i < chunkEnd - pos; i++) {
             result[pos + i] = rawBlock[i] ^ keystream[i];
         }
@@ -219,6 +228,11 @@ export async function decryptPatchRegion(ncaData, titlekey, secureValue, subEntr
     }
 
     return result;
+}
+
+// Decrypt a patch region located at fileOffset within a full NCA buffer.
+export async function decryptPatchRegion(ncaData, titlekey, secureValue, subEntry, fileOffset, size) {
+    return decryptPatchRegionData(ncaData.subarray(fileOffset, fileOffset + size), titlekey, secureValue, subEntry, fileOffset);
 }
 
 // Load titlekeys from file (format: rights_id = titlekey)

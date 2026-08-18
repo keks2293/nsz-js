@@ -1,5 +1,5 @@
 import { PFS0, PFS0Writer } from './pfs0.js';
-import { buildAdapter, collectBlob, copyRange } from './adapter.js';
+import { buildAdapter, buildRead, collectBlob, copyRange } from './adapter.js';
 import { XCIReader } from './xci.js';
 import { NCZDecompressor, AdapterNCZReader, parseNczSections } from './ncz.js';
 import { decryptNcaHeader, decryptNcaSection, parseCnmtFromDecryptedSection } from './nca.js';
@@ -8,7 +8,8 @@ import { AesXts, AesCtr } from '../crypto/aes-ops.mjs';
 import { AesEcb } from '../crypto/aes128.js';
 import { sha256 } from '../crypto/sha256.js';
 import { mergeRomFS } from './bktr-merge.js';
-import { preparePlaintextProgramNca, writePlaintextProgramNca, packMetaNca, extractExefs, extractRomfs, processNpdmAcid } from './nca-pack.js';
+import { FileRangeSource, NczStreamSource, ViewRangeSource, SparseNcaView } from './range-source.js';
+import { preparePlaintextProgramNca, writePlaintextProgramNca, packProgramNcaStream, extractExefsStream, packMetaNca, extractExefs, extractRomfs, processNpdmAcid } from './nca-pack.js';
 
 function hexToBytes(hex) {
     const bytes = new Uint8Array(hex.length / 2);
@@ -36,6 +37,21 @@ const NCA_HEADER_SIZE = 0xC00;
 
 function pad4000(n) {
     return (n + 0x3FFF) & ~0x3FFF;
+}
+
+// Total plaintext Program NCA size from the ExeFS (PFS0 data) and RomFS (BKTR data)
+// sizes — mirrors the layout in packProgramNcaStream/preparePlaintextProgramNca.
+function programNcaSize(exefsSize, romfsDataSize) {
+    const exeHtableSize = pad200(Math.ceil(exefsSize / 0x10000) * 0x20);
+    const exeSectionSize = pad200(exeHtableSize + exefsSize);
+    const h1 = pad4000(Math.ceil(romfsDataSize / 0x4000) * 0x20);
+    const h2 = pad4000(Math.ceil(h1 / 0x4000) * 0x20);
+    const h3 = pad4000(Math.ceil(h2 / 0x4000) * 0x20);
+    const h4 = pad4000(Math.ceil(h3 / 0x4000) * 0x20);
+    const h5 = pad4000(Math.ceil(h4 / 0x4000) * 0x20);
+    const hashLevelsSize = h1 + h2 + h3 + h4 + h5;
+    const romSectionSize = pad4000(hashLevelsSize + romfsDataSize);
+    return 0xC00 + exeSectionSize + romSectionSize;
 }
 
 function writeU64LE(buf, offset, value) {
@@ -234,24 +250,7 @@ async function extractNcaSection(reader, ncaOffset, ncaSize, isNcz, keys, log) {
     return sectionBuffer;
 }
 
-// Build a sparse NCA buffer containing only header (at 0..0xC00) + one or more sections
-// at their original NCA offsets. This allows mergeRomFS()/extractExefs() to work without
-// loading the entire ~4.4 GB NCA. The buffer is zero-filled between header and first
-// needed section, and between sections — only accessed regions are non-zero.
-// Returns a Uint8Array of size = max(sectionEndOffset) with sections placed at correct offsets.
-function buildSparseNcaBuffer(header, sections) {
-    // sections: [{ offset, data }, ...] — each section placed at its NCA offset
-    let maxEnd = NCA_HEADER_SIZE;
-    for (const s of sections) {
-        maxEnd = Math.max(maxEnd, s.offset + s.data.length);
-    }
-    const buf = new Uint8Array(maxEnd);
-    buf.set(header, 0);
-    for (const s of sections) {
-        buf.set(s.data, s.offset);
-    }
-    return buf;
-}
+// (SparseNcaView moved to ./range-source.js)
 
 async function decompressNCZ(nczReader) {
     const parsed = await parseNczSections(nczReader);
@@ -311,8 +310,6 @@ export async function update(readers, output, options = {}) {
 
     // Check if update Program NCA has BKTR section (cryptoType=4) for yanu-style merge
     const bktrMerge = options.bktrMerge !== false; // Enabled by default if BKTR section found
-    let baseProgramNcaData = null;
-    let updateProgramNcaData = null;
     let baseProgramEntry = null;
     let updateProgramEntry = null;
 
@@ -415,15 +412,16 @@ export async function update(readers, output, options = {}) {
         // ── Extract base Program NCA header ──────────────────────────────────
         log('info', `Reading base Program NCA header (${baseIsNcz ? 'from NCZ' : 'direct'})...`);
         let baseHeaderRaw;
+        let baseParsed = null;
         if (baseIsNcz) {
-            const parsed = await parseNczSections(baseReader);
+            baseParsed = await parseNczSections(baseReader);
             baseHeaderRaw = new Uint8Array(NCA_HEADER_SIZE);
             const decomp = new NCZDecompressor(baseReader);
             await decomp.decompress(() => {}, (chunk, offset) => {
                 if (offset >= NCA_HEADER_SIZE) return;
                 const end = Math.min(offset + chunk.length, NCA_HEADER_SIZE);
                 baseHeaderRaw.set(chunk.subarray(0, end - offset), offset);
-            }, parsed);
+            }, baseParsed);
         } else {
             baseHeaderRaw = await base.reader.read(baseProgramEntry.src.offset, NCA_HEADER_SIZE);
         }
@@ -448,9 +446,14 @@ export async function update(readers, output, options = {}) {
         const updateHeaderDec = decryptNcaHeader(updateHeaderRaw, keys);
         if (!updateHeaderDec) throw new Error('update: cannot decrypt update Program NCA header');
 
-        // ── Extract only needed sections (streaming NCZ, skip unneeded sections) ──
-        // Base: needs RomFS section for BKTR merge or RomFS extraction
-        // Update: needs BKTR section (if hasBktrRomfs) + ExeFS section
+        // ── Build NCA range sources (the NSZ→NSP converter's streaming discipline) ──
+        // Base: the whole NCA is served from the container — .nsp is random access,
+        // .nsz is ONE sequential NCZ decompression pass (base offsets are monotonic
+        // in merge order, so every needed range is served in-stream; nothing is
+        // buffered beyond transient 16 MB decrypt chunks).
+        // Update: patch physical offsets are NOT monotonic, so a .nsz update cannot
+        // stream — its BKTR + ExeFS sections are decompressed once and served from a
+        // zero-copy sparse view. A .nsp update is read on demand from the container.
         const baseRomfsSec = baseHeaderDec.sections.find(s => s.fsType === 3);
         const updateRomfsSec = updateHeaderDec.sections.find(s => s.fsType === 3 && s.cryptoType === 4);
         const updateExefsSec = updateHeaderDec.sections.find(s => s.fsType === 2);
@@ -458,58 +461,180 @@ export async function update(readers, output, options = {}) {
         if (!baseRomfsSec) throw new Error('update: base Program NCA has no RomFS section');
         if (!updateExefsSec) throw new Error('update: update Program NCA has no ExeFS section');
 
-        // Extract base RomFS section (skip ExeFS — saves ~3.3 GB)
-        log('info', `Extracting base RomFS section (0x${baseRomfsSec.offset.toString(16)}..0x${(baseRomfsSec.endOffset).toString(16)}) — skipping other sections...`);
-        await new Promise(r => setTimeout(r, 0));
-        const baseRomfsData = await extractNcaSection(
-            baseReader, baseRomfsSec.offset, baseRomfsSec.endOffset - baseRomfsSec.offset,
-            baseIsNcz, keys, log
-        );
+        let baseSource;
+        if (baseIsNcz) {
+            log('info', `Base .nsz: RomFS section (0x${baseRomfsSec.offset.toString(16)}..0x${(baseRomfsSec.endOffset).toString(16)}) streamed from NCZ, nothing buffered...`);
+            baseSource = new NczStreamSource(baseReader, baseParsed, log);
+        } else {
+            log('info', `Base .nsp: RomFS section (0x${baseRomfsSec.offset.toString(16)}..0x${(baseRomfsSec.endOffset).toString(16)}) read on demand from container...`);
+            baseSource = new FileRangeSource(base.reader, baseProgramEntry.src.offset, baseProgramEntry.src.size);
+        }
 
-        // Extract update BKTR section (small, ~2 MB)
-        let updateBktrData = null;
-        if (hasBktrRomfs && updateRomfsSec) {
-            log('info', `Extracting update BKTR section (0x${updateRomfsSec.offset.toString(16)}..0x${(updateRomfsSec.endOffset).toString(16)})...`);
+        let updateSource;
+        if (updateIsNcz) {
+            let updateBktrData = null;
+            if (hasBktrRomfs && updateRomfsSec) {
+                log('info', `Extracting update BKTR section (0x${updateRomfsSec.offset.toString(16)}..0x${(updateRomfsSec.endOffset).toString(16)})...`);
+                await new Promise(r => setTimeout(r, 0));
+                updateBktrData = await extractNcaSection(
+                    updateReader, updateRomfsSec.offset, updateRomfsSec.endOffset - updateRomfsSec.offset,
+                    updateIsNcz, keys, log
+                );
+            }
+            log('info', `Extracting update ExeFS section (0x${updateExefsSec.offset.toString(16)}..0x${(updateExefsSec.endOffset).toString(16)})...`);
             await new Promise(r => setTimeout(r, 0));
-            updateBktrData = await extractNcaSection(
-                updateReader, updateRomfsSec.offset, updateRomfsSec.endOffset - updateRomfsSec.offset,
+            const updateExefsData = await extractNcaSection(
+                updateReader, updateExefsSec.offset, updateExefsSec.endOffset - updateExefsSec.offset,
                 updateIsNcz, keys, log
             );
+            const updateSections = [];
+            if (updateBktrData) updateSections.push({ offset: updateRomfsSec.offset, data: updateBktrData });
+            updateSections.push({ offset: updateExefsSec.offset, data: updateExefsData });
+            const updateView = new SparseNcaView(updateHeaderRaw, updateSections);
+            updateSource = new ViewRangeSource(updateView);
+            log('info', `Update .nsz: ${updateSections.length} section(s) served from zero-copy sparse view (${updateView.length} bytes) — patch access is non-monotonic, so these stay buffered`);
+        } else {
+            log('info', 'Update .nsp: BKTR/ExeFS sections read on demand from container...');
+            updateSource = new FileRangeSource(update.reader, updateProgramEntry.src.offset, updateProgramEntry.src.size);
         }
 
-        // Extract update ExeFS section
-        log('info', `Extracting update ExeFS section (0x${updateExefsSec.offset.toString(16)}..0x${(updateExefsSec.endOffset).toString(16)})...`);
-        await new Promise(r => setTimeout(r, 0));
-        const updateExefsData = await extractNcaSection(
-            updateReader, updateExefsSec.offset, updateExefsSec.endOffset - updateExefsSec.offset,
-            updateIsNcz, keys, log
-        );
+        const baseInput = { headerRaw: baseHeaderRaw, source: baseSource };
+        const updateInput = { headerRaw: updateHeaderRaw, source: updateSource };
 
-        // ── Build sparse NCA buffers for mergeRomFS()/extractExefs() ──────────
-        // These functions expect full NCA data at absolute offsets; we provide
-        // sparse buffers with only header + needed sections (zeros between).
-        log('info', 'Building sparse NCA buffers...');
-        baseProgramNcaData = buildSparseNcaBuffer(baseHeaderRaw, [{ offset: baseRomfsSec.offset, data: baseRomfsData }]);
-        const baseSaved = baseProgramEntry.entry.size - baseProgramNcaData.length;
-        const savedUnit = baseSaved > 1024 * 1024
-            ? `${(baseSaved / 1024 / 1024).toFixed(1)} MB`
-            : `${(baseSaved / 1024).toFixed(0)} KB`;
-        log('info', `Base sparse NCA: header + RomFS → ${baseProgramNcaData.length} bytes (skipped ExeFS, saved ${savedUnit})`);
+        // ── Streaming path (seekable output + BKTR): no RomFS buffer ──────────
+        // ExeFS is buffered (small; needed for ACID zeroing); the large RomFS is
+        // streamed through the BKTR merge straight to the output. The NCA header,
+        // PFS0 htable, IVFC levels and the PFS0 Program/CNMT names are written with
+        // seek-back; the contentId comes from re-reading the written NCA.
+        const outRead = await buildRead(output);
+        if (hasBktrRomfs && outRead !== null) {
+            log('info', 'Streaming update (seekable output): ExeFS buffered, RomFS streamed via BKTR merge...');
+            await new Promise(r => setTimeout(r, 0));
 
-        const updateSections = [];
-        if (hasBktrRomfs && updateBktrData) {
-            updateSections.push({ offset: updateRomfsSec.offset, data: updateBktrData });
+            const exefsData = await extractExefs(updateInput, keys, updateTikData);
+            log('info', `ExeFS: ${exefsData.length} bytes`);
+            processNpdmAcid(exefsData, {
+                keepSig: options.keepNpdmAcidSig === true,
+                keepKey: options.keepNpdmAcidKey === true,
+            }, log);
+
+            const hdrKey = typeof keys.header_key === 'string' ? hexToBytes(keys.header_key) : keys.header_key;
+            const updateDecBytes = new AesXts(hdrKey).decrypt(updateHeaderRaw, 0);
+            const updateRomfsSecIdx = updateHeaderDec.sections.indexOf(updateRomfsSec);
+            const updateRomfsFsHdr = updateDecBytes.subarray(0x400 + updateRomfsSecIdx * 0x200, 0x400 + (updateRomfsSecIdx + 1) * 0x200);
+            const romfsDataSize = Number(new DataView(updateRomfsFsHdr.buffer, updateRomfsFsHdr.byteOffset + 0x98, 8).getBigUint64(0, true));
+            const programSize = programNcaSize(exefsData.length, romfsDataSize);
+            log('info', `Program NCA (streaming): exefs=${exefsData.length} romfs=${romfsDataSize} total=${programSize}`);
+
+            const adapter = await buildAdapter(output, outRead, { log, progress });
+
+            // Other NCAs (sorted by name) — same selection as the buffered path.
+            const otherNcas = [];
+            for (const e of update.cnmt.contentEntries) {
+                if (e.type === 6 || e.type === 1) continue;
+                const src = update.entries.find(x =>
+                    x.name.toLowerCase().startsWith(e.ncaId) && !x.name.toLowerCase().endsWith('.cnmt.nca'));
+                if (src) otherNcas.push({ name: src.name.replace(/\.ncz$/i, '.nca'), size: e.size, src });
+            }
+            otherNcas.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
+            // Placeholder Program id (32 zeros) + placeholder CNMT → PFS0 layout
+            // before the real contentId is known. Both names are fixed-length, so the
+            // header size is identical to the final one (only bytes are patched later).
+            const placeholderId = '0'.repeat(32);
+            const placeholderCnmt = await rebuildCnmtNca(base, update, keys, log, { hashHex: '0'.repeat(64), size: programSize });
+            const placeholderPw = new PFS0Writer(true);
+            placeholderPw.add(`${placeholderId}.nca`, programSize);
+            for (const m of otherNcas) placeholderPw.add(m.name, m.size);
+            placeholderPw.add(placeholderCnmt.name, placeholderCnmt.nca.length);
+            const pfs0Header = placeholderPw.buildHeader();
+            await adapter.write(0, pfs0Header.buffer);
+            log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${placeholderPw.files.length} members (placeholder names)`);
+
+            const programNcaPfs0Offset = pfs0Header.headerSize + placeholderPw.files[0].offset;
+
+            // Stream the Program NCA (ExeFS from buffer, RomFS via BKTR merge) → contentId.
+            const exefsBuf = exefsData;
+            const exefsChunk = 0x100000;
+            const { hashHex: contentId } = await packProgramNcaStream({
+                adapter, ncaOffset: programNcaPfs0Offset,
+                exefsSize: exefsBuf.length, romfsDataSize,
+                titleId: base.cnmt.titleId, keys,
+                streamExefs: async (emit) => {
+                    for (let off = 0; off < exefsBuf.length; off += exefsChunk) {
+                        const n = Math.min(exefsChunk, exefsBuf.length - off);
+                        await emit(exefsBuf.subarray(off, off + n), off);
+                    }
+                },
+                streamRomfs: async (emit) => {
+                    await mergeRomFS(baseInput, updateInput, {
+                        keys, baseTik: baseTikData, updateTik: updateTikData,
+                        onChunk: (chunk, off) => emit(chunk, off),
+                    });
+                },
+                log,
+            });
+
+            // Release the NCA sources — no longer needed after the merge.
+            baseSource = null;
+            updateSource = null;
+            baseParsed = null;
+
+            // Real names now: rebuild CNMT (real contentId) + patch PFS0 names.
+            const rebuilt = await rebuildCnmtNca(base, update, keys, log, { hashHex: contentId, size: programSize });
+            const realPw = new PFS0Writer(true);
+            realPw.add(`${contentId.slice(0, 32)}.nca`, programSize);
+            for (const m of otherNcas) realPw.add(m.name, m.size);
+            realPw.add(rebuilt.name, rebuilt.nca.length);
+            const realPfs0 = realPw.buildHeader();
+            if (realPfs0.headerSize !== pfs0Header.headerSize) {
+                throw new Error('update: PFS0 header size changed after contentId (placeholder/real name length mismatch)');
+            }
+            await adapter.write(0, realPfs0.buffer);
+            log('info', `Patched PFS0 names → ${contentId.slice(0, 32)}.nca, ${rebuilt.name}`);
+
+            // Write other NCAs (stream from source, sorted by name).
+            let written = programSize;
+            const totalData = realPw.files.reduce((s, f) => s + f.size, 0);
+            for (let i = 0; i < otherNcas.length; i++) {
+                const member = realPw.files[i + 1];
+                const src = otherNcas[i].src;
+                const pos = pfs0Header.headerSize + member.offset;
+                if (src.name.toLowerCase().endsWith('.ncz')) {
+                    const nczReader = new AdapterNCZReader(update.reader, src.offset, src.size);
+                    const parsed = await parseNczSections(nczReader);
+                    const decomp = new NCZDecompressor(nczReader);
+                    await decomp.decompress(
+                        (p) => progress((written + member.size * p) / totalData, `Decompressing ${member.name}...`),
+                        async (chunk, offset) => { await adapter.write(pos + offset, chunk); },
+                        parsed);
+                } else {
+                    await copyRange(update.reader, src.offset, member.size,
+                        (off, chunk) => adapter.write(pos + off, chunk));
+                }
+                log('info', `[WRITTEN] ${member.name} (${member.size} bytes)`);
+                written += member.size;
+            }
+
+            // Write CNMT last (matches yanu member order).
+            const cnmtPfs0Offset = pfs0Header.headerSize + realPw.files[realPw.files.length - 1].offset;
+            await adapter.write(cnmtPfs0Offset, rebuilt.nca);
+            log('info', `[WRITTEN] ${rebuilt.name} (${rebuilt.nca.length} bytes)`);
+
+            const totalSize = pfs0Header.headerSize + totalData;
+            log('info', `Updated NSP (streaming): ${realPw.files.length} members, ${totalSize} bytes`);
+            if (output.memory) {
+                return { size: totalSize, blob: collectBlob(adapter, totalSize), memberCount: realPw.files.length };
+            }
+            return { size: totalSize, memberCount: realPw.files.length };
         }
-        updateSections.push({ offset: updateExefsSec.offset, data: updateExefsData });
-        updateProgramNcaData = buildSparseNcaBuffer(updateHeaderRaw, updateSections);
-        log('info', `Update sparse NCA: header + ${updateSections.length} section(s) → ${updateProgramNcaData.length} bytes`);
 
         // ── Merge RomFS / Extract sections ───────────────────────────────────
         let mergedRomfs;
         if (hasBktrRomfs) {
-            log('info', 'Merging RomFS...');
+            log('info', `Merging RomFS (base streamed from ${baseIsNcz ? 'NCZ' : 'container'})...`);
             await new Promise(r => setTimeout(r, 0));
-            const mergeResult = await mergeRomFS(baseProgramNcaData, updateProgramNcaData, {
+            const mergeResult = await mergeRomFS(baseInput, updateInput, {
                 keys,
                 baseTik: baseTikData,
                 updateTik: updateTikData,
@@ -518,14 +643,14 @@ export async function update(readers, output, options = {}) {
             log('info', `Merged RomFS: ${mergedRomfs.length} bytes, ${mergeResult.relocEntries} reloc entries, ${mergeResult.subsectionEntries} subsection entries`);
         } else {
             log('info', 'Update has no RomFS section (ExeFS-only) — using base RomFS as-is...');
-            mergedRomfs = await extractRomfs(baseProgramNcaData, keys, baseTikData);
+            mergedRomfs = await extractRomfs(baseInput, keys, baseTikData);
             log('info', `Base RomFS: ${mergedRomfs.length} bytes`);
         }
 
         // Extract ExeFS from the update Program NCA
         log('info', 'Extracting ExeFS from update Program NCA...');
         await new Promise(r => setTimeout(r, 0));
-        const exefsData = await extractExefs(updateProgramNcaData, keys, updateTikData);
+        const exefsData = await extractExefs(updateInput, keys, updateTikData);
         log('info', `ExeFS: ${exefsData.length} bytes`);
 
         // hacpack parity: zero the ACID signature + key in main.npdm by default
@@ -535,9 +660,11 @@ export async function update(readers, output, options = {}) {
             keepKey: options.keepNpdmAcidKey === true,
         }, log);
 
-        // Release sparse buffers — no longer needed after section extraction
-        baseProgramNcaData = null;
-        updateProgramNcaData = null;
+        // Release the NCA sources — and, for a .nsz update, the buffered sections
+        // the sparse view references — no longer needed after merge + extraction.
+        baseSource = null;
+        updateSource = null;
+        baseParsed = null;
 
         // ── Prepare Program NCA and learn its real contentId (no writes) ───
         // Emulators require the shipped NCA filename to be `<contentId>.nca`

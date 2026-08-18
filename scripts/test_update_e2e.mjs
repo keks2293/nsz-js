@@ -22,10 +22,10 @@ class FileReader {
 }
 
 const DIR = '/Users/rmitkov/Downloads/Stardew Valley [NSZ]';
-const basePath = `${DIR}/Stardew Valley [0100E65002BB8000][v0] (0.87 GB).nsp`;
-const updatePath = `${DIR}/Stardew Valley [0100E65002BB8800][v1310720] (0.67 GB).nsp`;
+const basePath = process.env.BASE_PATH || `${DIR}/Stardew Valley [0100E65002BB8000][v0] (0.87 GB).nsp`;
+const updatePath = process.env.UPDATE_PATH || `${DIR}/Stardew Valley [0100E65002BB8800][v1310720] (0.67 GB).nsp`;
 const yanuPath = `${DIR}/Stardew Valley [0100E65002BB8000][v0] (0.87 GB) updated in yanu.nsp`;
-const outputPath = '/tmp/update_e2e_out.nsp';
+const outputPath = process.env.OUT_PATH || '/tmp/update_e2e_out.nsp';
 
 const keys = KeysParser.parse(fs.readFileSync('../static/prod.keys', 'utf8'));
 const log = (level, msg) => console.log(`[${level.toUpperCase()}] ${msg}`);
@@ -33,7 +33,7 @@ const progress = () => {};
 
 const baseReader = { name: 'Stardew Valley base.nsp', reader: new FileReader(basePath) };
 const updateReader = { name: 'Stardew Valley update.nsp', reader: new FileReader(updatePath) };
-const outputFd = fs.openSync(outputPath, 'w');
+const outputFd = fs.openSync(outputPath, 'w+');
 
 function pfs0Files(buf) {
   const pfs0 = new PFS0(buf);
