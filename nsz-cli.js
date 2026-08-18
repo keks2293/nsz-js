@@ -338,7 +338,9 @@ async function updateNSPs(inputPaths, outputDir, overwrite, rmSource, keysPath, 
             readers.push({ name: p, reader: new FileDescriptorReader(fd, 0, st.size) });
         }
 
-        const outputFd = fs.openSync(outPath, 'w');
+        // 'w+' (read+write): the streaming update path re-reads the written Program
+        // NCA to compute its contentId (mirrors hacpack's nca_calculate_hash).
+        const outputFd = fs.openSync(outPath, 'w+');
         fds.push(outputFd);
         let result;
         try {
