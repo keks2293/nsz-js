@@ -585,8 +585,9 @@ export async function update(readers, output, options = {}) {
 
             // Write CNMT last (matches yanu member order).
             const cnmtPfs0Offset = pfs0Header.headerSize + realPw.files[realPw.files.length - 1].offset;
+            const cnmtSize = rebuilt.nca.length;
             await adapter.write(cnmtPfs0Offset, rebuilt.nca);
-            log('info', `[WRITTEN] ${rebuilt.name} (${rebuilt.nca.length} bytes)`);
+            log('info', `[WRITTEN] ${rebuilt.name} (${cnmtSize} bytes)`);
 
             const totalSize = pfs0Header.headerSize + totalData;
             log('info', `Updated NSP (streaming): ${realPw.files.length} members, ${totalSize} bytes`);
@@ -706,8 +707,9 @@ export async function update(readers, output, options = {}) {
         // ── Write CNMT last (matches yanu member order) ───────────────────────
         const cnmtMemberIdx = finalPw.files.length - 1;
         const cnmtPfs0Offset = pfs0Header.headerSize + finalPw.files[cnmtMemberIdx].offset;
+        const cnmtSize = rebuilt.nca.length;
         await adapter.write(cnmtPfs0Offset, rebuilt.nca);
-        log('info', `[WRITTEN] ${rebuilt.name} (${rebuilt.nca.length} bytes)`);
+        log('info', `[WRITTEN] ${rebuilt.name} (${cnmtSize} bytes)`);
 
         const totalSize = pfs0Header.headerSize + totalData;
         log('info', `Updated NSP: ${finalPw.files.length} members, ${totalSize} bytes`);
