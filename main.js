@@ -4,6 +4,7 @@ import { ZstdDecompressor } from './crypto/zstd.js';
 class SWDownloader {
     #streamError = '';
     #swMsgHandler = null;
+    #pos = 0; // absolute byte position of the next byte in the stream
 
     constructor(outputName, iframe) {
         const base = location.pathname.substring(0, location.pathname.lastIndexOf('/') + 1) || '/';
@@ -49,16 +50,29 @@ class SWDownloader {
         this.iframe.src = url;
     }
 
+    get bytesWritten() { return this.#pos; }
+
+    #postChunk(bytes) {
+        this.sw.postMessage({ type: 'data', url: this.streamUrl, chunk: bytes.buffer }, [bytes.buffer]);
+    }
+
     async write({ type, position, data }) {
         if (type !== 'write' || !this.sw) return;
         if (this.#streamError) throw new Error('SW stream lost (' + this.#streamError + ')');
+        // Fill any gap with zeros (alignment padding, < 16 KB).
+        const gap = position - this.#pos;
+        if (gap > 0) this.#postChunk(new Uint8Array(gap));
         const view = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
         // If `view` is a subarray of a larger buffer, `view.buffer` is that larger
         // buffer — posting it would send the wrong bytes. Copy to a fresh buffer so
         // `chunk.buffer` is exactly the view's bytes (covers wasm-memory views too).
         const chunk = (view.byteLength !== view.buffer.byteLength)
             ? view.slice(0) : view;
-        this.sw.postMessage({ type: 'data', url: this.streamUrl, chunk: chunk.buffer }, [chunk.buffer]);
+        // Capture byteLength BEFORE #postChunk — the transfer detaches chunk.buffer,
+        // which causes chunk.byteLength to return 0 in Chrome (V8) per ES spec.
+        const len = chunk.byteLength;
+        this.#postChunk(chunk);
+        this.#pos = position + len;
     }
 
     async close() {
@@ -68,6 +82,18 @@ class SWDownloader {
         }
         if (this.sw) this.sw.postMessage({ type: 'end', url: this.streamUrl });
     }
+}
+
+// The SW stream is sequential and the main thread never observes the actual
+// delivered byte count — the success log shows the *expected* size. Compare the
+// SW's tracked position against the expected size to catch a dropped gap or a
+// mis-ordered write (a seekable FSA has no bytesWritten, so this is SW-only).
+function checkSwDelivered(writable, expectedSize) {
+    if (writable && typeof writable.bytesWritten === 'number' && typeof expectedSize === 'number' && writable.bytesWritten !== expectedSize) {
+        if (window.addLog) window.addLog('warn', `SW delivered ${writable.bytesWritten} bytes, expected ${expectedSize} — output may be corrupt`);
+        return false;
+    }
+    return true;
 }
 
 window.addEventListener('error', (e) => {
@@ -599,6 +625,7 @@ async function main() {
                         verify
                     });
                 }
+                checkSwDelivered(writable, result.size);
 
                 if (writable) {
                     await writable.close();
@@ -703,6 +730,7 @@ async function main() {
                 writable,
                 nodelta: noDeltas,
             });
+            checkSwDelivered(writable, result.size);
             if (writable) {
                 await writable.close();
             } else {
@@ -800,6 +828,7 @@ async function main() {
                 keepNpdmAcidSig: keepAcidSig,
                 keepNpdmAcidKey: keepAcidKey,
             });
+            checkSwDelivered(writable, result.size);
             if (writable) {
                 await writable.close();
             } else {
