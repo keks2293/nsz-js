@@ -53,8 +53,11 @@ class SWDownloader {
         if (type !== 'write' || !this.sw) return;
         if (this.#streamError) throw new Error('SW stream lost (' + this.#streamError + ')');
         const view = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-        const wasmMem = ZstdDecompressor.wasmBuffer;
-        const chunk = (wasmMem && view.buffer === wasmMem) ? view.slice(0) : view;
+        // If `view` is a subarray of a larger buffer, `view.buffer` is that larger
+        // buffer — posting it would send the wrong bytes. Copy to a fresh buffer so
+        // `chunk.buffer` is exactly the view's bytes (covers wasm-memory views too).
+        const chunk = (view.byteLength !== view.buffer.byteLength)
+            ? view.slice(0) : view;
         this.sw.postMessage({ type: 'data', url: this.streamUrl, chunk: chunk.buffer }, [chunk.buffer]);
     }
 
