@@ -964,6 +964,64 @@ export function processNpdmAcid(exefsData, opts = {}, log = () => {}) {
     return exefsData;
 }
 
+// Streaming equivalent of processNpdmAcid(): returns an async filter(chunk, off)
+// to run over the ExeFS PFS0 data stream. It locates main.npdm from the PFS0 header
+// (first chunk), reads acid_offset from the npdm header (+0x78), and zeroes the
+// ACID region [sigStart, sigStart+0x200) in place as it streams by — so the ExeFS
+// is never buffered. Respects keepSig/keepKey exactly like processNpdmAcid.
+export function createExefsAcidFilter(opts = {}, log = () => {}) {
+    const _log = typeof log === 'function' ? log : () => {};
+    const keepSig = opts.keepSig === true;
+    const keepKey = opts.keepKey === true;
+    if (keepSig && keepKey) return async () => {};
+    let npdmOffset = -1;   // -1 unknown, -2 = no main.npdm
+    let sigStart = -1;
+    let pfs0Parsed = false;
+    return async function filter(chunk, off) {
+        if (!pfs0Parsed) {
+            if (off !== 0) return;
+            pfs0Parsed = true;
+            const pfs0 = new PFS0(chunk);
+            const npdm = pfs0.getFiles().find(f => f.name === 'main.npdm');
+            if (!npdm) {
+                _log('warn', 'processNpdmAcid: main.npdm not found in ExeFS — skipping');
+                npdmOffset = -2;
+                return;
+            }
+            npdmOffset = npdm.offset;
+            if (npdmOffset + 0x7C <= chunk.length) {
+                const v = new DataView(chunk.buffer, chunk.byteOffset + npdmOffset + 0x78, 4);
+                sigStart = npdmOffset + v.getUint32(0, true);
+                _log('info', `  ACID (stream): main.npdm @0x${npdmOffset.toString(16)}, region @0x${sigStart.toString(16)}..0x${(sigStart + 0x200).toString(16)}`);
+            }
+        } else if (npdmOffset !== -2 && sigStart < 0) {
+            // npdm header not in the first chunk — read acid_offset when it arrives.
+            const hdrEnd = npdmOffset + 0x7C;
+            if (off <= npdmOffset && off + chunk.length >= hdrEnd) {
+                const local = npdmOffset + 0x78 - off;
+                const v = new DataView(chunk.buffer, chunk.byteOffset + local, 4);
+                sigStart = npdmOffset + v.getUint32(0, true);
+                _log('info', `  ACID (stream): region @0x${sigStart.toString(16)}..0x${(sigStart + 0x200).toString(16)}`);
+            }
+        }
+        if (npdmOffset === -2 || sigStart < 0) return;
+        // Zero the ACID region [sigStart, sigStart+0x200) in place as it streams by.
+        const regionEnd = sigStart + 0x200;
+        const a = Math.max(off, sigStart);
+        const b = Math.min(off + chunk.length, regionEnd);
+        if (b <= a) return;
+        const sigEnd = sigStart + 0x100;
+        if (!keepSig) {
+            const s0 = Math.max(a, sigStart), s1 = Math.min(b, sigEnd);
+            if (s1 > s0) chunk.fill(0, s0 - off, s1 - off);
+        }
+        if (!keepKey) {
+            const k0 = Math.max(a, sigEnd), k1 = Math.min(b, regionEnd);
+            if (k1 > k0) chunk.fill(0, k0 - off, k1 - off);
+        }
+    };
+}
+
 // ── Streaming NCA pack ───────────────────────────────────────────────────────
 // Writes NCA to output adapter instead of buffering in memory.
 // Output adapter: { write(offset, data), size }
