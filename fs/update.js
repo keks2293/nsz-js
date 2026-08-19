@@ -649,8 +649,13 @@ export async function update(readers, output, options = {}) {
                     await emit(chunk, off);
                 });
             };
+            const _baseReaderRef = baseReader;
+            const _baseParsedRef = baseParsed;
             const makeStreamRomfs = () => async (emit) => {
-                await mergeRomFS(baseInput, updateInput, {
+                const freshBase = baseIsNcz
+                    ? { headerRaw: baseHeaderRaw, source: new NczStreamSource(_baseReaderRef, _baseParsedRef, log) }
+                    : baseInput;
+                await mergeRomFS(freshBase, updateInput, {
                     keys, baseTik: baseTikData, updateTik: updateTikData,
                     onChunk: (chunk, off) => emit(chunk, off),
                 });
