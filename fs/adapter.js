@@ -10,11 +10,13 @@ async function buildAdapter(output, read, callbacks) {
         };
     }
     if (output.writable) {
-        return {
-            read,
-            write: (offset, data) => output.writable.write({ type: 'write', position: offset, data }),
-            log, progress, createHash,
-        };
+        const w = output.writable;
+        // FSA (FileSystemWritableFileStream) supports {type,position,data}; SWDownloader uses (pos, data).
+        // Detect FSA by its seek() method (SWDownloader doesn't have it).
+        const write = typeof w.seek === 'function'
+            ? (offset, data) => w.write({ type: 'write', position: offset, data })
+            : (offset, data) => w.write(offset, data);
+        return { read, write, log, progress, createHash };
     }
     if (output.memory) {
         const chunks = [];
