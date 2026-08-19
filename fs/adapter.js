@@ -10,11 +10,12 @@ async function buildAdapter(output, read, callbacks) {
         };
     }
     if (output.writable) {
-        return {
-            read,
-            write: (offset, data) => output.writable.write({ type: 'write', position: offset, data }),
-            log, progress, createHash,
-        };
+        const w = output.writable;
+        // FSA (FileSystemWritableFileStream) has seek(); SWDownloader doesn't.
+        const write = typeof w.seek === 'function'
+            ? async (offset, data) => { await w.seek(offset); await w.write(data); }
+            : (offset, data) => w.write(offset, data);
+        return { read, write, log, progress, createHash };
     }
     if (output.memory) {
         const chunks = [];
