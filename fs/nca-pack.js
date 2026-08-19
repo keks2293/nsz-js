@@ -1300,7 +1300,8 @@ function _twoPassLayout(exefsSize, romfsDataSize) {
     const exePaddingSize = exeSectionSize - (exeHtableSize + exefsSize);
     const romPaddingSize = romSectionSize - (hashLevelsSize + romfsDataSize);
     return { exeHtableSize, exeSectionSize, sec0Start, sec1Start, sec0DataOff, sec1DataOff,
-             hashLevelsSize, romSectionSize, ncaSize, exePaddingSize, romPaddingSize };
+             hashLevelsSize, romSectionSize, ncaSize, exePaddingSize, romPaddingSize,
+             exefsSize, romfsDataSize };
 }
 
 // Phase 1: compute metadata + contentId (no writes). Returns meta for Phase 2.
@@ -1371,7 +1372,7 @@ export async function writeProgramNcaTwoPass({ meta, adapter, ncaOffset, streamE
     await streamExefs(async (chunk, off) => {
         await adapter.write(ncaOffset + L.sec0DataOff + off, chunk);
     });
-    if (L.exePaddingSize > 0) await adapter.write(ncaOffset + L.sec0DataOff + exefsSize, new Uint8Array(L.exePaddingSize));
+    if (L.exePaddingSize > 0) await adapter.write(ncaOffset + L.sec0DataOff + L.exefsSize, new Uint8Array(L.exePaddingSize));
     let lvOff = 0;
     for (const lvl of romIvfc.hashLevels) {
         await adapter.write(ncaOffset + L.sec1Start + lvOff, lvl);
@@ -1380,7 +1381,7 @@ export async function writeProgramNcaTwoPass({ meta, adapter, ncaOffset, streamE
     await streamRomfs(async (chunk, off) => {
         await adapter.write(ncaOffset + L.sec1DataOff + off, chunk);
     });
-    if (L.romPaddingSize > 0) await adapter.write(ncaOffset + L.sec1DataOff + romfsDataSize, new Uint8Array(L.romPaddingSize));
+    if (L.romPaddingSize > 0) await adapter.write(ncaOffset + L.sec1DataOff + L.romfsDataSize, new Uint8Array(L.romPaddingSize));
 }
 
 export async function extractControl(updateNcaData, keys) {
