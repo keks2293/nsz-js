@@ -855,6 +855,63 @@ export async function extractRomfs(ncaData, keys, tikData = null) {
     return decrypted;
 }
 
+export async function extractRomfsStream(ncaData, keys, tikData, onChunk) {
+    const hdrKey = typeof keys.header_key === 'string'
+        ? hexToBytes(keys.header_key)
+        : new Uint8Array(keys.header_key);
+    const xts = new AesXts(hdrKey);
+    const decHeader = xts.decrypt(ncaHeaderRaw(ncaData), 0);
+
+    let titlekey = null;
+    if (tikData && tikData.length >= 0x190) {
+        const titlekek = typeof keys.titlekek_02 === 'string' ? hexToBytes(keys.titlekek_02) : keys.titlekek_02;
+        titlekey = new AesEcb(titlekek).decrypt(tikData.subarray(0x180, 0x190));
+    }
+    if (!titlekey) {
+        titlekey = deriveTitlekey(decHeader, keys);
+    }
+
+    let romfsIdx = -1;
+    let romfsFsHdr = null;
+    for (let i = 0; i < 4; i++) {
+        const fh = decHeader.subarray(0x400 + i * 0x200, 0x400 + i * 0x200 + 0x200);
+        if (fh[0x03] === 3) { romfsIdx = i; romfsFsHdr = fh; break; }
+    }
+    if (romfsIdx < 0) throw new Error('extractRomfsStream: RomFS section not found');
+
+    const sectionCtrRaw = romfsFsHdr.subarray(0x140, 0x148);
+    const sectionCtrRev = new Uint8Array(8);
+    for (let i = 0; i < 8; i++) sectionCtrRev[i] = sectionCtrRaw[7 - i];
+
+    const mediaOffset = new DataView(decHeader.buffer, decHeader.byteOffset + 0x240 + romfsIdx * 0x10, 4).getUint32(0, true);
+    const mediaEnd = new DataView(decHeader.buffer, decHeader.byteOffset + 0x240 + romfsIdx * 0x10 + 4, 4).getUint32(0, true);
+    const sectionOffset = mediaOffset * 0x200;
+    const mediaSize = mediaEnd * 0x200 - sectionOffset;
+
+    if (!titlekey || mediaSize === 0) {
+        let done = 0;
+        while (done < mediaSize) {
+            const n = Math.min(0x100000, mediaSize - done);
+            const raw = await ncaRead(ncaData, sectionOffset + done, n);
+            await onChunk(raw, done);
+            done += n;
+        }
+        return mediaSize;
+    }
+
+    const c = new AesCtr(titlekey, sectionCtrRev);
+    c.seek(sectionOffset);
+    let done = 0;
+    while (done < mediaSize) {
+        const n = Math.min(0x100000, mediaSize - done);
+        const cipher = await ncaRead(ncaData, sectionOffset + done, n);
+        const dec = await c.decrypt(cipher);
+        await onChunk(dec, done);
+        done += n;
+    }
+    return mediaSize;
+}
+
 // ── NPDM ACID zeroing (hacpack parity) ───────────────────────────────────────
 // When packing a Program NCA, hacpack (The-4n, v1.36) zeros the ACID
 // signature + key in main.npdm by default: signature[0x100] + modulus[0x100]
@@ -1214,6 +1271,116 @@ export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romf
     const hashHex = h.hex();
     _log('info', `  ----> Program NCA (streaming): ${ncaSize} bytes sha256=${hashHex}`);
     return { hashHex, size: ncaSize };
+}
+
+// ── Two-pass Program NCA pack (sequential output, no seek-back, no re-read) ─
+// For outputs that cannot seek or read back (SW download, FSA without read()).
+//
+// Phase 1 — computeProgramNcaContentId: compute metadata + contentId (4 source reads)
+// Phase 2 — writeProgramNcaTwoPass: write NCA sequentially (2 source reads)
+//
+// Total: 6 source reads, ~200 KB memory (hash levels + header only).
+// streamExefs / streamRomfs must be re-callable (called up to 3× each).
+
+function _twoPassLayout(exefsSize, romfsDataSize) {
+    const exeHtableSize = pad200(Math.ceil(exefsSize / 0x10000) * 0x20);
+    const exeSectionSize = pad200(exeHtableSize + exefsSize);
+    const sec0Start = NCA_HEADER_SIZE;
+    const sec1Start = sec0Start + exeSectionSize;
+    const sec0DataOff = sec0Start + exeHtableSize;
+    const h1 = pad4000(Math.ceil(romfsDataSize / 0x4000) * 0x20);
+    const h2 = pad4000(Math.ceil(h1 / 0x4000) * 0x20);
+    const h3 = pad4000(Math.ceil(h2 / 0x4000) * 0x20);
+    const h4 = pad4000(Math.ceil(h3 / 0x4000) * 0x20);
+    const h5 = pad4000(Math.ceil(h4 / 0x4000) * 0x20);
+    const hashLevelsSize = h1 + h2 + h3 + h4 + h5;
+    const sec1DataOff = sec1Start + hashLevelsSize;
+    const romSectionSize = pad4000(hashLevelsSize + romfsDataSize);
+    const ncaSize = sec1Start + romSectionSize;
+    const exePaddingSize = exeSectionSize - (exeHtableSize + exefsSize);
+    const romPaddingSize = romSectionSize - (hashLevelsSize + romfsDataSize);
+    return { exeHtableSize, exeSectionSize, sec0Start, sec1Start, sec0DataOff, sec1DataOff,
+             hashLevelsSize, romSectionSize, ncaSize, exePaddingSize, romPaddingSize };
+}
+
+// Phase 1: compute metadata + contentId (no writes). Returns meta for Phase 2.
+export async function computeProgramNcaContentId({ exefsSize, romfsDataSize, titleId, keys, streamExefs, streamRomfs, log }) {
+    const _log = typeof log === 'function' ? log : () => {};
+    const L = _twoPassLayout(exefsSize, romfsDataSize);
+    _log('info', `  Two-pass NCA layout: ExeFS=0x${L.exeSectionSize.toString(16)} (htable 0x${L.exeHtableSize.toString(16)}), RomFS=0x${L.romSectionSize.toString(16)} (levels 0x${L.hashLevelsSize.toString(16)}), total=0x${L.ncaSize.toString(16)}`);
+
+    _log('info', '  Pass 1: Computing hash metadata...');
+    const pfs0 = new StreamingPfs0Hasher(0x10000);
+    await streamExefs(async (chunk, off) => { pfs0.update(chunk); });
+    const exeHash = pfs0.finalize();
+
+    const ivfc = new StreamingIvfcHasher(romfsDataSize);
+    await streamRomfs(async (chunk, off) => { ivfc.update(chunk); });
+    const romIvfc = ivfc.finalize();
+
+    const sec0End = L.sec0Start + L.exeSectionSize;
+    const sec1End = L.sec1Start + L.romSectionSize;
+    const header = buildNcaHeader(titleId, [
+        { offset: L.sec0Start, endOffset: sec0End, size: L.exeSectionSize },
+        { offset: L.sec1Start, endOffset: sec1End, size: L.romSectionSize },
+    ], keys);
+    const exeFsHeader = buildPfs0FsHeader(0x01);
+    {
+        const ev = new DataView(exeFsHeader.buffer);
+        exeFsHeader.set(exeHash.masterHash, 0x08);
+        ev.setUint32(0x28, 0x10000, true);
+        ev.setUint32(0x2C, 2, true);
+        ev.setBigUint64(0x38, BigInt(exeHash.rawHashSize), true);
+        ev.setBigUint64(0x40, BigInt(L.exeHtableSize), true);
+        ev.setBigUint64(0x48, BigInt(exefsSize), true);
+    }
+    header.set(exeFsHeader, 0x400);
+    const romFsHeader = buildRomfsFsHeader(0x01);
+    romFsHeader.set(romIvfc.ivfcHeader, 0x08);
+    header.set(romFsHeader, 0x600);
+    header.set(hexToBytes(sha256(header.subarray(0x400, 0x600))), 0x280);
+    header.set(hexToBytes(sha256(header.subarray(0x600, 0x800))), 0x2A0);
+    writeU64LE(header, 0x208, L.ncaSize);
+    const hdrKey = typeof keys.header_key === 'string' ? hexToBytes(keys.header_key)
+        : (keys.header_key instanceof Uint8Array ? keys.header_key : new Uint8Array(keys.header_key));
+    const encHeader = new AesXts(hdrKey).encrypt(header);
+
+    _log('info', '  Pass 1: Computing contentId (re-stream)...');
+    const h = new SHA256();
+    h.update(encHeader);
+    h.update(exeHash.hashTable);
+    await streamExefs(async (chunk) => { h.update(chunk); });
+    if (L.exePaddingSize > 0) h.update(new Uint8Array(L.exePaddingSize));
+    for (const lvl of romIvfc.hashLevels) h.update(lvl);
+    await streamRomfs(async (chunk) => { h.update(chunk); });
+    if (L.romPaddingSize > 0) h.update(new Uint8Array(L.romPaddingSize));
+    const contentId = h.hex();
+    _log('info', `  ----> Program NCA (two-pass): ${L.ncaSize} bytes sha256=${contentId}`);
+
+    return { contentId, size: L.ncaSize, meta: { encHeader, exeHash, romIvfc, L } };
+}
+
+// Phase 2: write NCA sequentially (no seek-back). Uses meta from Phase 1.
+export async function writeProgramNcaTwoPass({ meta, adapter, ncaOffset, streamExefs, streamRomfs, log }) {
+    const _log = typeof log === 'function' ? log : () => {};
+    const { encHeader, exeHash, romIvfc, L } = meta;
+    _log('info', '  Pass 2: Writing NCA to output...');
+
+    await adapter.write(ncaOffset, encHeader);
+    await adapter.write(ncaOffset + L.sec0Start, exeHash.hashTable);
+    await streamExefs(async (chunk, off) => {
+        await adapter.write(ncaOffset + L.sec0DataOff + off, chunk);
+    });
+    if (L.exePaddingSize > 0) await adapter.write(ncaOffset + L.sec0DataOff + exefsSize, new Uint8Array(L.exePaddingSize));
+    let lvOff = 0;
+    for (const lvl of romIvfc.hashLevels) {
+        await adapter.write(ncaOffset + L.sec1Start + lvOff, lvl);
+        lvOff += lvl.length;
+    }
+    await streamRomfs(async (chunk, off) => {
+        await adapter.write(ncaOffset + L.sec1DataOff + off, chunk);
+    });
+    if (L.romPaddingSize > 0) await adapter.write(ncaOffset + L.sec1DataOff + romfsDataSize, new Uint8Array(L.romPaddingSize));
 }
 
 export async function extractControl(updateNcaData, keys) {

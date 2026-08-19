@@ -7,7 +7,7 @@ import { Cnmt } from './cnmt.js';
 import { sha256 } from '../crypto/sha256.js';
 import { mergeRomFS } from './bktr-merge.js';
 import { FileRangeSource, NczStreamSource, ViewRangeSource, SparseNcaView } from './range-source.js';
-import { preparePlaintextProgramNca, writePlaintextProgramNca, packProgramNcaStream, extractExefsStream, createExefsAcidFilter, packMetaNca, extractExefs, extractRomfs, processNpdmAcid } from './nca-pack.js';
+import { preparePlaintextProgramNca, writePlaintextProgramNca, packProgramNcaStream, computeProgramNcaContentId, writeProgramNcaTwoPass, extractExefsStream, extractRomfsStream, createExefsAcidFilter, packMetaNca, extractExefs, extractRomfs, processNpdmAcid } from './nca-pack.js';
 import { AesXts } from '../crypto/aes-ops.mjs';
 import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE } from './nca-utils.js';
 
@@ -242,8 +242,60 @@ async function decompressNCZ(nczReader) {
     return result;
 }
 
+// ── Shared helpers for BKTR streaming paths ──────────────────────────────────
+
+function collectOtherNcas(update) {
+    const otherNcas = [];
+    for (const e of update.cnmt.contentEntries) {
+        if (e.type === 6 || e.type === 1) continue;
+        const src = update.entries.find(x =>
+            x.name.toLowerCase().startsWith(e.ncaId) && !x.name.toLowerCase().endsWith('.cnmt.nca'));
+        if (src) otherNcas.push({ name: src.name.replace(/\.ncz$/i, '.nca'), size: e.size, src });
+    }
+    otherNcas.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return otherNcas;
+}
+
+async function writeOtherNcas(adapter, update, pfs0Header, pw, otherNcas, written, totalData, progress, log) {
+    for (let i = 0; i < otherNcas.length; i++) {
+        const member = pw.files[i + 1];
+        const src = otherNcas[i].src;
+        const pos = pfs0Header.headerSize + member.offset;
+        if (src.name.toLowerCase().endsWith('.ncz')) {
+            const nczReader = new AdapterNCZReader(update.reader, src.offset, src.size);
+            const parsed = await parseNczSections(nczReader);
+            const decomp = new NCZDecompressor(nczReader);
+            await decomp.decompress(
+                (p) => progress((written + member.size * p) / totalData, `Decompressing ${member.name}...`),
+                async (chunk, offset) => { await adapter.write(pos + offset, chunk); },
+                parsed);
+        } else {
+            await copyRange(update.reader, src.offset, member.size,
+                (off, chunk) => adapter.write(pos + off, chunk));
+        }
+        log('info', `[WRITTEN] ${member.name} (${member.size} bytes)`);
+        written += member.size;
+    }
+    return written;
+}
+
+async function writeCnmt(adapter, pfs0Header, pw, rebuilt, log) {
+    const cnmtPfs0Offset = pfs0Header.headerSize + pw.files[pw.files.length - 1].offset;
+    await adapter.write(cnmtPfs0Offset, rebuilt.nca);
+    log('info', `[WRITTEN] ${rebuilt.name} (${rebuilt.nca.length} bytes)`);
+}
+
+function finishOutput(adapter, pfs0Header, totalData, pw, output, log) {
+    const totalSize = pfs0Header.headerSize + totalData;
+    log('info', `Updated NSP: ${pw.files.length} members, ${totalSize} bytes`);
+    if (output.memory) {
+        return { size: totalSize, blob: collectBlob(adapter, totalSize), memberCount: pw.files.length };
+    }
+    return { size: totalSize, memberCount: pw.files.length };
+}
+
 export async function update(readers, output, options = {}) {
-    const { log = () => {}, progress = () => {}, keys = null } = options;
+    const { log = () => {}, progress = () => {}, keys = null, updateMode = 'auto' } = options;
 
     if (!Array.isArray(readers) || readers.length !== 2) {
         throw new Error('update: exactly two inputs required (base + update)');
@@ -485,7 +537,7 @@ export async function update(readers, output, options = {}) {
         // PFS0 htable, IVFC levels and the PFS0 Program/CNMT names are written with
         // seek-back; the contentId comes from re-reading the written NCA.
         const outRead = await buildRead(output);
-        if (hasBktrRomfs && outRead !== null) {
+        if (hasBktrRomfs && outRead !== null && updateMode !== 'buffered') {
             log('info', 'Streaming update (seekable output): ExeFS + RomFS streamed via BKTR merge (no data buffer)...');
             await new Promise(r => setTimeout(r, 0));
 
@@ -503,15 +555,7 @@ export async function update(readers, output, options = {}) {
 
             const adapter = await buildAdapter(output, outRead, { log, progress });
 
-            // Other NCAs (sorted by name) — same selection as the buffered path.
-            const otherNcas = [];
-            for (const e of update.cnmt.contentEntries) {
-                if (e.type === 6 || e.type === 1) continue;
-                const src = update.entries.find(x =>
-                    x.name.toLowerCase().startsWith(e.ncaId) && !x.name.toLowerCase().endsWith('.cnmt.nca'));
-                if (src) otherNcas.push({ name: src.name.replace(/\.ncz$/i, '.nca'), size: e.size, src });
-            }
-            otherNcas.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+            const otherNcas = collectOtherNcas(update);
 
             // Placeholder Program id (32 zeros) + placeholder CNMT → PFS0 layout
             // before the real contentId is known. Both names are fixed-length, so the
@@ -528,9 +572,6 @@ export async function update(readers, output, options = {}) {
 
             const programNcaPfs0Offset = pfs0Header.headerSize + placeholderPw.files[0].offset;
 
-            // Stream the Program NCA (ExeFS + RomFS via BKTR merge) → contentId.
-            // ExeFS is streamed (never buffered); the ACID zeroing is applied as a
-            // filter over the stream (createExefsAcidFilter).
             const acidFilter = createExefsAcidFilter({
                 keepSig: options.keepNpdmAcidSig === true,
                 keepKey: options.keepNpdmAcidKey === true,
@@ -554,12 +595,10 @@ export async function update(readers, output, options = {}) {
                 log,
             });
 
-            // Release the NCA sources — no longer needed after the merge.
             baseSource = null;
             updateSource = null;
             baseParsed = null;
 
-            // Real names now: rebuild CNMT (real contentId) + patch PFS0 names.
             const rebuilt = await rebuildCnmtNca(base, update, keys, log, { hashHex: contentId, size: programSize });
             const realPw = new PFS0Writer(true);
             realPw.add(`${contentId.slice(0, 32)}.nca`, programSize);
@@ -572,86 +611,186 @@ export async function update(readers, output, options = {}) {
             await adapter.write(0, realPfs0.buffer);
             log('info', `Patched PFS0 names → ${contentId.slice(0, 32)}.nca, ${rebuilt.name}`);
 
-            // Write other NCAs (stream from source, sorted by name).
-            let written = programSize;
             const totalData = realPw.files.reduce((s, f) => s + f.size, 0);
-            for (let i = 0; i < otherNcas.length; i++) {
-                const member = realPw.files[i + 1];
-                const src = otherNcas[i].src;
-                const pos = pfs0Header.headerSize + member.offset;
-                if (src.name.toLowerCase().endsWith('.ncz')) {
-                    const nczReader = new AdapterNCZReader(update.reader, src.offset, src.size);
-                    const parsed = await parseNczSections(nczReader);
-                    const decomp = new NCZDecompressor(nczReader);
-                    await decomp.decompress(
-                        (p) => progress((written + member.size * p) / totalData, `Decompressing ${member.name}...`),
-                        async (chunk, offset) => { await adapter.write(pos + offset, chunk); },
-                        parsed);
-                } else {
-                    await copyRange(update.reader, src.offset, member.size,
-                        (off, chunk) => adapter.write(pos + off, chunk));
-                }
-                log('info', `[WRITTEN] ${member.name} (${member.size} bytes)`);
-                written += member.size;
-            }
-
-            // Write CNMT last (matches yanu member order).
-            const cnmtPfs0Offset = pfs0Header.headerSize + realPw.files[realPw.files.length - 1].offset;
-            const cnmtSize = rebuilt.nca.length;
-            await adapter.write(cnmtPfs0Offset, rebuilt.nca);
-            log('info', `[WRITTEN] ${rebuilt.name} (${cnmtSize} bytes)`);
-
-            const totalSize = pfs0Header.headerSize + totalData;
-            log('info', `Updated NSP (streaming): ${realPw.files.length} members, ${totalSize} bytes`);
-            if (output.memory) {
-                return { size: totalSize, blob: collectBlob(adapter, totalSize), memberCount: realPw.files.length };
-            }
-            return { size: totalSize, memberCount: realPw.files.length };
+            await writeOtherNcas(adapter, update, pfs0Header, realPw, otherNcas, programSize, totalData, progress, log);
+            await writeCnmt(adapter, pfs0Header, realPw, rebuilt, log);
+            return finishOutput(adapter, pfs0Header, totalData, realPw, output, log);
         }
 
-        // ── Merge RomFS / Extract sections ───────────────────────────────────
-        let mergedRomfs;
-        if (hasBktrRomfs) {
-            log('info', `Merging RomFS (base streamed from ${baseIsNcz ? 'NCZ' : 'container'})...`);
+        // ── Two-pass path (sequential output + BKTR merge): no data buffer ──
+        // Pass 1: stream BKTR merge → compute contentId (hash metadata only).
+        // Pass 2: stream BKTR merge → write NCA sequentially to output.
+        // Memory: ~200 KB + streaming buffers (vs ~700 MB for buffered path).
+        // 6× source reads (4 for contentId, 2 for write) — trades I/O for memory.
+        if (hasBktrRomfs && outRead === null && updateMode !== 'buffered') {
+            log('info', 'Two-pass update (sequential output): BKTR merge, 6× source reads, ~200 KB memory...');
             await new Promise(r => setTimeout(r, 0));
-            const mergeResult = await mergeRomFS(baseInput, updateInput, {
-                keys,
-                baseTik: baseTikData,
-                updateTik: updateTikData,
+
+            const hdrKey = typeof keys.header_key === 'string' ? hexToBytes(keys.header_key) : keys.header_key;
+            const updateDecBytes = new AesXts(hdrKey).decrypt(updateHeaderRaw, 0);
+            const updateRomfsSecIdx = updateHeaderDec.sections.indexOf(updateRomfsSec);
+            const updateRomfsFsHdr = updateDecBytes.subarray(0x400 + updateRomfsSecIdx * 0x200, 0x400 + (updateRomfsSecIdx + 1) * 0x200);
+            const romfsDataSize = Number(new DataView(updateRomfsFsHdr.buffer, updateRomfsFsHdr.byteOffset + 0x98, 8).getBigUint64(0, true));
+            const updateExefsSecIdx = updateHeaderDec.sections.indexOf(updateExefsSec);
+            const updateExefsFsHdr = updateDecBytes.subarray(0x400 + updateExefsSecIdx * 0x200, 0x400 + (updateExefsSecIdx + 1) * 0x200);
+            const exefsSize = Number(new DataView(updateExefsFsHdr.buffer, updateExefsFsHdr.byteOffset + 0x48, 8).getBigUint64(0, true));
+            const programSize = programNcaSize(exefsSize, romfsDataSize);
+            log('info', `Program NCA (two-pass): exefs=${exefsSize} romfs=${romfsDataSize} total=${programSize}`);
+
+            const adapter = await buildAdapter(output, null, { log, progress });
+
+            const makeStreamExefs = () => async (emit) => {
+                const acidFilter = createExefsAcidFilter({
+                    keepSig: options.keepNpdmAcidSig === true,
+                    keepKey: options.keepNpdmAcidKey === true,
+                }, log);
+                await extractExefsStream(updateInput, keys, updateTikData, async (chunk, off) => {
+                    await acidFilter(chunk, off);
+                    await emit(chunk, off);
+                });
+            };
+            const makeStreamRomfs = () => async (emit) => {
+                await mergeRomFS(baseInput, updateInput, {
+                    keys, baseTik: baseTikData, updateTik: updateTikData,
+                    onChunk: (chunk, off) => emit(chunk, off),
+                });
+            };
+
+            const { contentId, size: computedSize, meta } = await computeProgramNcaContentId({
+                exefsSize, romfsDataSize, titleId: base.cnmt.titleId, keys,
+                streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
             });
-            mergedRomfs = mergeResult.mergedData;
-            log('info', `Merged RomFS: ${mergedRomfs.length} bytes, ${mergeResult.relocEntries} reloc entries, ${mergeResult.subsectionEntries} subsection entries`);
-        } else {
-            log('info', 'Update has no RomFS section (ExeFS-only) — using base RomFS as-is...');
-            mergedRomfs = await extractRomfs(baseInput, keys, baseTikData);
-            log('info', `Base RomFS: ${mergedRomfs.length} bytes`);
+            log('info', `ContentId: ${contentId} (${computedSize} bytes)`);
+
+            baseSource = null;
+            updateSource = null;
+            baseParsed = null;
+
+            const otherNcas = collectOtherNcas(update);
+            const rebuilt = await rebuildCnmtNca(base, update, keys, log, { hashHex: contentId, size: programSize });
+            const finalPw = new PFS0Writer(true);
+            finalPw.add(`${contentId.slice(0, 32)}.nca`, programSize);
+            for (const m of otherNcas) finalPw.add(m.name, m.size);
+            finalPw.add(rebuilt.name, rebuilt.nca.length);
+
+            const pfs0Header = finalPw.buildHeader();
+            await adapter.write(0, pfs0Header.buffer);
+            log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${finalPw.files.length} members`);
+
+            const programNcaPfs0Offset = pfs0Header.headerSize + finalPw.files[0].offset;
+            await writeProgramNcaTwoPass({
+                meta, adapter, ncaOffset: programNcaPfs0Offset,
+                streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
+            });
+
+            const totalData = finalPw.files.reduce((s, f) => s + f.size, 0);
+            await writeOtherNcas(adapter, update, pfs0Header, finalPw, otherNcas, programSize, totalData, progress, log);
+            await writeCnmt(adapter, pfs0Header, finalPw, rebuilt, log);
+            return finishOutput(adapter, pfs0Header, totalData, finalPw, output, log);
         }
 
-        // Extract ExeFS from the update Program NCA
+        // ── Non-BKTR two-pass streaming: base RomFS + update ExeFS ──────────
+        // Same two-pass approach as BKTR but sources are base RomFS + update ExeFS
+        // (no merge needed). 6× source reads, ~200 KB memory.
+        if (!hasBktrRomfs) {
+            log('info', 'Two-pass streaming (non-BKTR): base RomFS + update ExeFS...');
+            await new Promise(r => setTimeout(r, 0));
+
+            const hdrKey = typeof keys.header_key === 'string' ? hexToBytes(keys.header_key) : keys.header_key;
+            const baseDecBytes = new AesXts(hdrKey).decrypt(baseHeaderRaw, 0);
+            const updateDecBytes = new AesXts(hdrKey).decrypt(updateHeaderRaw, 0);
+
+            let baseRomfsFsHdr = null;
+            for (let i = 0; i < 4; i++) {
+                const fh = baseDecBytes.subarray(0x400 + i * 0x200, 0x400 + i * 0x200 + 0x200);
+                if (fh[0x03] === 3) { baseRomfsFsHdr = fh; break; }
+            }
+            if (!baseRomfsFsHdr) throw new Error('update: base NCA has no RomFS section');
+            const romfsDataSize = Number(new DataView(baseRomfsFsHdr.buffer, baseRomfsFsHdr.byteOffset + 0x98, 8).getBigUint64(0, true));
+
+            const updateExefsFsHdr = updateDecBytes.subarray(0x400, 0x600);
+            const exefsSize = Number(new DataView(updateExefsFsHdr.buffer, updateExefsFsHdr.byteOffset + 0x48, 8).getBigUint64(0, true));
+            const programSize = programNcaSize(exefsSize, romfsDataSize);
+            log('info', `Program NCA (two-pass): exefs=${exefsSize} romfs=${romfsDataSize} total=${programSize}`);
+
+            const adapter = await buildAdapter(output, null, { log, progress });
+
+            const makeStreamExefs = () => async (emit) => {
+                const acidFilter = createExefsAcidFilter({
+                    keepSig: options.keepNpdmAcidSig === true,
+                    keepKey: options.keepNpdmAcidKey === true,
+                }, log);
+                await extractExefsStream(updateInput, keys, updateTikData, async (chunk, off) => {
+                    await acidFilter(chunk, off);
+                    await emit(chunk, off);
+                });
+            };
+            const makeStreamRomfs = () => async (emit) => {
+                await extractRomfsStream(baseInput, keys, baseTikData, async (chunk, off) => {
+                    await emit(chunk, off);
+                });
+            };
+
+            const { contentId, size: computedSize, meta } = await computeProgramNcaContentId({
+                exefsSize, romfsDataSize, titleId: base.cnmt.titleId, keys,
+                streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
+            });
+            log('info', `ContentId: ${contentId} (${computedSize} bytes)`);
+
+            baseSource = null;
+            updateSource = null;
+            baseParsed = null;
+
+            const otherNcas = collectOtherNcas(update);
+            const rebuilt = await rebuildCnmtNca(base, update, keys, log, { hashHex: contentId, size: programSize });
+            const finalPw = new PFS0Writer(true);
+            finalPw.add(`${contentId.slice(0, 32)}.nca`, programSize);
+            for (const m of otherNcas) finalPw.add(m.name, m.size);
+            finalPw.add(rebuilt.name, rebuilt.nca.length);
+
+            const pfs0Header = finalPw.buildHeader();
+            await adapter.write(0, pfs0Header.buffer);
+            log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${finalPw.files.length} members`);
+
+            const programNcaPfs0Offset = pfs0Header.headerSize + finalPw.files[0].offset;
+            await writeProgramNcaTwoPass({
+                meta, adapter, ncaOffset: programNcaPfs0Offset,
+                streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
+            });
+
+            const totalData = finalPw.files.reduce((s, f) => s + f.size, 0);
+            await writeOtherNcas(adapter, update, pfs0Header, finalPw, otherNcas, programSize, totalData, progress, log);
+            await writeCnmt(adapter, pfs0Header, finalPw, rebuilt, log);
+            return finishOutput(adapter, pfs0Header, totalData, finalPw, output, log);
+        }
+
+        // ── BKTR buffered path (forced buffered mode) ────────────────────────
+        // Merge RomFS into memory, extract ExeFS, pack NCA from buffers.
+        // Only reached when updateMode === 'buffered' (skip streaming paths above).
+        log('info', `Merging RomFS (buffered, base streamed from ${baseIsNcz ? 'NCZ' : 'container'})...`);
+        await new Promise(r => setTimeout(r, 0));
+        const mergeResult = await mergeRomFS(baseInput, updateInput, {
+            keys,
+            baseTik: baseTikData,
+            updateTik: updateTikData,
+        });
+        const mergedRomfs = mergeResult.mergedData;
+        log('info', `Merged RomFS: ${mergedRomfs.length} bytes, ${mergeResult.relocEntries} reloc entries, ${mergeResult.subsectionEntries} subsection entries`);
+
         log('info', 'Extracting ExeFS from update Program NCA...');
         await new Promise(r => setTimeout(r, 0));
         const exefsData = await extractExefs(updateInput, keys, updateTikData);
         log('info', `ExeFS: ${exefsData.length} bytes`);
 
-        // hacpack parity: zero the ACID signature + key in main.npdm by default
-        // (hacpack's --nozeronpdmsig / --nozeroacidkey → keepNpdmAcidSig / keepNpdmAcidKey)
         processNpdmAcid(exefsData, {
             keepSig: options.keepNpdmAcidSig === true,
             keepKey: options.keepNpdmAcidKey === true,
         }, log);
 
-        // Release the NCA sources — and, for a .nsz update, the buffered sections
-        // the sparse view references — no longer needed after merge + extraction.
         baseSource = null;
         updateSource = null;
         baseParsed = null;
 
-        // ── Prepare Program NCA and learn its real contentId (no writes) ───
-        // Emulators require the shipped NCA filename to be `<contentId>.nca`
-        // (Switch looks up files by the content hash recorded in CNMT). The
-        // NCA hash is deterministic, so we compute it up front — this lets us
-        // build the PFS0 header with real names before streaming anything, no
-        // seek-back needed.
         log('info', 'Preparing merged Program NCA (hash precompute)...');
         const preparedProgram = await preparePlaintextProgramNca(
             exefsData, mergedRomfs, null, base.cnmt.titleId, keys, log
@@ -659,76 +798,31 @@ export async function update(readers, output, options = {}) {
         mergedProgram = { hashHex: preparedProgram.hashHex, size: preparedProgram.size, id: preparedProgram.hashHex.slice(0, 32) };
         log('info', `Merged Program NCA: ${mergedProgram.size} bytes sha256=${mergedProgram.hashHex} contentId=${mergedProgram.id}`);
 
-        // ── Build CNMT with correct Program NCA hash ─────────────────────────
         const rebuilt = await rebuildCnmtNca(base, update, keys, log,
             { hashHex: mergedProgram.hashHex, size: mergedProgram.size });
         log('info', `Rebuilt CNMT NCA: ${rebuilt.nca.length} bytes sha256=${sha256(rebuilt.nca)}`);
 
-        // ── Build PFS0 header with real names (no seek-back needed) ─────────
-        // Order: Program NCA → other NCAs (sorted by name) → CNMT last (yanu layout)
-        const otherNcas = [];
-        for (const e of update.cnmt.contentEntries) {
-            if (e.type === 6 || e.type === 1) continue;
-            const src = update.entries.find(x =>
-                x.name.toLowerCase().startsWith(e.ncaId) && !x.name.toLowerCase().endsWith('.cnmt.nca'));
-            if (src) otherNcas.push({ name: src.name.replace(/\.ncz$/i, '.nca'), size: e.size, src });
-        }
-        otherNcas.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+        const otherNcas = collectOtherNcas(update);
 
         const finalPw = new PFS0Writer(true);
         finalPw.add(`${mergedProgram.id}.nca`, mergedProgram.size);
         for (const m of otherNcas) finalPw.add(m.name, m.size);
         finalPw.add(rebuilt.name, rebuilt.nca.length);
 
-        // ── Write PFS0 header at offset 0 (final, no patching needed) ─────────
         const adapter = await buildAdapter(output, null, { log, progress });
         const pfs0Header = finalPw.buildHeader();
         await adapter.write(0, pfs0Header.buffer);
         log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${finalPw.files.length} members`);
 
-        // ── Stream Program NCA at its PFS0 offset ─────────────────────────────
         const programNcaPfs0Offset = pfs0Header.headerSize + finalPw.files[0].offset;
-
         log('info', 'Packing merged Program NCA (streaming)...');
         await new Promise(r => setTimeout(r, 0));
         await writePlaintextProgramNca(preparedProgram, adapter, log, programNcaPfs0Offset);
 
-        // ── Write other NCAs (stream from source, sorted by name) ────────────
-        let written = mergedProgram.size;
         const totalData = finalPw.files.reduce((s, f) => s + f.size, 0);
-        for (let i = 0; i < otherNcas.length; i++) {
-            const member = finalPw.files[i + 1];
-            const src = otherNcas[i].src;
-            const pos = pfs0Header.headerSize + member.offset;
-            if (src.name.toLowerCase().endsWith('.ncz')) {
-                const nczReader = new AdapterNCZReader(update.reader, src.offset, src.size);
-                const parsed = await parseNczSections(nczReader);
-                const decomp = new NCZDecompressor(nczReader);
-                await decomp.decompress(
-                    (p) => progress((written + member.size * p) / totalData, `Decompressing ${member.name}...`),
-                    async (chunk, offset) => { await adapter.write(pos + offset, chunk); },
-                    parsed);
-            } else {
-                await copyRange(update.reader, src.offset, member.size,
-                    (off, chunk) => adapter.write(pos + off, chunk));
-            }
-            log('info', `[WRITTEN] ${member.name} (${member.size} bytes)`);
-            written += member.size;
-        }
-
-        // ── Write CNMT last (matches yanu member order) ───────────────────────
-        const cnmtMemberIdx = finalPw.files.length - 1;
-        const cnmtPfs0Offset = pfs0Header.headerSize + finalPw.files[cnmtMemberIdx].offset;
-        const cnmtSize = rebuilt.nca.length;
-        await adapter.write(cnmtPfs0Offset, rebuilt.nca);
-        log('info', `[WRITTEN] ${rebuilt.name} (${cnmtSize} bytes)`);
-
-        const totalSize = pfs0Header.headerSize + totalData;
-        log('info', `Updated NSP: ${finalPw.files.length} members, ${totalSize} bytes`);
-        if (output.memory) {
-            return { size: totalSize, blob: collectBlob(adapter, totalSize), memberCount: finalPw.files.length };
-        }
-        return { size: totalSize, memberCount: finalPw.files.length };
+        await writeOtherNcas(adapter, update, pfs0Header, finalPw, otherNcas, mergedProgram.size, totalData, progress, log);
+        await writeCnmt(adapter, pfs0Header, finalPw, rebuilt, log);
+        return finishOutput(adapter, pfs0Header, totalData, finalPw, output, log);
     }
 
     // ── Non-merge path (original, buffered) ─────────────────────────────────
