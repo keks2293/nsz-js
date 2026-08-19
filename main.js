@@ -56,8 +56,8 @@ class SWDownloader {
         this.sw.postMessage({ type: 'data', url: this.streamUrl, chunk: bytes.buffer }, [bytes.buffer]);
     }
 
-    async write({ type, position, data }) {
-        if (type !== 'write' || !this.sw) return;
+    async write(position, data) {
+        if (!this.sw) return;
         if (this.#streamError) throw new Error('SW stream lost (' + this.#streamError + ')');
         // Fill any gap with zeros (alignment padding, < 16 KB).
         const gap = position - this.#pos;
