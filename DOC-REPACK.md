@@ -205,12 +205,13 @@ Our `--update` implementation in `fs/update.js` attempts to reproduce the **same
 |--------|------|-----|------|
 | Merged Program NCA size | 699,123,712 B | 699,123,712 B | identical (RomFS data level padded to 0x4000) |
 | Merged RomFS (IVFC Level 5) | 606,401,860 B | 606,401,864 B | +4 B (re-pack artifact, see below) |
-| ExeFS PFS0 size | 91,409,104 B | 91,409,120 B | +16 B (PFS0 string-table alignment; absorbed by 0x200 section padding → 0 B to total) |
-| Top-level NSP PFS0 | 272 B | 288 B | +16 B (PFS0 string-table alignment; the **only** total-size difference) |
-| main.npdm ACID | zeroed (`0x80..0x280`) | zeroed by default (hacpack parity) | **identical** — main.npdm is byte-identical (see below) |
-| CNMT NCA | `ee048d85...` | `f2d47876...` | Different hash |
-
-**PFS0 string-table alignment (one root cause, two instances):** our `PFS0Writer` (fs/pfs0.js) aligns the **whole** PFS0 header to 0x20, while hacpack aligns only the **string table** (`pfs0.c:121`, `(stringtable_offset + 0x1f) & ~0x1f`). It manifests in two PFS0s: the **top-level NSP** PFS0 (container header, not 0x200-rounded → the +16 B shows up in the total) and the **ExeFS** PFS0 (inside the Program NCA, whose section is 0x200-rounded → the +16 B is absorbed, 0 B to total). Both match Python nsz and Nintendo's original update NCA (`sts=0x30`); we keep our variant.
+ | ExeFS PFS0 size | 91,409,104 B | 91,409,120 B | +16 B (PFS0 string-table alignment; absorbed by 0x200 section padding → 0 B to total) |
+ | Top-level NSP PFS0 | 272 B | 272 B | **identical** (outer PFS0 header 0x10-aligned — Nintendo rule; the former +16 B total difference is gone) |
+ | Total NSP size | 701,770,512 B | 701,770,512 B | **identical** |
+ | main.npdm ACID | zeroed (`0x80..0x280`) | zeroed by default (hacpack parity) | **identical** — main.npdm is byte-identical (see below) |
+ | CNMT NCA | `ee048d85...` | `f2d47876...` | Different hash (derives from the Program contentId difference) |
+ 
+**PFS0 padding — three rules, three writers:** Nintendo aligns the **outer** NSP/NSZ PFS0 total header to **0x10** (verified on original NSZs: Stardew 0x1D0, LN2 0x190, both `mod 0x20 = 16`); Python nsz's `--fix-padding` aligns the **total header** to **0x20** (`Pfs0.getStringTableSize()` = `namesLen + allign0x20(0x10 + n*0x18 + namesLen)`); hacpack aligns only the **string table** to 0x20 (`pfs0.c:121`, `(stringtable_offset + 0x1f) & ~0x1f`). Our `PFS0Writer` (fs/pfs0.js) implements the Python-nsz rule with a `headerAlign` arg: the six outer-NSP writers in `fs/update.js` pass 0x10 (Nintendo — byte-identical to the reference), the inner **ExeFS/CNMT** PFS0s keep 0x20 (matches Python nsz; the ExeFS one is 0x200-section-padded → the +16 B vs hacpack is absorbed, 0 B to total).
 
 **main.npdm ACID key pair (zeroed by default — hacpack parity, no size/functional impact):** the `main.npdm` in the Program NCA ExeFS embeds the **ACID** (Application ID) at `acid_offset=0x80` (confirmed by `scripts/analyze_npdm.mjs`): `signature[0x100]` (`0x80..0x180`) + `modulus[0x100]` (`0x180..0x280`) — the ACID's RSA-2048 key pair, i.e. the title's **cryptographic authorization block** (for eShop titles, signed with Nintendo's ACID private key). All variants are the same 0x200 bytes (no size impact), and the ACID is **not enforced** for plaintext/dev NCAs — integrity comes from the IVFC hash trees, not the ACID — so there is no functional impact either. The 0x200 bytes of content differ by toolchain:
 
@@ -659,14 +660,18 @@ This anomaly is present **identically in both** the original update and yanu's r
 ## Testing
 
 - `test_update_e2e.mjs` — full E2E test on Stardew Valley v0+v1310720
+- `test_update_sw_sim.mjs` — fd/seekback ≡ SW-sim/two-pass ≡ fd/buffered, one sha256 for all three modes
+- `test_twopass_sw_sim.mjs` — two-pass on a detaching vs copying sequential writer (browser SW transfer semantics), byte-identical
 - `verify_updated_output.mjs` — compare output NSP vs yanu reference (member-wise hash match)
 - `bktr_verify_merged.mjs` — verify merged RomFS against yanu's output
+- `cmp_exefs.mjs` — compare two output NSPs' Program-ExeFS PFS0s against the original update NCA's ExeFS
+- `cmp_exefs2.mjs` — ExeFS per-file content diff + RomFS section diff bucketed (IVFC levels / RFS0 header / file data / trailing tables)
 
 ## Verification on Stardew Valley v0+v1310720
 
 ```
 Input:  base.nsp (877 MB) + update.nsz (667 MB compressed)
-Output: 701,770,528 B / 4 members (Δ +16 B vs yanu = top-level PFS0 string-table alignment)
+Output: 701,770,512 B / 4 members — same size as the yanu reference
   - Merged Program NCA: 699,123,712 B (contentId=6e41adaf…)
   - CNMT NCA: f2d47876… (type 0x80, v1310720, 3 contents)
   - Control NCA: 2,476,032 B (af613c75…)
@@ -678,8 +683,27 @@ CNMT entries:
   type=5 ncaId=99636bbd… size=166400 (PublicData)
 
 Merged Program NCA structure:
-  Header: cryptoType=0 (plaintext), keyIndex=0
-  Section [0] ExeFS: cryptoType=0 (plaintext), 87.2 MiB
-  Section [1] RomFS: cryptoType=0 (plaintext), 606,401,864 B (~579 MiB)
+  Header: cryptoType=0 (plaintext), keyIndex=0, XTS-encrypted header, zero sigs
+  Section [0] ExeFS: FsHeader crypt_type=1 (CRYPT_NONE, plaintext), 87.2 MiB
+  Section [1] RomFS: FsHeader crypt_type=1 (CRYPT_NONE, plaintext), 606,401,864 B (~579 MiB)
   IVFC: 6-level hash tree, 64KB blocks
 ```
+
+### Full byte-level diff vs the yanu reference (2026-08-20)
+
+Compared our `_updated.nsp` against the STORM SWITCH BOX yanu output file (`9742a449…`, 701,770,512 B) with `scripts/cmp_nsp.mjs`-style PFS0 walk + `scripts/cmp_exefs.mjs` / `scripts/cmp_exefs2.mjs` (ExeFS content vs the original update NCA, RomFS diff bucketing). Result — **all game content is identical; every difference is a repack-level container artifact**:
+
+| Region | Diff | Explanation |
+|---|---|---|
+| Top-level PFS0 | 0 B | identical (272 B header, same members; only the Program/CNMT *names* differ — different contentIds) |
+| Control / Manual NCAs | 0 B | byte-identical |
+| ExeFS files (main, rtld, sdk) | 0 B | byte-identical to the original update NCA's ExeFS (in both our and yanu's output) |
+| ExeFS main.npdm | 509 B | the ACID zeroing region (`0x80..0x27F`) — **both** zero it identically (512 B, 3 already zero) |
+| ExeFS PFS0 | +16 B | string-table padding rule: ours 160 (header→0x20, Python-nsz) vs yanu 144 (strtab→0x20, hacpack); absorbed by the 0x200 section padding |
+| **RomFS game data** | **0 B** | 100% identical |
+| RomFS trailing tables | 161,218 B | `dir_hash_table_ofs` 8-aligned (ours, Nintendo) vs 4-aligned (yanu/hacpack) → all later table offsets shift by 4 B; the RomFS data level itself is **−4 B** in yanu (0x2424F544 vs 0x2424F548), absorbed by the section's 0x4000 padding |
+| RomFS IVFC levels | 608 B | hash chain from the changed blocks (RFS0 superblock block + the table blocks): level4[0]→level3[0]→…→level0[0] + level4 entries over the table region |
+| NCA header (XTS-decrypted) | 5 fields | `pfs0_size` (1 B, the +16 B), ExeFS PFS0 master hash (32 B), IVFC level-5 `hash_data_size` (1 B, the −4 B), IVFC master hash (32 B), section hashes 0+1 (64 B) — all derived from the two above |
+| NCA signatures | 0 B | **both** all-zero (hacpack default `NCA_SIG_TYPE_ZERO`; verified in the XTS-decrypted header) |
+
+The contentId difference (`6e41adaf…` vs `8dc3f778…`) is therefore fully accounted for by the two root causes (ExeFS PFS0 padding rule, RomFS 4-vs-8 table alignment); the CNMT differs only because it embeds the Program contentId. Note: the NCA header is XTS-encrypted in both outputs — raw-byte header comparisons must decrypt with `header_key` first, and the NCA sits at NSP offset 272 (0x110), so NSP-relative file reads must account for the PFS0 header.

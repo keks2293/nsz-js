@@ -65,10 +65,18 @@ class PFS0 {
 }
 
 class PFS0Writer {
-    constructor(fixPadding = false, inputStringTableSize = null) {
+    // headerAlign: 0x20 (Python nsz rule — `Pfs0.getStringTableSize()` pads so the
+    // TOTAL header is 0x20-aligned; note hacpack is different: `pfs0.c:121`
+    // aligns only the string table, not the header) or 0x10 (Nintendo rule for
+    // outer NSP/NSZ containers: pad so the total header is 0x10-aligned —
+    // verified on original NSZ headers: Stardew 0x1D0, Little Nightmares II
+    // 0x190, both mod 0x20 = 16). The inner CNMT PFS0 (META NCA) uses the 0x20
+    // rule (verified: Stardew CNMT strtab=0x38, hdr=0x60).
+    constructor(fixPadding = false, inputStringTableSize = null, headerAlign = 0x20) {
         this.files = [];
         this.fixPadding = fixPadding;
         this.inputStringTableSize = inputStringTableSize;
+        this.headerAlign = headerAlign;
     }
 
     add(name, size) {
@@ -83,9 +91,10 @@ class PFS0Writer {
         const namesLen = this.files.reduce((sum, f) => sum + f.name.length + 1, 0);
         const rawSize = 0x10 + this.files.length * 0x18 + namesLen;
         const stringTable = this.files.map(f => f.name).join('\0') + '\0';
+        const pad = (this.headerAlign - (rawSize % this.headerAlign)) % this.headerAlign;
         const paddedSize = this.fixPadding
-            ? stringTable.length + (0x20 - (rawSize % 0x20))
-            : (this.inputStringTableSize ?? (stringTable.length + (0x20 - (rawSize % 0x20))));
+            ? stringTable.length + pad
+            : (this.inputStringTableSize ?? (stringTable.length + pad));
         const padded = stringTable.length < paddedSize
             ? stringTable + '\0'.repeat(paddedSize - stringTable.length)
             : stringTable;

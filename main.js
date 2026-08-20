@@ -63,13 +63,17 @@ class SWDownloader {
         const gap = position - this.#pos;
         if (gap > 0) this.#postChunk(new Uint8Array(gap));
         const view = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-        // If `view` is a subarray of a larger buffer, `view.buffer` is that larger
-        // buffer — posting it would send the wrong bytes. Copy to a fresh buffer so
-        // `chunk.buffer` is exactly the view's bytes (covers wasm-memory views too).
-        const chunk = (view.byteLength !== view.buffer.byteLength)
-            ? view.slice(0) : view;
-        // Capture byteLength BEFORE #postChunk — the transfer detaches chunk.buffer,
-        // which causes chunk.byteLength to return 0 in Chrome (V8) per ES spec.
+        // Zero-copy where possible: a FULL-buffer view is transferred as-is
+        // (no memcpy). Contract: the caller must not read the buffer after this
+        // write — a detached view reports .length/.byteLength 0 (and data reads
+        // throw). Subarray views ALWAYS go through a copy: transferring would
+        // detach the WHOLE underlying buffer (wasm zstd memory, reused decrypt
+        // buffers) and post the wrong bytes.
+        const chunk = (view.byteLength !== view.buffer.byteLength) ? view.slice(0) : view;
+        // Capture the length BEFORE #postChunk: the transfer detaches chunk.buffer,
+        // which makes chunk.byteLength 0 (V8, per ES spec) — using it afterwards
+        // would stall #pos at each write's start position and insert a zero gap
+        // of the previous write's size before every chunk (2x file size).
         const len = chunk.byteLength;
         this.#postChunk(chunk);
         this.#pos = position + len;
