@@ -269,8 +269,11 @@ async function writeOtherNcas(adapter, update, pfs0Header, pw, otherNcas, writte
 
 async function writeCnmt(adapter, pfs0Header, pw, rebuilt, log) {
     const cnmtPfs0Offset = pfs0Header.headerSize + pw.files[pw.files.length - 1].offset;
+    // Capture the size BEFORE the write: the SW adapter transfers the buffer
+    // (detaches it), so rebuilt.nca.length would read 0 afterwards.
+    const cnmtSize = rebuilt.nca.length;
     await adapter.write(cnmtPfs0Offset, rebuilt.nca);
-    log('info', `[WRITTEN] ${rebuilt.name} (${rebuilt.nca.length} bytes)`);
+    log('info', `[WRITTEN] ${rebuilt.name} (${cnmtSize} bytes)`);
 }
 
 function finishOutput(adapter, pfs0Header, totalData, pw, output, log) {
@@ -550,7 +553,7 @@ export async function update(readers, output, options = {}) {
             // header size is identical to the final one (only bytes are patched later).
             const placeholderId = '0'.repeat(32);
             const placeholderCnmt = await rebuildCnmtNca(base, update, keys, log, { hashHex: '0'.repeat(64), size: programSize });
-            const placeholderPw = new PFS0Writer(true);
+            const placeholderPw = new PFS0Writer(true, null, 0x10);
             placeholderPw.add(`${placeholderId}.nca`, programSize);
             for (const m of otherNcas) placeholderPw.add(m.name, m.size);
             placeholderPw.add(placeholderCnmt.name, placeholderCnmt.nca.length);
@@ -588,7 +591,7 @@ export async function update(readers, output, options = {}) {
             baseParsed = null;
 
             const rebuilt = await rebuildCnmtNca(base, update, keys, log, { hashHex: contentId, size: programSize });
-            const realPw = new PFS0Writer(true);
+            const realPw = new PFS0Writer(true, null, 0x10);
             realPw.add(`${contentId.slice(0, 32)}.nca`, programSize);
             for (const m of otherNcas) realPw.add(m.name, m.size);
             realPw.add(rebuilt.name, rebuilt.nca.length);
@@ -661,7 +664,7 @@ export async function update(readers, output, options = {}) {
 
             const otherNcas = collectOtherNcas(update);
             const rebuilt = await rebuildCnmtNca(base, update, keys, log, { hashHex: contentId, size: programSize });
-            const finalPw = new PFS0Writer(true);
+            const finalPw = new PFS0Writer(true, null, 0x10);
             finalPw.add(`${contentId.slice(0, 32)}.nca`, programSize);
             for (const m of otherNcas) finalPw.add(m.name, m.size);
             finalPw.add(rebuilt.name, rebuilt.nca.length);
@@ -670,13 +673,13 @@ export async function update(readers, output, options = {}) {
             await adapter.write(0, pfs0Header.buffer);
             log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${finalPw.files.length} members`);
 
+            const totalData = finalPw.files.reduce((s, f) => s + f.size, 0);
             const programNcaPfs0Offset = pfs0Header.headerSize + finalPw.files[0].offset;
             await writeProgramNcaTwoPass({
                 meta, adapter, ncaOffset: programNcaPfs0Offset,
                 streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
+                progress: (p) => progress((pfs0Header.headerSize + p * programSize) / totalData, 'Writing Program NCA...'),
             });
-
-            const totalData = finalPw.files.reduce((s, f) => s + f.size, 0);
             await writeOtherNcas(adapter, update, pfs0Header, finalPw, otherNcas, programSize, totalData, progress, log);
             await writeCnmt(adapter, pfs0Header, finalPw, rebuilt, log);
             return finishOutput(adapter, pfs0Header, totalData, finalPw, output, log);
@@ -736,7 +739,7 @@ export async function update(readers, output, options = {}) {
 
             const otherNcas = collectOtherNcas(update);
             const rebuilt = await rebuildCnmtNca(base, update, keys, log, { hashHex: contentId, size: programSize });
-            const finalPw = new PFS0Writer(true);
+            const finalPw = new PFS0Writer(true, null, 0x10);
             finalPw.add(`${contentId.slice(0, 32)}.nca`, programSize);
             for (const m of otherNcas) finalPw.add(m.name, m.size);
             finalPw.add(rebuilt.name, rebuilt.nca.length);
@@ -745,13 +748,13 @@ export async function update(readers, output, options = {}) {
             await adapter.write(0, pfs0Header.buffer);
             log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${finalPw.files.length} members`);
 
+            const totalData = finalPw.files.reduce((s, f) => s + f.size, 0);
             const programNcaPfs0Offset = pfs0Header.headerSize + finalPw.files[0].offset;
             await writeProgramNcaTwoPass({
                 meta, adapter, ncaOffset: programNcaPfs0Offset,
                 streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
+                progress: (p) => progress((pfs0Header.headerSize + p * programSize) / totalData, 'Writing Program NCA...'),
             });
-
-            const totalData = finalPw.files.reduce((s, f) => s + f.size, 0);
             await writeOtherNcas(adapter, update, pfs0Header, finalPw, otherNcas, programSize, totalData, progress, log);
             await writeCnmt(adapter, pfs0Header, finalPw, rebuilt, log);
             return finishOutput(adapter, pfs0Header, totalData, finalPw, output, log);
@@ -797,7 +800,7 @@ export async function update(readers, output, options = {}) {
 
         const otherNcas = collectOtherNcas(update);
 
-        const finalPw = new PFS0Writer(true);
+        const finalPw = new PFS0Writer(true, null, 0x10);
         finalPw.add(`${mergedProgram.id}.nca`, mergedProgram.size);
         for (const m of otherNcas) finalPw.add(m.name, m.size);
         finalPw.add(rebuilt.name, rebuilt.nca.length);
@@ -850,7 +853,7 @@ export async function update(readers, output, options = {}) {
     members.push({ name: rebuilt.name, size: rebuilt.nca.length, data: rebuilt.nca });
 
     const adapter = await buildAdapter(output, null, { log, progress });
-    const pw = new PFS0Writer(true);
+    const pw = new PFS0Writer(true, null, 0x10);
     for (const m of members) pw.add(m.name, m.size);
     const pfs0Header = pw.buildHeader();
     await adapter.write(0, pfs0Header.buffer);

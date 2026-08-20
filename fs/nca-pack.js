@@ -1362,26 +1362,73 @@ export async function computeProgramNcaContentId({ exefsSize, romfsDataSize, tit
 }
 
 // Phase 2: write NCA sequentially (no seek-back). Uses meta from Phase 1.
-export async function writeProgramNcaTwoPass({ meta, adapter, ncaOffset, streamExefs, streamRomfs, log }) {
+export async function writeProgramNcaTwoPass({ meta, adapter, ncaOffset, streamExefs, streamRomfs, log, progress }) {
     const _log = typeof log === 'function' ? log : () => {};
+    const _prog = typeof progress === 'function' ? progress : () => {};
     const { encHeader, exeHash, romIvfc, L } = meta;
     _log('info', '  Pass 2: Writing NCA to output...');
 
-    await adapter.write(ncaOffset, encHeader);
-    await adapter.write(ncaOffset + L.sec0Start, exeHash.hashTable);
+    // The two-pass path is for sequential outputs: every write must land exactly
+    // where the previous one ended. A mismatch means the output would be corrupt
+    // (SW adapter fills the gap with zeros), so fail loudly instead.
+    let expected = ncaOffset;
+    const w = async (pos, data) => {
+        if (pos !== expected) {
+            throw new Error(`writeProgramNcaTwoPass: non-sequential write at 0x${pos.toString(16)} (expected 0x${expected.toString(16)}, gap=${pos - expected}) — output would be corrupt`);
+        }
+        expected += data.byteLength;
+        return adapter.write(pos, data);
+    };
+
+    // Progress + activity logs (a pass-2 merge can take a while with no other
+    // output — the UI would otherwise look frozen). track() takes a SIZE (number):
+    // the SW adapter transfers full-buffer chunks (detaches them), so lengths
+    // must be captured before the write, never read off the chunk afterwards.
+    let ncaDone = 0;
+    const track = (n) => {
+        ncaDone += n;
+        if ((ncaDone & 0x3FFFFFF) === 0) {
+            _log('info', `  Program NCA: ${(ncaDone / 1048576).toFixed(0)} / ${(L.ncaSize / 1048576).toFixed(0)} MB`);
+            _prog(Math.min(1, ncaDone / L.ncaSize));
+        }
+    };
+
+    const hdrLen = encHeader.byteLength;
+    await w(ncaOffset, encHeader);
+    track(hdrLen);
+    const htabLen = exeHash.hashTable.byteLength;
+    await w(ncaOffset + L.sec0Start, exeHash.hashTable);
+    track(htabLen);
     await streamExefs(async (chunk, off) => {
-        await adapter.write(ncaOffset + L.sec0DataOff + off, chunk);
+        const n = chunk.byteLength;
+        await w(ncaOffset + L.sec0DataOff + off, chunk);
+        track(n);
     });
-    if (L.exePaddingSize > 0) await adapter.write(ncaOffset + L.sec0DataOff + L.exefsSize, new Uint8Array(L.exePaddingSize));
-    let lvOff = 0;
-    for (const lvl of romIvfc.hashLevels) {
-        await adapter.write(ncaOffset + L.sec1Start + lvOff, lvl);
-        lvOff += lvl.length;
+    if (L.exePaddingSize > 0) {
+        await w(ncaOffset + L.sec0DataOff + L.exefsSize, new Uint8Array(L.exePaddingSize));
+        track(L.exePaddingSize);
     }
+    let lvOff = 0;
+    for (let i = 0; i < romIvfc.hashLevels.length; i++) {
+        const lvl = romIvfc.hashLevels[i];
+        // Capture the length BEFORE the write: the SW adapter transfers the
+        // buffer (detaches it), which zeroes .length on the caller's view —
+        // `lvOff += lvl.length` after the write would add 0.
+        const lvlLen = lvl.length;
+        _log('info', `  [dbg] ivfc level#${i}: lvOff=0x${lvOff.toString(16)} lvl.length=0x${lvlLen.toString(16)} type=${lvl.constructor.name} pos=0x${(ncaOffset + L.sec1Start + lvOff).toString(16)}`);
+        await w(ncaOffset + L.sec1Start + lvOff, lvl);
+        lvOff += lvlLen;
+        track(lvlLen);
+    }
+    _log('info', `  RomFS streaming: ${(L.romfsDataSize / 1048576).toFixed(0)} MB to merge/write...`);
     await streamRomfs(async (chunk, off) => {
-        await adapter.write(ncaOffset + L.sec1DataOff + off, chunk);
+        const n = chunk.byteLength;
+        await w(ncaOffset + L.sec1DataOff + off, chunk);
+        track(n);
     });
-    if (L.romPaddingSize > 0) await adapter.write(ncaOffset + L.sec1DataOff + L.romfsDataSize, new Uint8Array(L.romPaddingSize));
+    if (L.romPaddingSize > 0) await w(ncaOffset + L.sec1DataOff + L.romfsDataSize, new Uint8Array(L.romPaddingSize));
+    _prog(1);
+    _log('info', `  [dbg] two-pass done: final=0x${expected.toString(16)} expected=0x${(ncaOffset + L.ncaSize).toString(16)}`);
 }
 
 export async function extractControl(updateNcaData, keys) {
