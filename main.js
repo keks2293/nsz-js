@@ -128,6 +128,7 @@ async function main() {
     const noDeltaBtn = document.getElementById('noDeltaBtn');
     const keepAcidSigBtn = document.getElementById('keepAcidSigBtn');
     const keepAcidKeyBtn = document.getElementById('keepAcidKeyBtn');
+    const bufferedBtn = document.getElementById('bufferedBtn');
 
     let fixPadding = false;
     let overwrite = false;
@@ -135,6 +136,7 @@ async function main() {
     let noDeltas = false;
     let keepAcidSig = false;
     let keepAcidKey = false;
+    let buffered = false;
     let mode = 'convert';
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     let downloadMode = isMobile ? 'sw' : 'fsa';
@@ -162,6 +164,7 @@ async function main() {
         noDeltaBtn.classList.toggle('hidden', !noDeltaVisible);
         keepAcidSigBtn.classList.toggle('hidden', !keepAcidVisible);
         keepAcidKeyBtn.classList.toggle('hidden', !keepAcidVisible);
+        bufferedBtn.classList.toggle('hidden', !keepAcidVisible);
     }
 
     updateOptionsVisibility();
@@ -411,6 +414,11 @@ async function main() {
     keepAcidKeyBtn.addEventListener('click', () => {
         keepAcidKey = !keepAcidKey;
         keepAcidKeyBtn.classList.toggle('on', keepAcidKey);
+    });
+
+    bufferedBtn.addEventListener('click', () => {
+        buffered = !buffered;
+        bufferedBtn.classList.toggle('on', buffered);
     });
 
     document.querySelectorAll('.pill[data-mode]').forEach(btn => {
@@ -831,6 +839,7 @@ async function main() {
                 writable,
                 keepNpdmAcidSig: keepAcidSig,
                 keepNpdmAcidKey: keepAcidKey,
+                updateMode: buffered ? 'buffered' : 'two-pass',
             });
             checkSwDelivered(writable, result.size);
             if (writable) {

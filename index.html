@@ -750,16 +750,18 @@
                                      <b>Overwrite</b> — Continue even if a file with same name exists.<br>
                                      <b>Verify</b> — Verify SHA-256 hash after conversion. Slower, rarely needed.<br>
                                       <b>No Deltas</b> — Merge: exclude delta-fragment NCAs (needs keys to detect them).<br>
-                                      <b>Keep ACID Sig / Key</b> — Update: keep the original ACID signature/key in main.npdm (hacpack --nozeronpdmsig/--nozeroacidkey). Zeroed by default.
-                                   </div>
+                                       <b>Keep ACID Sig / Key</b> — Update: keep the original ACID signature/key in main.npdm (hacpack --nozeronpdmsig/--nozeroacidkey). Zeroed by default.<br>
+                                       <b>Buffer</b> — Update: buffer the merged RomFS in memory (much more RAM, single pass). Off = two-pass streaming (low RAM, re-reads the sources).
+                                    </div>
                                   <div class="pills" id="optionsButtons">
                                       <button class="pill" id="fixPaddingBtn" title="Fixes PFS0 padding to match the nxdumptool/no-intro standard.">Fix Padding</button>
                                       <button class="pill" id="overwriteBtn" title="Continue even if file with same name exists.">Overwrite</button>
                                       <button class="pill" id="verifyBtn" title="Verify SHA-256 hash after conversion. Slower, rarely needed.">Verify</button>
                                        <button class="pill" id="noDeltaBtn" title="Merge: exclude delta-fragment NCAs (needs keys to detect them).">No Deltas</button>
                                        <button class="pill" id="keepAcidSigBtn" title="Update: keep the original ACID signature in main.npdm (hacpack --nozeronpdmsig). Zeroed by default.">Keep ACID Sig</button>
-                                       <button class="pill" id="keepAcidKeyBtn" title="Update: keep the original ACID key in main.npdm (hacpack --nozeroacidkey). Zeroed by default.">Keep ACID Key</button>
-                                   </div>
+                                        <button class="pill" id="keepAcidKeyBtn" title="Update: keep the original ACID key in main.npdm (hacpack --nozeroacidkey). Zeroed by default.">Keep ACID Key</button>
+                                        <button class="pill" id="bufferedBtn" title="Update: buffer the merged RomFS in memory (much more RAM, single pass). Off = two-pass streaming (~200 KB RAM, re-reads the sources).">Buffer</button>
+                                    </div>
                             </div>
                         </div>
                         <div class="actions">

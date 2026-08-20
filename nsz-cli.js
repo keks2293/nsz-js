@@ -350,6 +350,7 @@ async function updateNSPs(inputPaths, outputDir, overwrite, rmSource, keysPath, 
                 keys,
                 keepNpdmAcidSig,
                 keepNpdmAcidKey,
+                updateMode: 'seekback',
             });
         } catch (e) {
             fs.closeSync(outputFd);
