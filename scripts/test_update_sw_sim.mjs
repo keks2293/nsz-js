@@ -34,13 +34,13 @@ class SequentialWriter {
 
 const DIR = '/Users/rmitkov/Downloads/Stardew Valley [NSZ]';
 const basePath = process.env.BASE_PATH || `${DIR}/Stardew Valley [0100E65002BB8000][v0] (0.87 GB).nsp`;
-const updatePath = process.env.UPDATE_PATH || `${DIR}/Stardew Valley [0100E65002BB8800][v1310720] (0.67 GB).nsp`;
+const updatePath = process.env.UPDATE_PATH || `${DIR}/Stardew Valley [0100E65002BB8800][v1310720] (0.67 GB).nsz`;
 const keys = KeysParser.parse(fs.readFileSync('../static/prod.keys', 'utf8'));
 const log = () => {};
 const progress = () => {};
 
 const baseReader = { name: 'base.nsp', reader: new FileReader(basePath) };
-const updateReader = { name: 'update.nsp', reader: new FileReader(updatePath) };
+const updateReader = { name: 'update.nsz', reader: new FileReader(updatePath) };
 
 // Reference: seekable fd output (known-good)
 const refPath = '/tmp/update_sw_sim_ref.nsp';
@@ -52,22 +52,35 @@ const ref = new Uint8Array(fs.readFileSync(refPath));
 
 // SW-simulated: sequential writer with gap-fill
 const base2 = { name: 'base.nsp', reader: new FileReader(basePath) };
-const update2 = { name: 'update.nsp', reader: new FileReader(updatePath) };
+const update2 = { name: 'update.nsz', reader: new FileReader(updatePath) };
 const sw = new SequentialWriter();
 const result = await update([base2, update2], { writable: sw }, { keys, log, progress, bktrMerge: true });
 base2.reader.close(); update2.reader.close();
 const sim = sw.build();
 
+// Buffered mode (the browser "Buffer" pill): merged RomFS fully in memory
+const base3 = { name: 'base.nsp', reader: new FileReader(basePath) };
+const update3 = { name: 'update.nsz', reader: new FileReader(updatePath) };
+const bufPath = '/tmp/update_sw_sim_buffered.nsp';
+const bufFd = fs.openSync(bufPath, 'w+');
+await update([base3, update3], { fd: bufFd }, { keys, log, progress, bktrMerge: true, updateMode: 'buffered' });
+fs.closeSync(bufFd);
+base3.reader.close(); update3.reader.close();
+const buf = new Uint8Array(fs.readFileSync(bufPath));
+
 const refSha = crypto.createHash('sha256').update(ref).digest('hex');
 const simSha = crypto.createHash('sha256').update(sim).digest('hex');
-console.log('ref (fd)       :', ref.length, 'sha256=' + refSha);
-console.log('sim (sw-seq)   :', sim.length, 'sha256=' + simSha);
-console.log('result.size    :', result.size);
-if (refSha === simSha && ref.length === sim.length) {
-  console.log('MATCH — SW sequential+gap-fill is byte-identical to fd');
+const bufSha = crypto.createHash('sha256').update(buf).digest('hex');
+console.log('ref (fd, seekback) :', ref.length, 'sha256=' + refSha);
+console.log('sim (sw, two-pass) :', sim.length, 'sha256=' + simSha);
+console.log('buffered (fd)      :', buf.length, 'sha256=' + bufSha);
+console.log('result.size        :', result.size);
+if (refSha === simSha && refSha === bufSha && ref.length === sim.length && ref.length === buf.length) {
+  console.log('MATCH — seekback ≡ two-pass ≡ buffered, all byte-identical to fd');
 } else {
   console.log('MISMATCH');
   let i = 0; const n = Math.min(ref.length, sim.length);
   while (i < n && ref[i] === sim[i]) i++;
-  console.log('first diff at', i, '0x' + i.toString(16), 'len ref=' + ref.length + ' sim=' + sim.length);
+  console.log('first diff ref/sim at', i, '0x' + i.toString(16), 'len ref=' + ref.length + ' sim=' + sim.length + ' buf=' + buf.length);
+  process.exit(1);
 }
