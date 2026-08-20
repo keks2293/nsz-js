@@ -211,19 +211,22 @@ class NCZDecompressor {
         let lastAesCtr = null;
         let lastDecryptEnd = -1;
         const processChunk = async (chunk, decompOffset) => {
+            // Capture before writeChunk: a plaintext section's chunk can be
+            // transferred (detached) by the SW adapter, zeroing .length.
+            const chunkLen = chunk.length;
             let offset = 0;
-            while (offset < chunk.length) {
+            while (offset < chunkLen) {
                 const ncaPos = decompOffset + offset;
                 while (sectionIdx < sortedSections.length - 1 &&
                        ncaPos >= sortedSections[sectionIdx].offset + sortedSections[sectionIdx].size) {
                     sectionIdx++;
                 }
                 let aesCtr = null;
-                let boundary = chunk.length;
+                let boundary = chunkLen;
                 if (sectionIdx < sortedSections.length) {
                     const s = sortedSections[sectionIdx];
                     aesCtr = sectionAesCtrs.get(s) || null;
-                    boundary = Math.min(chunk.length, offset + (s.offset + s.size - ncaPos));
+                    boundary = Math.min(chunkLen, offset + (s.offset + s.size - ncaPos));
                 }
                 const subSize = boundary - offset;
                 let data = chunk.subarray(offset, offset + subSize);
@@ -239,7 +242,7 @@ class NCZDecompressor {
                 offset += subSize;
                 if (progressCallback) progressCallback((decompOffset + offset) / ncaSize);
             }
-            return decompOffset + chunk.length;
+            return decompOffset + chunkLen;
         };
 
         let pos = headerEnd;
@@ -294,12 +297,15 @@ class NCZDecompressor {
                 const chunkSize = Math.min(SECTION_CHUNK_SIZE, end - i);
                 const chunk = await reader.read(chunkSize);
                 if (!chunk || chunk.length === 0) break;
+                // Capture before writeChunk: for plaintext sections data === chunk,
+                // and the SW adapter transfers it (detached .length would stall i).
+                const chunkLen = chunk.length;
 
                 const data = aesCtr ? await aesCtr.decrypt(chunk) : chunk;
                 await writeChunk(data, i);
 
-                i += chunk.length;
-                decompressedOffset += chunk.length;
+                i += chunkLen;
+                decompressedOffset += chunkLen;
                 if (progressCallback) progressCallback(decompressedOffset / ncaSize);
             }
         }

@@ -17,9 +17,8 @@ class FileReader {
 class SequentialWriter {
   #pos = 0;
   chunks = [];
-  write({ type, position, data }) {
-    if (type !== 'write') return;
-    if (position < this.#pos) throw new Error('SW seek-back not supported (pos ' + position + ' < ' + this.#pos + ')');
+  // Mirrors SWDownloader.write exactly (adapter API: write(position, data)).
+  write(position, data) {
     const gap = position - this.#pos;
     if (gap > 0) this.chunks.push(new Uint8Array(gap));
     this.chunks.push(new Uint8Array(data));
