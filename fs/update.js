@@ -560,20 +560,15 @@ export async function update(readers, output, options = {}) {
 
             const otherNcas = collectOtherNcas(update);
 
-            // Placeholder Program id (32 zeros) + placeholder CNMT → PFS0 layout
-            // before the real contentId is known. Both names are fixed-length, so the
-            // header size is identical to the final one (only bytes are patched later).
-            const placeholderId = '0'.repeat(32);
-            const placeholderCnmt = await rebuildCnmtNca(base, update, keys, log, { hashHex: '0'.repeat(64), size: programSize });
-            const placeholderPw = new PFS0Writer(true, null, 0x10);
-            placeholderPw.add(`${placeholderId}.nca`, programSize);
-            for (const m of otherNcas) placeholderPw.add(m.name, m.size);
-            placeholderPw.add(placeholderCnmt.name, placeholderCnmt.nca.length);
-            const pfs0Header = placeholderPw.buildHeader();
-            await adapter.write(0, pfs0Header.buffer);
-            log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${placeholderPw.files.length} members (placeholder names)`);
-
-            const programNcaPfs0Offset = pfs0Header.headerSize + placeholderPw.files[0].offset;
+            // Compute PFS0 headerSize without writing: both names are fixed-length
+            // (program 36 chars, CNMT 42 chars), so the layout matches the final header.
+            const layoutPw = new PFS0Writer(true, null, 0x10);
+            layoutPw.add(`${'0'.repeat(32)}.nca`, programSize);
+            for (const m of otherNcas) layoutPw.add(m.name, m.size);
+            layoutPw.add(`${'0'.repeat(32)}.cnmt.nca`, 0);
+            const pfs0Header = layoutPw.buildHeader();
+            const programNcaPfs0Offset = pfs0Header.headerSize + layoutPw.files[0].offset;
+            log('info', `PFS0 layout: ${pfs0Header.headerSize} bytes header, ${layoutPw.files.length} members, Program NCA at 0x${programNcaPfs0Offset.toString(16)}`);
 
             const acidFilter = createExefsAcidFilter({
                 keepSig: options.keepNpdmAcidSig === true,
@@ -608,11 +603,8 @@ export async function update(readers, output, options = {}) {
             for (const m of otherNcas) realPw.add(m.name, m.size);
             realPw.add(rebuilt.name, rebuilt.nca.length);
             const realPfs0 = realPw.buildHeader();
-            if (realPfs0.headerSize !== pfs0Header.headerSize) {
-                throw new Error('update: PFS0 header size changed after contentId (placeholder/real name length mismatch)');
-            }
             await adapter.write(0, realPfs0.buffer);
-            log('info', `Patched PFS0 names → ${contentId.slice(0, 32)}.nca, ${rebuilt.name}`);
+            log('info', `PFS0 header ${realPfs0.headerSize} bytes, ${realPw.files.length} members`);
 
             const totalData = realPw.files.reduce((s, f) => s + f.size, 0);
             await writeOtherNcas(adapter, update, pfs0Header, realPw, otherNcas, programSize, totalData, progress, log);
