@@ -19,11 +19,15 @@ self.addEventListener('message', e => {
                 reasons.set(url, 'cancelled');
                 streams.delete(url);
             }
-        });
+        }, { highWaterMark: 1 });
 
-        streams.set(url, { stream, controllerReady, fileName: e.data.fileName });
+        const entry = {
+            stream, controllerReady,
+            fileName: e.data.fileName,
+            client: e.source,
+        };
+        streams.set(url, entry);
         reasons.delete(url);
-        console.log('[SW] registered stream for', url);
         e.source.postMessage({ type: 'ready', url });
         return;
     }
@@ -31,17 +35,16 @@ self.addEventListener('message', e => {
     const entry = streams.get(url);
     if (!entry) {
         const reason = reasons.get(url) || 'not-registered';
-        console.warn('[SW] no stream for', url, 'reason:', reason);
         e.source.postMessage({ type: 'error', url, message: reason });
         return;
     }
 
     if (type === 'data') {
+        const chunkCopy = new Uint8Array(e.data.chunk);
         entry.controllerReady.then(c => {
-            c.enqueue(new Uint8Array(e.data.chunk));
+            c.enqueue(chunkCopy);
         });
     } else if (type === 'end') {
-        console.log('[SW] close stream for', url);
         reasons.set(url, 'closed');
         entry.controllerReady.then(c => { c.close(); streams.delete(url); });
     } else if (type === 'error') {
@@ -55,7 +58,6 @@ self.addEventListener('fetch', e => {
     const match = url.pathname.match(/\/download\/([^/]+)$/);
     if (match) {
         const entry = streams.get(url.pathname);
-        console.log('[SW] fetch', url.pathname, 'found:', !!entry);
         if (entry) {
             e.respondWith(new Response(entry.stream, {
                 headers: {
