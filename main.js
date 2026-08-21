@@ -736,11 +736,26 @@ async function main() {
             }
         }
         if (!writable && (downloadMode === 'sw' || downloadMode === 'fsa') && await ensureSW()) {
-            try {
-                writable = await createSWWritable(outputName, iframe);
-            } catch (e) {
-                addLog('info', 'SW not available: ' + e.message);
-            }
+            // Lazy SW: start the stream only on first write() so Firefox
+            // doesn't kill the idle SW during the long prep phase.
+            let real = null;
+            const dl = new SWDownloader(outputName, iframe);
+            writable = {
+                async write(position, data) {
+                    if (!real) {
+                        addLog('info', 'Connecting to SW...');
+                        await dl.start();
+                        dl.triggerDownload();
+                        addLog('info', 'Stream ready');
+                        real = dl;
+                    }
+                    return real.write(position, data);
+                },
+                async close() {
+                    if (real) await real.close();
+                },
+                get bytesWritten() { return real ? real.bytesWritten : 0; },
+            };
         }
 
         const onProgress = (p) => { updateProgress(p); updateStats(p); };
