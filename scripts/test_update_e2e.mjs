@@ -22,9 +22,9 @@ class FileReader {
 }
 
 const DIR = '/Users/rmitkov/Downloads/Stardew Valley [NSZ]';
-const basePath = process.env.BASE_PATH || `${DIR}/Stardew Valley [0100E65002BB8000][v0] (0.87 GB).nsp`;
+const basePath = process.env.BASE_PATH || `${DIR}/Stardew Valley [0100E65002BB8000][v0] (0.87 GB).nsz`;
 const updatePath = process.env.UPDATE_PATH || `${DIR}/Stardew Valley [0100E65002BB8800][v1310720] (0.67 GB).nsz`;
-const yanuPath = `${DIR}/Stardew Valley [0100E65002BB8000][v0] (0.87 GB) updated in yanu.nsp`;
+const yanuPath = process.env.YANU_PATH || '/Users/rmitkov/Downloads/Stardew Valley [0100E65002BB8000][v0] (0.87 GB) updated in yanu.nsp';
 const outputPath = process.env.OUT_PATH || '/tmp/update_e2e_out.nsp';
 
 const keys = KeysParser.parse(fs.readFileSync('../static/prod.keys', 'utf8'));

@@ -80,6 +80,9 @@ When original files from npm don't work directly in the target environment:
 - **Problem**: `zstddec` streaming ESM build has a bug in `decode()` when passing explicit `uncompressedSize` — produces truncated/all-zeros output for large streams (>1GB).
   **Solution**: In `ncz.js` (around line 310), call `decoder.decode(compressedData, 0)` (auto-detect size). This works correctly: calls `ZSTD_findDecompressedSize` internally, falls back to streaming API if size is unknown.
 
+- **Problem**: When `writePlaintextProgramNca` writes a Uint8Array via the SW adapter (`postMessage` with `transfer`), the buffer is detached. Subsequent reads of `.length` return 0 (spec: detached ArrayBuffer has byteLength 0). This caused the romPos calculation to omit the hash table size (0xB000), placing IVFC levels and RomFS data 0xB000 bytes too early — a backward write that corrupted the output.
+  **Solution**: Snapshot all buffer lengths (`htableLen`, `exefsLen`, `levelLengths`) into local variables **before** any writes in `writePlaintextProgramNca` (`fs/nca-pack.js`). Same pattern applied defensively in `packProgramNcaStream`.
+
 Browser HTML files load dependencies:
 ```html
 <!-- zstddec.mjs is imported via ES module in crypto/zstd.js and fs/ncz.js -->

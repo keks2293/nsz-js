@@ -1133,22 +1133,34 @@ export async function preparePlaintextProgramNca(exefsData, romfsData, controlDa
 export async function writePlaintextProgramNca(prepared, outputAdapter, log, baseOffset = 0) {
     const _log = typeof log === 'function' ? log : () => {};
     const { encHeader, exeHtablePadded, exePfs0Offset, exefsData, romIvfc,
-            sec0Start, romPaddingSize } = prepared.data;
+            sec0Start, exePaddingSize, romPaddingSize } = prepared.data;
     _log('info', '  Writing NCA to output adapter (streaming)...');
+
+    // Snapshot all lengths BEFORE any writes — postMessage transfer can
+    // detach buffers, making .length return 0 for full-buffer Uint8Arrays.
+    const htableLen = exeHtablePadded.length;
+    const exefsLen = exefsData.length;
 
     // Write header (at baseOffset)
     await outputAdapter.write(baseOffset, encHeader);
 
-    // Write ExeFS section: hash_table + PFS0 data
+    // Write ExeFS section: hash_table + PFS0 data + section padding
     await outputAdapter.write(baseOffset + sec0Start, exeHtablePadded);
     await outputAdapter.write(baseOffset + sec0Start + exePfs0Offset, exefsData);
+    if (exePaddingSize > 0) {
+        await outputAdapter.write(baseOffset + sec0Start + exePfs0Offset + exefsLen,
+            new Uint8Array(exePaddingSize));
+    }
 
     // Write RomFS section: IVFC levels concatenated
-    let romPos = sec0Start + exeHtablePadded.length + exefsData.length + prepared.data.exePaddingSize;
+    // Snapshot level lengths BEFORE writing — postMessage transfer detaches buffers,
+    // making .length return 0 for full-buffer Uint8Arrays.
+    const levelLengths = romIvfc.levelFiles.map(l => l.length);
+    let romPos = sec0Start + htableLen + exefsLen + exePaddingSize;
     for (let lvl = 0; lvl < romIvfc.levelFiles.length; lvl++) {
         const levelData = romIvfc.levelFiles[lvl];
         await outputAdapter.write(baseOffset + romPos, levelData);
-        romPos += levelData.length;
+        romPos += levelLengths[lvl];
     }
     if (romPaddingSize > 0) {
         await outputAdapter.write(baseOffset + romPos, new Uint8Array(romPaddingSize));
@@ -1254,8 +1266,9 @@ export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romf
     await adapter.write(ncaOffset + sec0Start, exeHash.hashTable);
     let lvOff = 0;
     for (const lvl of romIvfc.hashLevels) {
+        const lvlLen = lvl.length;
         await adapter.write(ncaOffset + sec1Start + lvOff, lvl);
-        lvOff += lvl.length;
+        lvOff += lvlLen;
     }
 
     // ── Re-read NCA from output → contentId (sha256) ───────────────────────
@@ -1415,7 +1428,6 @@ export async function writeProgramNcaTwoPass({ meta, adapter, ncaOffset, streamE
         // buffer (detaches it), which zeroes .length on the caller's view —
         // `lvOff += lvl.length` after the write would add 0.
         const lvlLen = lvl.length;
-        _log('info', `  [dbg] ivfc level#${i}: lvOff=0x${lvOff.toString(16)} lvl.length=0x${lvlLen.toString(16)} type=${lvl.constructor.name} pos=0x${(ncaOffset + L.sec1Start + lvOff).toString(16)}`);
         await w(ncaOffset + L.sec1Start + lvOff, lvl);
         lvOff += lvlLen;
         track(lvlLen);
@@ -1428,7 +1440,6 @@ export async function writeProgramNcaTwoPass({ meta, adapter, ncaOffset, streamE
     });
     if (L.romPaddingSize > 0) await w(ncaOffset + L.sec1DataOff + L.romfsDataSize, new Uint8Array(L.romPaddingSize));
     _prog(1);
-    _log('info', `  [dbg] two-pass done: final=0x${expected.toString(16)} expected=0x${(ncaOffset + L.ncaSize).toString(16)}`);
 }
 
 export async function extractControl(updateNcaData, keys) {
