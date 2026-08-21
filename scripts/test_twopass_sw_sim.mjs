@@ -96,12 +96,12 @@ function compareFiles(a, b) {
 const DIR = '/Users/rmitkov/Downloads/Stardew Valley [NSZ]';
 const basePath = process.env.BASE_PATH || `${DIR}/Stardew Valley [0100E65002BB8000][v0] (0.87 GB).nsz`;
 const updatePath = process.env.UPDATE_PATH || `${DIR}/Stardew Valley [0100E65002BB8800][v1310720] (0.67 GB).nsz`;
-// Reference = our earlier verified blob output (288-byte PFS0 header, pre 0x10-padding fix).
-// The new output has a 272-byte header (0x10-aligned, matches yanu/Nintendo), so the
-// content after the header must equal the old output shifted by 16 bytes.
+// Reference = our verified output (sha 3bae0bac…, 272-byte PFS0 header,
+// 0x10-aligned, matches yanu/Nintendo) — same format as the new output, so the
+// comparison is a plain byte-for-byte match (shift 0).
 const refPath = process.env.REF_PATH || `${DIR}/Stardew Valley [0100E65002BB8000][v0] (0.87 GB)_updated.nsp`;
-const refHeaderSize = process.env.REF_HDR ? Number(process.env.REF_HDR) : 288;
-const yanuPath = `${DIR}/Stardew Valley [0100E65002BB8000][v0] (0.87 GB) updated in yanu.nsp`;
+const refHeaderSize = process.env.REF_HDR ? Number(process.env.REF_HDR) : 272;
+const yanuPath = process.env.YANU_PATH || '/Users/rmitkov/Downloads/Stardew Valley [0100E65002BB8000][v0] (0.87 GB) updated in yanu.nsp';
 
 const keys = KeysParser.parse(fs.readFileSync('static/prod.keys', 'utf8'));
 const log = (level, msg) => { if (!process.env.QUIET) console.log(`[${level.toUpperCase()}] ${msg}`); };

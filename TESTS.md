@@ -260,6 +260,21 @@ node nsz-cli.js --merge a.nsp b.nsp -o ./out --rm-source              # delete s
 
 ---
 
+### Update pipeline tests (Node.js)
+
+Test data: `/Users/rmitkov/Downloads/Stardew Valley [NSZ]/` (base `.nsz` v0 + update `.nsz` v1310720), yanu reference at the Downloads root, verified output `[NSZ]/…_updated.nsp` (sha256 `3bae0bac…`, 701,770,512 B).
+
+| Script | What it verifies | Run (workdir) |
+|---|---|---|
+| `scripts/test_update_e2e.mjs` | fd (seekback) update e2e; member compare vs yanu reference (Program/CNMT contentId diff is the documented repack artifact, not a failure) | `scripts/` — `node test_update_e2e.mjs` |
+| `scripts/test_update_sw_sim.mjs` | **all three modes** — fd/seekback, SW-sim/two-pass, fd/buffered — must yield ONE sha256 (`3bae0bac…`) and `exit(1)` on mismatch | `scripts/` — `node test_update_sw_sim.mjs` |
+| `scripts/test_twopass_sw_sim.mjs` | two-pass through a faithful SW simulation (detach + copy transfer modes): 272 B header, yanu total size, 0 gap-fills/backward writes, content byte-identical to the verified output | repo root — `node scripts/test_twopass_sw_sim.mjs` |
+| `scripts/test_sw_chunk.mjs` | `sw-downloader.js` unit test (FakeSW with ack mocking): byte-for-byte stream equality for the 14-write buffered sequence (scaled), wasm-subarray safety (no detached transfer), small-write zero-copy, gap-fill correctness | `scripts/` — `node test_sw_chunk.mjs` |
+
+Analysis tools (persisted forensics): `scripts/cmp_nsp_top.mjs` (top-level NSP PFS0 + Program NCA section tables of two outputs), `scripts/cmp_tail.mjs` (common-region diff + tail analysis of the larger file), `scripts/dump_buffered_writes.mjs` (buffered-path write sequence: pos/len/gap/backward per write), `scripts/cmp_exefs.mjs` / `cmp_exefs2.mjs` (ExeFS/RomFS bucket diffing vs the original update).
+
+---
+
 ## 4. Test Coverage Summary
 
 | Component | Python Ref | Node.js | Browser |
@@ -276,6 +291,9 @@ node nsz-cli.js --merge a.nsp b.nsp -o ./out --rm-source              # delete s
 | NSP/XCI merge (union + dedup, XCI inputs) | ✅ FinalRom merger | ✅ CLI (synthetic NSP + XCI) | ✅ browser/Playwright |
 | NSZ/XCZ merge (NCZ decompression to .nca) | - | ✅ test_merge_ncz.mjs (streaming + NCZBLOCK) | ✅ browser/Playwright |
 | NSP split (CNMT grouping, per-title NSP) | ✅ FinalRom unmerger | ✅ CLI (synthetic NSP + real keys) | ✅ browser/Playwright |
+| Update: 3 modes ≡ 1 sha (Stardew) | ✅ yanu reference | ✅ test_update_sw_sim.mjs, test_update_e2e.mjs | ✅ browser retest |
+| Update two-pass SW sim (detach + copy) | ✅ yanu size | ✅ test_twopass_sw_sim.mjs | - |
+| SW backpressure (PULL ack flow) | - | ✅ test_sw_chunk.mjs | - |
 
 ---
 
