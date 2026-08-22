@@ -1197,7 +1197,7 @@ export async function packPlaintextProgramNcaStreaming(exefsData, romfsData, con
 // streamExefs(stream)  : calls stream(chunk, offInExefsData) over the ExeFS PFS0 data
 // streamRomfs(stream)  : calls stream(chunk, offInRomfsData) over the merged RomFS data
 // Returns { hashHex, size }.
-export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romfsDataSize, titleId, keys, streamExefs, streamRomfs, log }) {
+export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romfsDataSize, titleId, keys, streamExefs, streamRomfs, log, progress }) {
     const _log = typeof log === 'function' ? log : () => {};
 
     // ── Layout (from sizes only) ───────────────────────────────────────────
@@ -1232,9 +1232,14 @@ export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romf
 
     // ── Stream RomFS data → output + IVFC hasher ───────────────────────────
     _log('info', '  Streaming RomFS (BKTR data) → output...');
+    const _prog = typeof progress === 'function' ? progress : () => {};
+    const romTotal = romfsDataSize || 1;
+    let romDone = 0;
     await streamRomfs(async (chunk, off) => {
         await adapter.write(ncaOffset + sec1DataOff + off, chunk);
         ivfc.update(chunk);
+        romDone += chunk.length;
+        _prog(romDone / romTotal);
     });
     const romIvfc = ivfc.finalize();
 
@@ -1328,7 +1333,7 @@ export function twoPassLayout(exefsSize, romfsDataSize) {
 }
 
 // Phase 1: compute metadata + contentId (no writes). Returns meta for Phase 2.
-export async function computeProgramNcaContentId({ exefsSize, romfsDataSize, titleId, keys, streamExefs, streamRomfs, log }) {
+export async function computeProgramNcaContentId({ exefsSize, romfsDataSize, titleId, keys, streamExefs, streamRomfs, log, progress }) {
     const _log = typeof log === 'function' ? log : () => {};
     const L = twoPassLayout(exefsSize, romfsDataSize);
     _log('info', `  Two-pass NCA layout: ExeFS=0x${L.exeSectionSize.toString(16)} (htable 0x${L.exeHtableSize.toString(16)}), RomFS=0x${L.romSectionSize.toString(16)} (levels 0x${L.hashLevelsSize.toString(16)}), total=0x${L.ncaSize.toString(16)}`);
@@ -1339,7 +1344,10 @@ export async function computeProgramNcaContentId({ exefsSize, romfsDataSize, tit
     const exeHash = pfs0.finalize();
 
     const ivfc = new StreamingIvfcHasher(romfsDataSize);
-    await streamRomfs(async (chunk, off) => { ivfc.update(chunk); });
+    const _prog = typeof progress === 'function' ? progress : () => {};
+    const romTotal = romfsDataSize || 1;
+    let romDone = 0;
+    await streamRomfs(async (chunk, off) => { ivfc.update(chunk); romDone += chunk.length; _prog(romDone / romTotal); });
     const romIvfc = ivfc.finalize();
 
     const sec0End = L.sec0Start + L.exeSectionSize;

@@ -566,7 +566,7 @@ export async function update(readers, output, options = {}) {
                         onChunk: (chunk, off) => emit(chunk, off),
                     });
                 },
-                log,
+                log, progress,
             });
 
             baseSource = null;
@@ -627,6 +627,7 @@ export async function update(readers, output, options = {}) {
             const { contentId, size: computedSize, meta } = await computeProgramNcaContentId({
                 exefsSize, romfsDataSize, titleId: base.cnmt.titleId, keys,
                 streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
+                progress: (p) => progress(p * 0.5),
             });
             log('info', `ContentId: ${contentId} (${computedSize} bytes)`);
 
@@ -702,6 +703,7 @@ export async function update(readers, output, options = {}) {
             const { contentId, size: computedSize, meta } = await computeProgramNcaContentId({
                 exefsSize, romfsDataSize, titleId: base.cnmt.titleId, keys,
                 streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
+                progress: (p) => progress(p * 0.5),
             });
             log('info', `ContentId: ${contentId} (${computedSize} bytes)`);
 
