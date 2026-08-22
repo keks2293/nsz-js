@@ -7,7 +7,7 @@ import { Cnmt } from './cnmt.js';
 import { sha256 } from '../crypto/sha256.js';
 import { mergeRomFS } from './bktr-merge.js';
 import { FileRangeSource, NczStreamSource, ViewRangeSource, SparseNcaView } from './range-source.js';
-import { preparePlaintextProgramNca, writePlaintextProgramNca, packProgramNcaStream, computeProgramNcaContentId, writeProgramNcaTwoPass, extractExefsStream, extractRomfsStream, createExefsAcidFilter, packMetaNca, extractExefs, extractRomfs, processNpdmAcid } from './nca-pack.js';
+import { preparePlaintextProgramNca, writePlaintextProgramNca, packProgramNcaStream, computeProgramNcaContentId, writeProgramNcaTwoPass, extractExefsStream, extractRomfsStream, createExefsAcidFilter, packMetaNca, extractExefs, extractRomfs, processNpdmAcid, twoPassLayout } from './nca-pack.js';
 import { AesXts } from '../crypto/aes-ops.mjs';
 import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE } from './nca-utils.js';
 
@@ -23,27 +23,9 @@ function u16le(v) {
     return b;
 }
 
-function pad200(n) {
-    return (n + 0x1FF) & ~0x1FF;
-}
-
-function pad4000(n) {
-    return (n + 0x3FFF) & ~0x3FFF;
-}
-
-// Total plaintext Program NCA size from the ExeFS (PFS0 data) and RomFS (BKTR data)
-// sizes — mirrors the layout in packProgramNcaStream/preparePlaintextProgramNca.
+// Total plaintext Program NCA size from ExeFS and RomFS data sizes.
 function programNcaSize(exefsSize, romfsDataSize) {
-    const exeHtableSize = pad200(Math.ceil(exefsSize / 0x10000) * 0x20);
-    const exeSectionSize = pad200(exeHtableSize + exefsSize);
-    const h1 = pad4000(Math.ceil(romfsDataSize / 0x4000) * 0x20);
-    const h2 = pad4000(Math.ceil(h1 / 0x4000) * 0x20);
-    const h3 = pad4000(Math.ceil(h2 / 0x4000) * 0x20);
-    const h4 = pad4000(Math.ceil(h3 / 0x4000) * 0x20);
-    const h5 = pad4000(Math.ceil(h4 / 0x4000) * 0x20);
-    const hashLevelsSize = h1 + h2 + h3 + h4 + h5;
-    const romSectionSize = pad4000(hashLevelsSize + romfsDataSize);
-    return 0xC00 + exeSectionSize + romSectionSize;
+    return twoPassLayout(exefsSize, romfsDataSize).ncaSize;
 }
 
 // Extract romfsDataSize / exefsSize from the decrypted update NCA header.
