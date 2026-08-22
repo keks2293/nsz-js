@@ -220,3 +220,26 @@ export function sha256(data) {
     h.update(data);
     return h.hex();
 }
+
+import { isNode } from './platform.js';
+
+// Native SHA256 digest (Uint8Array) when available, pure JS fallback.
+// node:crypto — sync, ~17× faster than pure JS.
+// browser crypto.subtle — async, not used here (see browser fallback).
+let _nativeDigest = null;
+if (isNode) {
+    try {
+        const { createHash } = await import('node:crypto');
+        _nativeDigest = (data) => {
+            if (data instanceof Uint8Array || data instanceof ArrayBuffer) {
+                return new Uint8Array(createHash('sha256').update(Buffer.from(data)).digest());
+            }
+            return new Uint8Array(createHash('sha256').update(data).digest());
+        };
+    } catch {}
+}
+export const digest32 = _nativeDigest || ((data) => {
+    const h = new SHA256();
+    h.update(data);
+    return h.digest();
+});
