@@ -4,6 +4,13 @@ import { sha256, SHA256 } from '../crypto/sha256.js';
 import { PFS0, PFS0Writer } from './pfs0.js';
 import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE } from './nca-utils.js';
 
+// Fast hash: returns Uint8Array(32) directly, avoids hex string intermediate.
+function digest32(data) {
+    const h = new SHA256();
+    h.update(data);
+    return h.digest();
+}
+
 // Yanu update pipeline uses only:
 //   PROGRAM (--plaintext) → ExeFS + RomFS, CRYPT_NONE sections ✅
 //   META → PFS0, CRYPT_CTR, XTS header ✅
@@ -71,7 +78,7 @@ export function buildIvfcHashTree(romfsData) {
             // padding inline here.
             const block = new Uint8Array(blockSize);
             block.set(currentData.subarray(blockStart, blockEnd));
-            const hash = hexToBytes(sha256(block));
+            const hash = digest32(block);
             hashFile.set(hash, b * hashSize);
         }
         const paddedSize = pad4000(hashFile.length);
@@ -111,7 +118,7 @@ export function buildIvfcHashTree(romfsData) {
     }
 
     // Master hash = sha256(top hash level 0 (all 0x4000 bytes))
-    ivfcHeader.set(hexToBytes(sha256(reversedFiles[0])), 0xC0);
+    ivfcHeader.set(digest32(reversedFiles[0]), 0xC0);
 
     // Physical layout: concatenate all level files
     let physicalSize = 0;
@@ -137,7 +144,7 @@ export function buildPfs0HashTable(pfs0Data, hashBlock) {
         const blockStart = b * hashBlock;
         const blockEnd = Math.min(blockStart + hashBlock, pfs0Data.length);
         const block = pfs0Data.subarray(blockStart, blockEnd);
-        const hash = hexToBytes(sha256(block));
+        const hash = digest32(block);
         hashTable.set(hash, b * hashSize);
     }
 
@@ -145,7 +152,7 @@ export function buildPfs0HashTable(pfs0Data, hashBlock) {
     const padded = new Uint8Array(paddedSize);
     padded.set(hashTable);
 
-    const masterHash = hexToBytes(sha256(hashTable.subarray(0, hashTable.length)));
+    const masterHash = digest32(hashTable.subarray(0, hashTable.length));
 
     return {
         hashTable: padded,
@@ -179,7 +186,7 @@ export class StreamingIvfcHasher {
             this.bufLen += n;
             off += n;
             if (this.bufLen === this.blockSize) {
-                this.h1.set(hexToBytes(sha256(this.buf)), this.blockIdx * this.hashSize);
+                this.h1.set(digest32(this.buf), this.blockIdx * this.hashSize);
                 this.blockIdx++;
                 this.buf.fill(0); // zero before next block (last partial block must hash real+zeros)
                 this.bufLen = 0;
@@ -188,7 +195,7 @@ export class StreamingIvfcHasher {
     }
     finalize() {
         if (this.bufLen > 0) {
-            this.h1.set(hexToBytes(sha256(this.buf)), this.blockIdx * this.hashSize);
+            this.h1.set(digest32(this.buf), this.blockIdx * this.hashSize);
             this.blockIdx++;
         }
         // Build H1..H5 (each level = sha256 of 0x4000 blocks of the previous, padded level).
@@ -202,14 +209,14 @@ export class StreamingIvfcHasher {
             const numBlocks = Math.ceil(padded.length / this.blockSize);
             const next = new Uint8Array(numBlocks * this.hashSize);
             for (let b = 0; b < numBlocks; b++) {
-                next.set(hexToBytes(sha256(padded.subarray(b * this.blockSize, (b + 1) * this.blockSize))), b * this.hashSize);
+                next.set(digest32(padded.subarray(b * this.blockSize, (b + 1) * this.blockSize)), b * this.hashSize);
             }
             current = next;
         }
         // levels = [H1, H2, H3, H4, H5]; write order = [H5, H4, H3, H2, H1]
         const hashLevels = [levels[4], levels[3], levels[2], levels[1], levels[0]];
         const dataSizes = [levels[4].length, levels[3].length, levels[2].length, levels[1].length, levels[0].length, this.dataSize];
-        const masterHash = hexToBytes(sha256(levels[4]));
+        const masterHash = digest32(levels[4]);
         const ivfcHeader = this._buildHeader(dataSizes, masterHash);
         const physicalSize = dataSizes.reduce((a, b) => a + b, 0);
         return { hashLevels, dataSizes, masterHash, ivfcHeader, physicalSize };
@@ -255,7 +262,7 @@ export class StreamingPfs0Hasher {
             this.bufLen += n;
             off += n;
             if (this.bufLen === this.hashBlock) {
-                this.hashes.push(hexToBytes(sha256(this.buf)));
+                this.hashes.push(digest32(this.buf));
                 this.buf.fill(0);
                 this.bufLen = 0;
             }
@@ -263,14 +270,14 @@ export class StreamingPfs0Hasher {
     }
     finalize() {
         if (this.bufLen > 0) {
-            this.hashes.push(hexToBytes(sha256(this.buf.subarray(0, this.bufLen))));
+            this.hashes.push(digest32(this.buf.subarray(0, this.bufLen)));
         }
         const hashTable = new Uint8Array(this.hashes.length * this.hashSize);
         for (let i = 0; i < this.hashes.length; i++) hashTable.set(this.hashes[i], i * this.hashSize);
         const paddedSize = pad200(hashTable.length);
         const padded = new Uint8Array(paddedSize);
         padded.set(hashTable);
-        const masterHash = hexToBytes(sha256(hashTable)); // raw (unpadded) hash table
+        const masterHash = digest32(hashTable); // raw (unpadded) hash table
         return { hashTable: padded, rawHashSize: hashTable.length, masterHash };
     }
 }
@@ -564,14 +571,14 @@ export async function packMetaNca(cnmtData, pfs0FileName, titleId, keys, log) {
         const blockStart = b * hashBlock;
         const blockEnd = Math.min(blockStart + hashBlock, newPfs0.length);
         const block = newPfs0.subarray(blockStart, blockEnd);
-        const hash = hexToBytes(sha256(block));
+        const hash = digest32(block);
         htableRaw.set(hash, b * hashSize);
     }
     const htablePadded = new Uint8Array(pad200(htableRaw.length));
     htablePadded.set(htableRaw);
     const pfs0Offset = htablePadded.length; // = 0x200
     const pfs0Size = newPfs0.length;
-    const masterHash = hexToBytes(sha256(htableRaw));
+    const masterHash = digest32(htableRaw);
 
     // ── Section layout ─────────────────────────────────────────────────────
     const sectionDataSize = pad200(pfs0Offset + pfs0Size);
@@ -1253,8 +1260,8 @@ export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romf
     const romFsHeader = buildRomfsFsHeader(0x01);
     romFsHeader.set(romIvfc.ivfcHeader, 0x08);
     header.set(romFsHeader, 0x600);
-    header.set(hexToBytes(sha256(header.subarray(0x400, 0x600))), 0x280);
-    header.set(hexToBytes(sha256(header.subarray(0x600, 0x800))), 0x2A0);
+    header.set(digest32(header.subarray(0x400, 0x600)), 0x280);
+    header.set(digest32(header.subarray(0x600, 0x800)), 0x2A0);
     writeU64LE(header, 0x208, ncaSize);
     const hdrKey = typeof keys.header_key === 'string' ? hexToBytes(keys.header_key)
         : (keys.header_key instanceof Uint8Array ? keys.header_key : new Uint8Array(keys.header_key));
@@ -1352,8 +1359,8 @@ export async function computeProgramNcaContentId({ exefsSize, romfsDataSize, tit
     const romFsHeader = buildRomfsFsHeader(0x01);
     romFsHeader.set(romIvfc.ivfcHeader, 0x08);
     header.set(romFsHeader, 0x600);
-    header.set(hexToBytes(sha256(header.subarray(0x400, 0x600))), 0x280);
-    header.set(hexToBytes(sha256(header.subarray(0x600, 0x800))), 0x2A0);
+    header.set(digest32(header.subarray(0x400, 0x600)), 0x280);
+    header.set(digest32(header.subarray(0x600, 0x800)), 0x2A0);
     writeU64LE(header, 0x208, L.ncaSize);
     const hdrKey = typeof keys.header_key === 'string' ? hexToBytes(keys.header_key)
         : (keys.header_key instanceof Uint8Array ? keys.header_key : new Uint8Array(keys.header_key));
