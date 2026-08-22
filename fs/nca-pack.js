@@ -252,7 +252,8 @@ export class StreamingPfs0Hasher {
         this.hashSize = 0x20;
         this.buf = new Uint8Array(hashBlock);
         this.bufLen = 0;
-        this.hashes = [];
+        this._hashBuf = new Uint8Array(4096);
+        this._hashCount = 0;
     }
     update(chunk) {
         let off = 0;
@@ -263,17 +264,26 @@ export class StreamingPfs0Hasher {
             this.bufLen += n;
             off += n;
             if (this.bufLen === this.hashBlock) {
-                this.hashes.push(digest32(this.buf));
+                this._writeHash(digest32(this.buf));
                 this.bufLen = 0;
             }
         }
     }
+    _writeHash(h) {
+        const need = (this._hashCount + 1) * this.hashSize;
+        if (need > this._hashBuf.length) {
+            const grown = new Uint8Array(this._hashBuf.length * 2);
+            grown.set(this._hashBuf.subarray(0, this._hashCount * this.hashSize));
+            this._hashBuf = grown;
+        }
+        this._hashBuf.set(h, this._hashCount * this.hashSize);
+        this._hashCount++;
+    }
     finalize() {
         if (this.bufLen > 0) {
-            this.hashes.push(digest32(this.buf.subarray(0, this.bufLen)));
+            this._writeHash(digest32(this.buf.subarray(0, this.bufLen)));
         }
-        const hashTable = new Uint8Array(this.hashes.length * this.hashSize);
-        for (let i = 0; i < this.hashes.length; i++) hashTable.set(this.hashes[i], i * this.hashSize);
+        const hashTable = this._hashBuf.subarray(0, this._hashCount * this.hashSize);
         const paddedSize = pad200(hashTable.length);
         const padded = new Uint8Array(paddedSize);
         padded.set(hashTable);
