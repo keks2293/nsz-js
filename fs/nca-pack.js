@@ -1,15 +1,8 @@
 import { AesXts, AesCtr } from '../crypto/aes-ops.mjs';
 import { AesEcb } from '../crypto/aes128.js';
-import { sha256, SHA256 } from '../crypto/sha256.js';
+import { sha256, SHA256, digest32 } from '../crypto/sha256.js';
 import { PFS0, PFS0Writer } from './pfs0.js';
 import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE } from './nca-utils.js';
-
-// Fast hash: returns Uint8Array(32) directly, avoids hex string intermediate.
-function digest32(data) {
-    const h = new SHA256();
-    h.update(data);
-    return h.digest();
-}
 
 // Yanu update pipeline uses only:
 //   PROGRAM (--plaintext) → ExeFS + RomFS, CRYPT_NONE sections ✅
