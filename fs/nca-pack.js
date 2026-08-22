@@ -188,14 +188,15 @@ export class StreamingIvfcHasher {
             if (this.bufLen === this.blockSize) {
                 this.h1.set(digest32(this.buf), this.blockIdx * this.hashSize);
                 this.blockIdx++;
-                this.buf.fill(0); // zero before next block (last partial block must hash real+zeros)
                 this.bufLen = 0;
             }
         }
     }
     finalize() {
         if (this.bufLen > 0) {
-            this.h1.set(digest32(this.buf), this.blockIdx * this.hashSize);
+            const padded = new Uint8Array(this.blockSize);
+            padded.set(this.buf.subarray(0, this.bufLen));
+            this.h1.set(digest32(padded), this.blockIdx * this.hashSize);
             this.blockIdx++;
         }
         // Build H1..H5 (each level = sha256 of 0x4000 blocks of the previous, padded level).
@@ -263,7 +264,6 @@ export class StreamingPfs0Hasher {
             off += n;
             if (this.bufLen === this.hashBlock) {
                 this.hashes.push(digest32(this.buf));
-                this.buf.fill(0);
                 this.bufLen = 0;
             }
         }
