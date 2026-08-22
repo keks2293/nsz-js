@@ -46,6 +46,20 @@ function programNcaSize(exefsSize, romfsDataSize) {
     return 0xC00 + exeSectionSize + romSectionSize;
 }
 
+// Extract romfsDataSize / exefsSize from the decrypted update NCA header.
+// Used by the BKTR streaming paths (identical logic).
+function parseUpdateSectionSizes(updateHeaderDec, updateHeaderRaw, updateRomfsSec, updateExefsSec, keys) {
+    const hdrKey = typeof keys.header_key === 'string' ? hexToBytes(keys.header_key) : keys.header_key;
+    const decBytes = new AesXts(hdrKey).decrypt(updateHeaderRaw, 0);
+    const romfsIdx = updateHeaderDec.sections.indexOf(updateRomfsSec);
+    const romfsFsHdr = decBytes.subarray(0x400 + romfsIdx * 0x200, 0x400 + (romfsIdx + 1) * 0x200);
+    const romfsDataSize = Number(new DataView(romfsFsHdr.buffer, romfsFsHdr.byteOffset + 0x98, 8).getBigUint64(0, true));
+    const exefsIdx = updateHeaderDec.sections.indexOf(updateExefsSec);
+    const exefsFsHdr = decBytes.subarray(0x400 + exefsIdx * 0x200, 0x400 + (exefsIdx + 1) * 0x200);
+    const exefsSize = Number(new DataView(exefsFsHdr.buffer, exefsFsHdr.byteOffset + 0x48, 8).getBigUint64(0, true));
+    return { romfsDataSize, exefsSize, programSize: programNcaSize(exefsSize, romfsDataSize) };
+}
+
 // Build a ContentMeta: 0x20 header + extended header + 0x38 content infos (+ digest).
 function buildCnmt(tidHex, version, type, extHdr, entries, withDigest) {
     const cnmt = new Uint8Array(0x20 + extHdr.length + entries.length * 0x38 + (withDigest ? 0x20 : 0));
@@ -533,15 +547,7 @@ export async function update(readers, output, options = {}) {
             await new Promise(r => setTimeout(r, 0));
 
             // Precompute section data sizes from the update header (no buffering).
-            const hdrKey = typeof keys.header_key === 'string' ? hexToBytes(keys.header_key) : keys.header_key;
-            const updateDecBytes = new AesXts(hdrKey).decrypt(updateHeaderRaw, 0);
-            const updateRomfsSecIdx = updateHeaderDec.sections.indexOf(updateRomfsSec);
-            const updateRomfsFsHdr = updateDecBytes.subarray(0x400 + updateRomfsSecIdx * 0x200, 0x400 + (updateRomfsSecIdx + 1) * 0x200);
-            const romfsDataSize = Number(new DataView(updateRomfsFsHdr.buffer, updateRomfsFsHdr.byteOffset + 0x98, 8).getBigUint64(0, true));
-            const updateExefsSecIdx = updateHeaderDec.sections.indexOf(updateExefsSec);
-            const updateExefsFsHdr = updateDecBytes.subarray(0x400 + updateExefsSecIdx * 0x200, 0x400 + (updateExefsSecIdx + 1) * 0x200);
-            const exefsSize = Number(new DataView(updateExefsFsHdr.buffer, updateExefsFsHdr.byteOffset + 0x48, 8).getBigUint64(0, true));
-            const programSize = programNcaSize(exefsSize, romfsDataSize);
+            const { romfsDataSize, exefsSize, programSize } = parseUpdateSectionSizes(updateHeaderDec, updateHeaderRaw, updateRomfsSec, updateExefsSec, keys);
             log('info', `Program NCA (streaming): exefs=${exefsSize} romfs=${romfsDataSize} total=${programSize}`);
 
             const adapter = await buildAdapter(output, outRead, { log, progress });
@@ -609,15 +615,7 @@ export async function update(readers, output, options = {}) {
             log('info', 'Two-pass update (sequential output): BKTR merge, 6× source reads, ~200 KB memory...');
             await new Promise(r => setTimeout(r, 0));
 
-            const hdrKey = typeof keys.header_key === 'string' ? hexToBytes(keys.header_key) : keys.header_key;
-            const updateDecBytes = new AesXts(hdrKey).decrypt(updateHeaderRaw, 0);
-            const updateRomfsSecIdx = updateHeaderDec.sections.indexOf(updateRomfsSec);
-            const updateRomfsFsHdr = updateDecBytes.subarray(0x400 + updateRomfsSecIdx * 0x200, 0x400 + (updateRomfsSecIdx + 1) * 0x200);
-            const romfsDataSize = Number(new DataView(updateRomfsFsHdr.buffer, updateRomfsFsHdr.byteOffset + 0x98, 8).getBigUint64(0, true));
-            const updateExefsSecIdx = updateHeaderDec.sections.indexOf(updateExefsSec);
-            const updateExefsFsHdr = updateDecBytes.subarray(0x400 + updateExefsSecIdx * 0x200, 0x400 + (updateExefsSecIdx + 1) * 0x200);
-            const exefsSize = Number(new DataView(updateExefsFsHdr.buffer, updateExefsFsHdr.byteOffset + 0x48, 8).getBigUint64(0, true));
-            const programSize = programNcaSize(exefsSize, romfsDataSize);
+            const { romfsDataSize, exefsSize, programSize } = parseUpdateSectionSizes(updateHeaderDec, updateHeaderRaw, updateRomfsSec, updateExefsSec, keys);
             log('info', `Program NCA (two-pass): exefs=${exefsSize} romfs=${romfsDataSize} total=${programSize}`);
 
             const adapter = await buildAdapter(output, null, { log, progress });
