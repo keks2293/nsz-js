@@ -1312,7 +1312,7 @@ export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romf
 // Total: 6 source reads, ~200 KB memory (hash levels + header only).
 // streamExefs / streamRomfs must be re-callable (called up to 3× each).
 
-function _twoPassLayout(exefsSize, romfsDataSize) {
+export function twoPassLayout(exefsSize, romfsDataSize) {
     const exeHtableSize = pad200(Math.ceil(exefsSize / 0x10000) * 0x20);
     const exeSectionSize = pad200(exeHtableSize + exefsSize);
     const sec0Start = NCA_HEADER_SIZE;
@@ -1337,7 +1337,7 @@ function _twoPassLayout(exefsSize, romfsDataSize) {
 // Phase 1: compute metadata + contentId (no writes). Returns meta for Phase 2.
 export async function computeProgramNcaContentId({ exefsSize, romfsDataSize, titleId, keys, streamExefs, streamRomfs, log }) {
     const _log = typeof log === 'function' ? log : () => {};
-    const L = _twoPassLayout(exefsSize, romfsDataSize);
+    const L = twoPassLayout(exefsSize, romfsDataSize);
     _log('info', `  Two-pass NCA layout: ExeFS=0x${L.exeSectionSize.toString(16)} (htable 0x${L.exeHtableSize.toString(16)}), RomFS=0x${L.romSectionSize.toString(16)} (levels 0x${L.hashLevelsSize.toString(16)}), total=0x${L.ncaSize.toString(16)}`);
 
     _log('info', '  Pass 1: Computing hash metadata...');
