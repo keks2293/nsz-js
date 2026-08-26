@@ -1,7 +1,7 @@
-import { AesCtr } from '../crypto/aes-ops.mjs';
+import { AesCtr, AesXts } from '../crypto/aes-ops.mjs';
 import { PFS0 } from './pfs0.js';
 import { Cnmt } from './cnmt.js';
-import { toKeyBytes, deriveTitlekeyFromKeyArea, decryptNcaHeaderBytes } from './nca-utils.js';
+import { toKeyBytes, deriveTitlekeyFromKeyArea } from './nca-utils.js';
 
 const FsType = Object.freeze({ NONE: 0, PFS0: 2, ROMFS: 3 });
 
@@ -140,7 +140,7 @@ export function decryptNcaHeader(raw, keys = null) {
     const len = Math.min(0xC00, arr.length);
     // Header is ALWAYS XTS-encrypted (hacPack encrypts unconditionally).
     // cryptoType byte = keygen index, NOT "no encryption".
-    const decrypted = decryptNcaHeaderBytes(arr.subarray(0, len), keys);
+    const decrypted = new AesXts(headerKey).decrypt(arr.subarray(0, len), 0);
     return NCAHeader.parse(decrypted, keys);
 }
 
