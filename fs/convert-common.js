@@ -2,6 +2,7 @@
 // collection, and per-member write (decompress-or-copy + verify).
 
 import { NCZDecompressor, AdapterNCZReader, parseNczSections } from './ncz.js';
+import { copyRange } from './adapter.js';
 import { sha256 } from '../crypto/sha256.js';
 
 // ── NCA hash verification ───────────────────────────────────────────────────
@@ -95,5 +96,25 @@ export async function writeMember({ meta, adapter, writePos, verify, createHash,
             verifyNcaHash({ hash, inputName: meta.inputName, outputName: meta.name, cnmtHashMap, log });
         }
         await adapter.write(writePos, data);
+    }
+}
+
+// ── Streaming member write (merge / update) ───────────────────────────────
+
+// Write one member from a file reader: NCZ → streaming decompress, plain NCA
+// → copyRange. For NCZ with sections, pass `parsed` to skip re-parsing.
+// progress(fraction) is called during work.
+export async function writeFromReader(adapter, writePos, { reader, offset, size, isNcz, parsed }, progress) {
+    if (isNcz) {
+        const nczReader = new AdapterNCZReader(reader, offset, size);
+        const decomp = new NCZDecompressor(nczReader);
+        await decomp.decompress(
+            progress,
+            (chunk, chunkOffset) => adapter.write(writePos + chunkOffset, chunk),
+            parsed);
+    } else {
+        await copyRange(reader, offset, size,
+            (off, chunk) => adapter.write(writePos + off, chunk),
+            progress);
     }
 }
