@@ -1,8 +1,8 @@
-import { PFS0, PFS0Writer } from './pfs0.js';
+import { PFS0Writer } from './pfs0.js';
 import { buildAdapter, collectBlob, copyRange } from './adapter.js';
-import { XCIReader } from './xci.js';
 import { NCZDecompressor, AdapterNCZReader, parseNczSections } from './ncz.js';
 import { decryptNcaHeader, readCnmtFromMeta, FsType } from './nca.js';
+import { openContainer } from './container.js';
 
 function stem(name) {
     const dot = name.lastIndexOf('.');
@@ -15,31 +15,6 @@ function formatBytes(bytes) {
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-async function openContainer(r) {
-    const magic = await r.reader.read(0, 4);
-    const m = String.fromCharCode(magic[0], magic[1], magic[2], magic[3]);
-    if (m === 'PFS0') {
-        const pfs0 = await PFS0.open(r.reader);
-        return { kind: 'pfs0', entries: pfs0.getFiles() };
-    }
-    let head = await r.reader.read(0x100, 4);
-    let isHead = String.fromCharCode(head[0], head[1], head[2], head[3]) === 'HEAD';
-    if (!isHead) {
-        head = await r.reader.read(0x1100, 4);
-        isHead = String.fromCharCode(head[0], head[1], head[2], head[3]) === 'HEAD';
-    }
-    if (isHead) {
-        const xci = new XCIReader(r.reader);
-        await xci.parse();
-        const entries = await xci.getSecureFiles();
-        if (entries.length === 0) {
-            throw new Error(`mergeNSP: no secure partition files found in ${r.name}`);
-        }
-        return { kind: 'xci', entries };
-    }
-    throw new Error(`mergeNSP: unsupported container in ${r.name} (magic ${m})`);
 }
 
 export async function mergeNSP(readers, output, options = {}) {
@@ -167,6 +142,7 @@ export async function mergeNSP(readers, output, options = {}) {
     }
 
     const totalSize = headerSize + totalDataSize;
+    log('info', `Merged NSP: ${members.length} members, ${totalSize} bytes`);
     if (output.memory) {
         return { size: totalSize, blob: collectBlob(adapter, totalSize), memberCount: members.length };
     }
