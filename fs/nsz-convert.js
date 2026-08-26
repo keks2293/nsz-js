@@ -1,38 +1,12 @@
 import { PFS0Writer, PFS0 } from './pfs0.js';
-import { NCZDecompressor, AdapterNCZReader, parseNczSections } from './ncz.js';
-import { sha256 } from '../crypto/sha256.js';
-import { extractContentHashMap } from './cnmt-hashes.js';
 import { buildAdapter, collectBlob } from './adapter.js';
+import { collectFileMetas, writeMember } from './convert-common.js';
 
-function verifyHashByNcaId(hash, ncaId, cnmtHashMap, onLog) {
-    const log = onLog || ((level, msg) => console.log(`  ${msg}`));
-    if (cnmtHashMap.size > 0) {
-        const expected = cnmtHashMap.get(ncaId);
-        if (expected && expected === hash) {
-            log('success', `[VERIFIED]   ${ncaId} ${hash}`);
-        } else {
-            log('error', `[CORRUPTED]  ${ncaId} expected ${expected || 'none'}, got ${hash}`);
-            throw new Error(`Verification detected hash mismatch: ${ncaId}`);
-        }
-    }
-}
-
-function verifyFileNameHash(hash, nczName, ncaName, onLog) {
-    const log = onLog || ((level, msg) => console.log(`  ${msg}`));
-    const fileNameHash = nczName.replace(/\.[^.]+$/, '').toLowerCase().slice(0, 32);
-    if (hash.slice(0, 32) === fileNameHash) {
-        log('success', `[VERIFIED]   ${ncaName} ${hash}`);
-    } else {
-        log('error', `[MISMATCH]   Filename starts with ${fileNameHash} but ${hash.slice(0, 32)} was expected`);
-        throw new Error(`Verification detected hash mismatch: ${ncaName}`);
-    }
-}
-
-async function convertNSZStreaming(pfs0, adapter, options, cnmtHashes = new Set()) {
+async function convertNSZStreaming(pfs0, adapter, options, cnmtHashes = new Map()) {
     const { verify = false, fixPadding = false } = options;
     const files = pfs0.getFiles();
 
-    const outputMeta = await collectOutputMeta(files, adapter);
+    const outputMeta = await collectFileMetas(files, adapter);
 
     const writer = new PFS0Writer(fixPadding, pfs0.stringTableSize);
     for (const m of outputMeta) {
@@ -52,68 +26,19 @@ async function convertNSZStreaming(pfs0, adapter, options, cnmtHashes = new Set(
         const f = files[idx];
         const writePos = pfs0Header.headerSize + writer.files[idx].offset;
 
-        if (meta.isNcz) {
-            options.log('info', `[EXISTS]     ${f.name}`);
-            const hasher = verify ? options.createHash() : null;
-            const nczReader = new AdapterNCZReader(adapter, meta.offset, meta.nczLen);
-            const decomp = new NCZDecompressor(nczReader);
-            await decomp.decompress(
-                (p) => options.progress(pct(dataWritten + meta.size * p), `Decompressing ${f.name}...`),
-                async (chunk, offset) => {
-                    if (hasher) hasher.update(chunk);
-                    await adapter.write(writePos + offset, chunk);
-                },
-                meta.parsed);
-            if (hasher) {
-                const hash = hasher.hex();
-                options.log('info', `[NCA HASH]   ${hash}`);
-                if (meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                    const ncaId = meta.name.replace(/\.nca$/i, '');
-                    if (cnmtHashes.size > 0) {
-                        verifyHashByNcaId(hash, ncaId, cnmtHashes, options.log);
-                    } else {
-                        verifyFileNameHash(hash, f.name, meta.name, options.log);
-                    }
-                }
-            }
-        } else {
-            options.log('info', `[EXISTS]     ${f.name}`);
-            options.progress(pct(dataWritten), `Copying ${f.name}...`);
-            const data = await adapter.read(meta.offset, meta.size);
-            if (verify && meta.name.endsWith('.nca') && !meta.name.endsWith('.cnmt.nca')) {
-                const hash = await sha256(data);
-                options.log('info', `[NCA HASH]   ${hash}`);
-                const ncaId = meta.name.replace(/\.nca$/i, '');
-                if (cnmtHashes.size > 0) {
-                    verifyHashByNcaId(hash, ncaId, cnmtHashes, options.log);
-                } else {
-                    verifyFileNameHash(hash, f.name, meta.name, options.log);
-                }
-            }
-            await adapter.write(writePos, data);
-        }
+        options.log('info', `[EXISTS]     ${f.name}`);
+        await writeMember({
+            meta, adapter, writePos,
+            verify, createHash: options.createHash, cnmtHashMap: cnmtHashes,
+            log: options.log, progress: options.progress,
+            progressBase: dataWritten, pct,
+        });
 
         dataWritten += meta.size;
         options.progress(pct(dataWritten), `File ${idx + 1}/${files.length} done`);
     }
 
     return { headerSize: pfs0Header.headerSize, totalDataSize };
-}
-
-async function collectOutputMeta(files, adapter) {
-    const outputMeta = [];
-    for (const f of files) {
-        const isNcz = f.name.toLowerCase().endsWith('.ncz');
-        const outputName = isNcz ? f.name.slice(0, -4) + '.nca' : f.name;
-        if (isNcz) {
-            const headerReader = new AdapterNCZReader(adapter, f.offset, Math.min(f.size, 0x10000));
-            const parsed = await parseNczSections(headerReader);
-            outputMeta.push({ name: outputName, size: parsed.ncaSize, isNcz: true, offset: f.offset, nczLen: f.size, parsed });
-        } else {
-            outputMeta.push({ name: outputName, size: f.size, isNcz: false, offset: f.offset });
-        }
-    }
-    return outputMeta;
 }
 
 export async function convertNSZ(reader, output, options = {}) {
@@ -142,5 +67,3 @@ export async function convertNSZ(reader, output, options = {}) {
     if (output.memory) return { size: totalSize, blob: collectBlob(adapter, totalSize) };
     return { size: totalSize };
 }
-
-
