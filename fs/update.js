@@ -279,6 +279,63 @@ function finishOutput(adapter, pfs0Header, totalData, pw, output, log) {
     return { size: totalSize, memberCount: pw.files.length };
 }
 
+// Build the final output PFS0 layout: program NCA first, then other NCAs,
+// then the rebuilt CNMT (yanu member order). Returns the writer, header,
+// total data size, and the Program NCA's offset within the output.
+function buildFinalPfs0(programName, programSize, otherNcas, rebuilt) {
+    const pw = new PFS0Writer(true, null, 0x10);
+    pw.add(programName, programSize);
+    for (const m of otherNcas) pw.add(m.name, m.size);
+    pw.add(rebuilt.name, rebuilt.nca.length);
+    const pfs0Header = pw.buildHeader();
+    const totalData = pw.files.reduce((s, f) => s + f.size, 0);
+    const programNcaPfs0Offset = pfs0Header.headerSize + pw.files[0].offset;
+    return { pw, pfs0Header, totalData, programNcaPfs0Offset };
+}
+
+// Write the tail of the output NSP: the non-Program NCAs, then the CNMT,
+// then finish. pfs0Header is the header used to compute member offsets
+// (normally the one just built; the seekback path passes its layout header,
+// which is size-identical to the real one).
+async function finalizeOutputNsP(adapter, { pfs0Header, pw, otherNcas, programSize, totalData, rebuilt, update, output, log, progress }) {
+    await writeOtherNcas(adapter, update, pfs0Header, pw, otherNcas, programSize, totalData, progress, log);
+    await writeCnmt(adapter, pfs0Header, pw, rebuilt, log);
+    return finishOutput(adapter, pfs0Header, totalData, pw, output, log);
+}
+
+// Two-pass tail (shared by BKTR and non-BKTR two-pass paths): rebuild the CNMT,
+// build the final PFS0, write the Program NCA in pass 2 (streaming), then the
+// other NCAs + CNMT. Sources must already be nulled by the caller.
+async function writeTwoPassProgramAndFinish({ adapter, base, update, keys, log, progress, output, contentId, programSize, meta, makeStreamExefs, makeStreamRomfs }) {
+    const otherNcas = collectOtherNcas(update);
+    const rebuilt = await rebuildCnmtNca(base, update, keys, log, { hashHex: contentId, size: programSize });
+    const { pw, pfs0Header, totalData, programNcaPfs0Offset } = buildFinalPfs0(`${contentId.slice(0, 32)}.nca`, programSize, otherNcas, rebuilt);
+    await adapter.write(0, pfs0Header.buffer);
+    log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${pw.files.length} members`);
+    await writeProgramNcaTwoPass({
+        meta, adapter, ncaOffset: programNcaPfs0Offset,
+        streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
+        progress: (p) => progress((pfs0Header.headerSize + p * programSize) / totalData, 'Writing Program NCA...'),
+    });
+    return finalizeOutputNsP(adapter, { pfs0Header, pw, otherNcas, programSize, totalData, rebuilt, update, output, log, progress });
+}
+
+// Factory for a streaming ExeFS extractor with NPDM ACID filtering applied.
+// Each call returns a fresh stream (new acidFilter) so pass-1 and pass-2
+// streaming both get clean state.
+function makeExefsStream(updateInput, keys, updateTikData, options, log) {
+    return async (emit) => {
+        const acidFilter = createExefsAcidFilter({
+            keepSig: options.keepNpdmAcidSig === true,
+            keepKey: options.keepNpdmAcidKey === true,
+        }, log);
+        await extractExefsStream(updateInput, keys, updateTikData, async (chunk, off) => {
+            await acidFilter(chunk, off);
+            await emit(chunk, off);
+        });
+    };
+}
+
 export async function update(readers, output, options = {}) {
     const { log = () => {}, progress = () => {}, keys = null, updateMode = 'auto' } = options;
 
@@ -572,18 +629,12 @@ export async function update(readers, output, options = {}) {
             baseParsed = null;
 
             const rebuilt = await rebuildCnmtNca(base, update, keys, log, { hashHex: contentId, size: programSize });
-            const realPw = new PFS0Writer(true, null, 0x10);
-            realPw.add(`${contentId.slice(0, 32)}.nca`, programSize);
-            for (const m of otherNcas) realPw.add(m.name, m.size);
-            realPw.add(rebuilt.name, rebuilt.nca.length);
-            const realPfs0 = realPw.buildHeader();
+            const { pw: realPw, pfs0Header: realPfs0, totalData } = buildFinalPfs0(`${contentId.slice(0, 32)}.nca`, programSize, otherNcas, rebuilt);
             await adapter.write(0, realPfs0.buffer);
             log('info', `PFS0 header ${realPfs0.headerSize} bytes, ${realPw.files.length} members`);
 
-            const totalData = realPw.files.reduce((s, f) => s + f.size, 0);
-            await writeOtherNcas(adapter, update, pfs0Header, realPw, otherNcas, programSize, totalData, progress, log);
-            await writeCnmt(adapter, pfs0Header, realPw, rebuilt, log);
-            return finishOutput(adapter, pfs0Header, totalData, realPw, output, log);
+            // Tail uses the layout header (pfs0Header), size-identical to realPfs0.
+            return finalizeOutputNsP(adapter, { pfs0Header, pw: realPw, otherNcas, programSize, totalData, rebuilt, update, output, log, progress });
         }
 
         // ── Two-pass path (sequential output + BKTR merge): no data buffer ──
@@ -600,16 +651,7 @@ export async function update(readers, output, options = {}) {
 
             const adapter = await buildAdapter(output, null, { log, progress });
 
-            const makeStreamExefs = () => async (emit) => {
-                const acidFilter = createExefsAcidFilter({
-                    keepSig: options.keepNpdmAcidSig === true,
-                    keepKey: options.keepNpdmAcidKey === true,
-                }, log);
-                await extractExefsStream(updateInput, keys, updateTikData, async (chunk, off) => {
-                    await acidFilter(chunk, off);
-                    await emit(chunk, off);
-                });
-            };
+            const makeStreamExefs = () => makeExefsStream(updateInput, keys, updateTikData, options, log);
             const _baseReaderRef = baseReader;
             const _baseParsedRef = baseParsed;
             const makeStreamRomfs = () => async (emit) => {
@@ -633,27 +675,10 @@ export async function update(readers, output, options = {}) {
             updateSource = null;
             baseParsed = null;
 
-            const otherNcas = collectOtherNcas(update);
-            const rebuilt = await rebuildCnmtNca(base, update, keys, log, { hashHex: contentId, size: programSize });
-            const finalPw = new PFS0Writer(true, null, 0x10);
-            finalPw.add(`${contentId.slice(0, 32)}.nca`, programSize);
-            for (const m of otherNcas) finalPw.add(m.name, m.size);
-            finalPw.add(rebuilt.name, rebuilt.nca.length);
-
-            const pfs0Header = finalPw.buildHeader();
-            await adapter.write(0, pfs0Header.buffer);
-            log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${finalPw.files.length} members`);
-
-            const totalData = finalPw.files.reduce((s, f) => s + f.size, 0);
-            const programNcaPfs0Offset = pfs0Header.headerSize + finalPw.files[0].offset;
-            await writeProgramNcaTwoPass({
-                meta, adapter, ncaOffset: programNcaPfs0Offset,
-                streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
-                progress: (p) => progress((pfs0Header.headerSize + p * programSize) / totalData, 'Writing Program NCA...'),
+            return await writeTwoPassProgramAndFinish({
+                adapter, base, update, keys, log, progress, output,
+                contentId, programSize, meta, makeStreamExefs, makeStreamRomfs,
             });
-            await writeOtherNcas(adapter, update, pfs0Header, finalPw, otherNcas, programSize, totalData, progress, log);
-            await writeCnmt(adapter, pfs0Header, finalPw, rebuilt, log);
-            return finishOutput(adapter, pfs0Header, totalData, finalPw, output, log);
         }
 
         // ── Non-BKTR two-pass streaming: base RomFS + update ExeFS ──────────
@@ -677,16 +702,7 @@ export async function update(readers, output, options = {}) {
 
             const adapter = await buildAdapter(output, null, { log, progress });
 
-            const makeStreamExefs = () => async (emit) => {
-                const acidFilter = createExefsAcidFilter({
-                    keepSig: options.keepNpdmAcidSig === true,
-                    keepKey: options.keepNpdmAcidKey === true,
-                }, log);
-                await extractExefsStream(updateInput, keys, updateTikData, async (chunk, off) => {
-                    await acidFilter(chunk, off);
-                    await emit(chunk, off);
-                });
-            };
+            const makeStreamExefs = () => makeExefsStream(updateInput, keys, updateTikData, options, log);
             const makeStreamRomfs = () => async (emit) => {
                 await extractRomfsStream(baseInput, keys, baseTikData, async (chunk, off) => {
                     await emit(chunk, off);
@@ -704,27 +720,10 @@ export async function update(readers, output, options = {}) {
             updateSource = null;
             baseParsed = null;
 
-            const otherNcas = collectOtherNcas(update);
-            const rebuilt = await rebuildCnmtNca(base, update, keys, log, { hashHex: contentId, size: programSize });
-            const finalPw = new PFS0Writer(true, null, 0x10);
-            finalPw.add(`${contentId.slice(0, 32)}.nca`, programSize);
-            for (const m of otherNcas) finalPw.add(m.name, m.size);
-            finalPw.add(rebuilt.name, rebuilt.nca.length);
-
-            const pfs0Header = finalPw.buildHeader();
-            await adapter.write(0, pfs0Header.buffer);
-            log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${finalPw.files.length} members`);
-
-            const totalData = finalPw.files.reduce((s, f) => s + f.size, 0);
-            const programNcaPfs0Offset = pfs0Header.headerSize + finalPw.files[0].offset;
-            await writeProgramNcaTwoPass({
-                meta, adapter, ncaOffset: programNcaPfs0Offset,
-                streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
-                progress: (p) => progress((pfs0Header.headerSize + p * programSize) / totalData, 'Writing Program NCA...'),
+            return await writeTwoPassProgramAndFinish({
+                adapter, base, update, keys, log, progress, output,
+                contentId, programSize, meta, makeStreamExefs, makeStreamRomfs,
             });
-            await writeOtherNcas(adapter, update, pfs0Header, finalPw, otherNcas, programSize, totalData, progress, log);
-            await writeCnmt(adapter, pfs0Header, finalPw, rebuilt, log);
-            return finishOutput(adapter, pfs0Header, totalData, finalPw, output, log);
         }
 
         // ── BKTR buffered path (forced buffered mode) ────────────────────────
@@ -767,25 +766,17 @@ export async function update(readers, output, options = {}) {
 
         const otherNcas = collectOtherNcas(update);
 
-        const finalPw = new PFS0Writer(true, null, 0x10);
-        finalPw.add(`${mergedProgram.id}.nca`, mergedProgram.size);
-        for (const m of otherNcas) finalPw.add(m.name, m.size);
-        finalPw.add(rebuilt.name, rebuilt.nca.length);
+        const { pw, pfs0Header, totalData, programNcaPfs0Offset } = buildFinalPfs0(`${mergedProgram.id}.nca`, mergedProgram.size, otherNcas, rebuilt);
 
         const adapter = await buildAdapter(output, null, { log, progress });
-        const pfs0Header = finalPw.buildHeader();
         await adapter.write(0, pfs0Header.buffer);
-        log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${finalPw.files.length} members`);
+        log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${pw.files.length} members`);
 
-        const programNcaPfs0Offset = pfs0Header.headerSize + finalPw.files[0].offset;
         log('info', 'Packing merged Program NCA (streaming)...');
         await new Promise(r => setTimeout(r, 0));
         await writePlaintextProgramNca(preparedProgram, adapter, log, programNcaPfs0Offset);
 
-        const totalData = finalPw.files.reduce((s, f) => s + f.size, 0);
-        await writeOtherNcas(adapter, update, pfs0Header, finalPw, otherNcas, mergedProgram.size, totalData, progress, log);
-        await writeCnmt(adapter, pfs0Header, finalPw, rebuilt, log);
-        return finishOutput(adapter, pfs0Header, totalData, finalPw, output, log);
+        return finalizeOutputNsP(adapter, { pfs0Header, pw, otherNcas, programSize: mergedProgram.size, totalData, rebuilt, update, output, log, progress });
     }
 
     // ── Non-merge path (original, buffered) ─────────────────────────────────
