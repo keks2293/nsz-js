@@ -9,6 +9,7 @@ import { mergeRomFS } from './bktr-merge.js';
 import { FileRangeSource, NczStreamSource, ViewRangeSource, SparseNcaView } from './range-source.js';
 import { preparePlaintextProgramNca, writePlaintextProgramNca, packProgramNcaStream, computeProgramNcaContentId, writeProgramNcaTwoPass, extractExefsStream, extractRomfsStream, createExefsAcidFilter, packMetaNca, extractExefs, extractRomfs, processNpdmAcid, twoPassLayout } from './nca-pack.js';
 import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE, decryptNcaHeaderBytes, findRomfsFsHeader } from './nca-utils.js';
+import { writeFromReader } from './convert-common.js';
 
 function u32le(v) {
     const b = new Uint8Array(4);
@@ -207,7 +208,13 @@ function collectOtherNcas(update) {
         if (e.type === 6 || e.type === 1) continue;
         const src = update.entries.find(x =>
             x.name.toLowerCase().startsWith(e.ncaId) && !x.name.toLowerCase().endsWith('.cnmt.nca'));
-        if (src) otherNcas.push({ name: src.name.replace(/\.ncz$/i, '.nca'), size: e.size, src });
+        if (src) otherNcas.push({
+            name: src.name.replace(/\.ncz$/i, '.nca'),
+            size: e.size,
+            reader: update.reader,
+            offset: src.offset,
+            isNcz: src.name.toLowerCase().endsWith('.ncz'),
+        });
     }
     otherNcas.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     return otherNcas;
@@ -215,22 +222,12 @@ function collectOtherNcas(update) {
 
 async function writeOtherNcas(adapter, update, pfs0Header, pw, otherNcas, written, totalData, progress, log) {
     for (let i = 0; i < otherNcas.length; i++) {
+        const m = otherNcas[i];
         const member = pw.files[i + 1];
-        const src = otherNcas[i].src;
         const pos = pfs0Header.headerSize + member.offset;
-        if (src.name.toLowerCase().endsWith('.ncz')) {
-            const nczReader = new AdapterNCZReader(update.reader, src.offset, src.size);
-            const parsed = await parseNczSections(nczReader);
-            const decomp = new NCZDecompressor(nczReader);
-            await decomp.decompress(
-                (p) => progress((written + member.size * p) / totalData, `Decompressing ${member.name}...`),
-                async (chunk, offset) => { await adapter.write(pos + offset, chunk); },
-                parsed);
-        } else {
-            await copyRange(update.reader, src.offset, member.size,
-                (off, chunk) => adapter.write(pos + off, chunk));
-        }
-        log('info', `[WRITTEN] ${member.name} (${member.size} bytes)`);
+        await writeFromReader(adapter, pos, m,
+            (p) => progress((written + member.size * p) / totalData, `Decompressing ${m.name}...`));
+        log('info', `[WRITTEN] ${m.name} (${m.size} bytes)`);
         written += member.size;
     }
     return written;

@@ -1,8 +1,9 @@
 import { PFS0Writer } from './pfs0.js';
-import { buildAdapter, collectBlob, copyRange } from './adapter.js';
-import { NCZDecompressor, AdapterNCZReader, parseNczSections } from './ncz.js';
-import { decryptNcaHeader, readCnmtFromMeta, FsType } from './nca.js';
+import { buildAdapter, collectBlob } from './adapter.js';
+import { parseNczSections, AdapterNCZReader } from './ncz.js';
+import { decryptNcaHeader, readCnmtFromMeta } from './nca.js';
 import { openContainer } from './container.js';
+import { writeFromReader } from './convert-common.js';
 
 function stem(name) {
     const dot = name.lastIndexOf('.');
@@ -75,27 +76,25 @@ export async function mergeNSP(readers, output, options = {}) {
         const entries = inputInfo.entries;
 
         for (const f of entries) {
-            const isNcz = f.name.toLowerCase().endsWith('.ncz');
-            const outputName = isNcz ? f.name.slice(0, -4) + '.nca' : f.name;
-            const ncaStem = stem(outputName);
+            const ncaStem = stem(f.outputName);
 
-            if (seenNames.has(outputName)) continue;
+            if (seenNames.has(f.outputName)) continue;
 
             if (deltaFrags && deltaFrags.has(ncaStem)) {
-                log('info', `[nodelta] excluding delta fragment ${outputName}`);
+                log('info', `[nodelta] excluding delta fragment ${f.outputName}`);
                 continue;
             }
 
-            seenNames.add(outputName);
-            if (isNcz) {
+            seenNames.add(f.outputName);
+            if (f.isNcz) {
                 const nczReader = new AdapterNCZReader(rReader, f.offset, f.size);
                 const parsed = await parseNczSections(nczReader);
                 const { ncaSize, sections } = parsed;
-                log('info', `[DECOMPRESS] ${f.name} -> ${outputName} (${formatBytes(ncaSize)})`);
-                members.push({ name: outputName, src: i, offset: f.offset, size: ncaSize, isNcz: true, nczLen: f.size, parsed });
+                log('info', `[DECOMPRESS] ${f.name} -> ${f.outputName} (${formatBytes(ncaSize)})`);
+                members.push({ name: f.outputName, reader: rReader, src: i, offset: f.offset, size: ncaSize, isNcz: true, nczLen: f.size, parsed });
                 totalDataSize += ncaSize;
             } else {
-                members.push({ name: outputName, src: i, offset: f.offset, size: f.size, isNcz: false });
+                members.push({ name: f.outputName, reader: rReader, src: i, offset: f.offset, size: f.size, isNcz: false });
                 totalDataSize += f.size;
             }
         }
@@ -121,23 +120,8 @@ export async function mergeNSP(readers, output, options = {}) {
         const m = members[i];
         const writePos = headerSize + writer.files[i].offset;
         const doneBefore = written;
-        if (m.isNcz) {
-            const nczReader = new AdapterNCZReader(readers[m.src].reader, m.offset, m.nczLen);
-            const decomp = new NCZDecompressor(nczReader);
-            await decomp.decompress(
-                (p) => progress((doneBefore + m.size * p) / totalDataSize, `Decompressing ${m.name}...`),
-                (chunk, offset) => adapter.write(writePos + offset, chunk),
-                m.parsed,
-            );
-        } else {
-            await copyRange(
-                readers[m.src].reader,
-                m.offset,
-                m.size,
-                (pos, data) => adapter.write(writePos + pos, data),
-                (n) => progress((doneBefore + n) / totalDataSize, `Copying ${m.name}...`),
-            );
-        }
+        await writeFromReader(adapter, writePos, m,
+            (p) => progress((doneBefore + m.size * p) / totalDataSize, `${m.isNcz ? 'Decompressing' : 'Copying'} ${m.name}...`));
         written = doneBefore + m.size;
     }
 
