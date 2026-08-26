@@ -113,8 +113,9 @@ export async function writeFromReader(adapter, writePos, { reader, offset, size,
             (chunk, chunkOffset) => adapter.write(writePos + chunkOffset, chunk),
             parsed);
     } else {
+        let copiedBytes = 0;
         await copyRange(reader, offset, size,
             (off, chunk) => adapter.write(writePos + off, chunk),
-            progress);
+            (n) => { copiedBytes += n; progress(copiedBytes / size); });
     }
 }
