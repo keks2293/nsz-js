@@ -1,6 +1,11 @@
  # NSZ to NSP Converter - Status Report
 
-    ## ✅ Recent Changes (2026-08-21)
+     ## ✅ Recent Changes (2026-08-22)
+
+     21. **Refactor: deduplicate shared NCA key/crypto + converter + update logic** — behavior-preserving cleanup, verified byte-identical on all paths.
+        - **NCA header assembly + XTS** (`nca-pack.js`): `fillPfs0Superblock` / `fillSectionHashes` / `encryptNcaHeader` replace 5×-copied PFS0-superblock/section-hash/XTS blocks; `packMetaNca` now uses `buildNcaHeader` (new `contentType` param) instead of a hand-rolled header + duplicate key-area ECB.
+
+     ## ✅ Recent Changes (2026-08-21)
 
     20. **Fix: Firefox SW killed during update prep — lazy SW writable wrapper** — `main.js`. Firefox (and other browsers) terminate idle SWs after ~30-60 s with no events. The update path called `createSWWritable()` (which starts the SW + iframe download) **before** the long prep phase (merging RomFS, hash precompute, ~1-2 min), so the SW was idle and killed before the first `write()`. Conversion worked because `createSWWritable()` → first `write()` happens immediately. **Fix**: wrap the SW writable in a lazy proxy that defers `dl.start()` + `dl.triggerDownload()` to the first `write()` call. SW lifecycle starts only when the pipeline is ready to send data.
 
