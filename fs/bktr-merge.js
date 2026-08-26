@@ -136,9 +136,7 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
     // up front and it lived alongside `merged` for the entire merge).
     // Counter base = section offset (AesCtr counter = absolute section byte / 16).
     const baseFsHdr = baseDecHeader.subarray(0x400 + baseRomfsSecMeta.secIdx * 0x200, 0x400 + baseRomfsSecMeta.secIdx * 0x200 + 0x200);
-    const baseSectionCtrRaw = baseFsHdr.subarray(0x140, 0x148);
-    const baseNonce = new Uint8Array(8);
-    for (let j = 0; j < 8; j++) baseNonce[j] = baseSectionCtrRaw[7 - j];
+    const baseNonce = reversedSectionCtr(baseFsHdr);
     const baseCtr = new AesCtr(baseTitlekey, baseNonce);
     const BASE_DECRYPT_CHUNK = 0x1000000; // 16 MB
 

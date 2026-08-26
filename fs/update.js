@@ -666,7 +666,7 @@ export async function update(readers, output, options = {}) {
             const baseDecBytes = decryptNcaHeaderBytes(baseHeaderRaw, keys);
             const updateDecBytes = decryptNcaHeaderBytes(updateHeaderRaw, keys);
 
-            const { idx: romfsIdx } = findRomfsFsHeader(baseHeaderDec, 'base');
+            const { idx: romfsIdx } = findRomfsFsHeader(baseDecBytes, 'base');
             const baseRomfsFsHdr = baseDecBytes.subarray(0x400 + romfsIdx * 0x200, 0x400 + (romfsIdx + 1) * 0x200);
             const romfsDataSize = Number(new DataView(baseRomfsFsHdr.buffer, baseRomfsFsHdr.byteOffset + 0x98, 8).getBigUint64(0, true));
 
