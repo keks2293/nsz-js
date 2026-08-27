@@ -667,13 +667,24 @@ export async function update(readers, output, options = {}) {
             const _baseReaderRef = baseReader;
             const _baseParsedRef = baseParsed;
             const makeStreamRomfs = () => async (emit) => {
+                log('info', '[makeStreamRomfs] creating fresh base source...');
                 const freshBase = baseIsNcz
                     ? { headerRaw: baseHeaderRaw, source: new NczStreamSource(_baseReaderRef, _baseParsedRef, log) }
                     : baseInput;
-                await mergeRomFS(freshBase, updateInput, {
-                    keys, baseTik: baseTikData, updateTik: updateTikData,
-                    onChunk: (chunk, off) => emit(chunk, off),
-                });
+                log('info', '[makeStreamRomfs] mergeRomFS starting...');
+                let _mergeBytes = 0;
+                const _wd = setInterval(() => {
+                    log('info', `[makeStreamRomfs] watchdog: merge emitted ${(_mergeBytes / 1048576).toFixed(0)} MB so far`);
+                }, 15_000);
+                try {
+                    await mergeRomFS(freshBase, updateInput, {
+                        keys, baseTik: baseTikData, updateTik: updateTikData,
+                        onChunk: (chunk, off) => { _mergeBytes += chunk.length; emit(chunk, off); },
+                    });
+                } finally {
+                    clearInterval(_wd);
+                    log('info', `[makeStreamRomfs] mergeRomFS done (${(_mergeBytes / 1048576).toFixed(0)} MB emitted)`);
+                }
             };
 
             const { size: computedSize, contentId, meta } = await computeProgramNcaContentId({
