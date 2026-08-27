@@ -1,6 +1,9 @@
- # NSZ to NSP Converter - Status Report
+  # NSZ to NSP Converter - Status Report
 
-     ## ✅ Recent Changes (2026-08-27)
+     ## ✅ Recent Changes (2026-08-29)
+
+     27. **Optimization: cache `parseNczSections` result on the reader** — `fs/ncz.js`. `parseNczSections` now memoizes its result on `reader._nczParsed`. Multiple independent `AdapterNCZReader`/reader instances each trigger their own parse, but the update path creates several reader objects over the same NCZ file; caching on the reader avoids re-parsing the section table when the same reader object is reused. (Note: the BKTR update still needs 2+ distinct reader objects for the base NCZ across merge passes, so the cache only helps same-object repeats.)
+
 
      26. **Two-pass BKTR update: 2× romfs decompressions on seekable output, no placeholder PFS0 header** — `fs/nca-pack.js`, `fs/update.js`, `crypto/sha256.js`, `scripts/test_twopass_fsa_sim.mjs` (new). Previously `computeProgramNcaContentId` decompressed the entire RomFS once (for IVFC hash levels) and hashed the full NCA to get `contentId`; then `writeProgramNcaTwoPass` decompressed RomFS again for writing = 3 total NCZ decompressions. Now: Pass 1 streams ExeFS + RomFS, builds IVFC hash levels + NCA header, hashes the NCA up to hashLevels, then `clone()`s the SHA256 state into `sha256Mid` (no full-NCA hash). Pass 2 restores `sha256Mid` and streams RomFS chunks (updating SHA256 + writing simultaneously) → `contentId` = 2 RomFS decompressions. The PFS0 header has no contentId field besides the `<contentId32>.nca` filename, so `writeTwoPassProgramAndFinish` branches on adapter capability (`appendOnly` = writable without `seek()`):
         - **seekable (FSA / memory)**: layout computed in memory only (temp names 36/41 chars fix headerSize/offsets, same lengths as the real ones), NCA written first (adapter zero-fills `[0..programNcaPfs0Offset)`), real PFS0 header overwrites offset 0 at the end. `contentId` piggybacks on the Pass 2 write → 2× romfs reads.

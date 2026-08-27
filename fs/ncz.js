@@ -102,6 +102,8 @@ class FakeSection {
 }
 
 async function parseNczSections(reader) {
+    if (reader._nczParsed) return reader._nczParsed;
+
     const magicBytes = await reader.read(0, 8);
     const magic = bytesToAscii(magicBytes, 0, 8);
     console.log('[NCZ] magic at offset 0:', JSON.stringify(magic));
@@ -151,7 +153,9 @@ async function parseNczSections(reader) {
         ncaSize += s.size;
     }
 
-    return { sections, ncaSize, headerEnd: offset, ncaHeader };
+    const result = { sections, ncaSize, headerEnd: offset, ncaHeader };
+    reader._nczParsed = result;
+    return result;
 }
 
 class NCZDecompressor {
