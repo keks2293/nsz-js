@@ -4,6 +4,8 @@
 
      21. **Refactor: deduplicate shared NCA key/crypto + converter + update logic** — behavior-preserving cleanup, verified byte-identical on all paths.
         - **NCA header assembly + XTS** (`nca-pack.js`): `fillPfs0Superblock` / `fillSectionHashes` / `encryptNcaHeader` replace 5×-copied PFS0-superblock/section-hash/XTS blocks; `packMetaNca` now uses `buildNcaHeader` (new `contentType` param) instead of a hand-rolled header + duplicate key-area ECB.
+        - **Titlekey derivation** (`nca-utils.js`): `deriveTitlekeyFromKeyArea` / `extractTitlekeyFromTik` / `resolveTitlekey` / `decryptNcaHeaderBytes` / `toKeyBytes` / `reversedSectionCtr` / `findRomfsFsHeader` — previously copy-pasted across `nca-pack.js`, `nca.js`, `bktr.js`, `bktr-merge.js`. The master-key index now uses the hactool `nca.c` formula `max(crypto_type, crypto_type2)` then `--` if nonzero — no behavior change on our test vectors (both fields agree there).
+        - **update.js inline decrypt → nca-utils**: `parseUpdateSectionSizes` + non-BKTR two-pass path's inline `hexToBytes` + `AesXts` decrypt replaced by `decryptNcaHeaderBytes`; manual RomFS fsHeader search replaced by `findRomfsFsHeader`. Removed the direct `AesXts` import from update.js.
 
      ## ✅ Recent Changes (2026-08-21)
 
