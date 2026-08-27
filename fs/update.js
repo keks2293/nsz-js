@@ -275,20 +275,52 @@ async function finalizeOutputNsP(adapter, { pfs0Header, pw, otherNcas, programSi
     return finishOutput(adapter, pfs0Header, totalData, pw, output, log);
 }
 
-// Two-pass tail (shared by BKTR and non-BKTR two-pass paths): rebuild the CNMT,
-// build the final PFS0, write the Program NCA in pass 2 (streaming), then the
-// other NCAs + CNMT. Sources must already be nulled by the caller.
-async function writeTwoPassProgramAndFinish({ adapter, base, update, keys, log, progress, output, contentId, programSize, meta, makeStreamExefs, makeStreamRomfs }) {
+// Two-pass tail (shared by BKTR and non-BKTR two-pass paths): write the Program
+// NCA in pass 2 (streaming), rebuild the CNMT, then the other NCAs + CNMT.
+// Sources must already be nulled by the caller.
+//
+// No placeholder PFS0 header in either mode — only the write ORDER differs:
+//   appendOnly (SW download): the stream can only grow, so the PFS0 header
+//     (which contains the contentId filename) must be written BEFORE the NCA.
+//     contentId is therefore precomputed in Pass 1 (contentIdInPass1) and Pass 2
+//     skips the hash. 3× romfs reads.
+//   seekable (FSA / memory): the NCA is written first (the adapter zero-fills
+//     [0..programNcaPfs0Offset)), then the real header overwrites offset 0.
+//     contentId piggybacks on the Pass 2 write. 2× romfs reads.
+async function writeTwoPassProgramAndFinish({ adapter, base, update, keys, log, progress, output, programSize, meta, makeStreamExefs, makeStreamRomfs, contentId, appendOnly }) {
     const otherNcas = collectOtherNcas(update);
-    const rebuilt = await rebuildCnmtNca(base, update, keys, log, { hashHex: contentId, size: programSize });
-    const { pw, pfs0Header, totalData, programNcaPfs0Offset } = buildFinalPfs0(`${contentId.slice(0, 32)}.nca`, programSize, otherNcas, rebuilt);
-    await adapter.write(0, pfs0Header.buffer);
-    log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${pw.files.length} members`);
-    await writeProgramNcaTwoPass({
+    const progProgress = (headerSize, total) => (p) => progress((headerSize + p * programSize) / total, 'Writing Program NCA...');
+
+    if (appendOnly) {
+        // contentId is final after Pass 1 → real PFS0 header first, then the NCA.
+        const rebuilt = await rebuildCnmtNca(base, update, keys, log, { hashHex: contentId, size: programSize });
+        const { pw, pfs0Header, totalData, programNcaPfs0Offset } = buildFinalPfs0(`${contentId.slice(0, 32)}.nca`, programSize, otherNcas, rebuilt);
+        await adapter.write(0, pfs0Header.buffer);
+        log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${pw.files.length} members`);
+        await writeProgramNcaTwoPass({
+            meta, adapter, ncaOffset: programNcaPfs0Offset, contentId,
+            streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
+            progress: progProgress(pfs0Header.headerSize, totalData),
+        });
+        return finalizeOutputNsP(adapter, { pfs0Header, pw, otherNcas, programSize, totalData, rebuilt, update, output, log, progress });
+    }
+
+    // Seekable: compute the layout in memory only (temp names are the same
+    // LENGTH as the real ones — 36/41 chars — so headerSize and offsets are
+    // identical to the final header), write the NCA, then the real header at 0.
+    const TEMP_PROG = '0'.repeat(36);
+    const TEMP_CNMT = '0'.repeat(41); // matches `${id}.cnmt.nca` length
+    const { pfs0Header: layoutHdr, totalData: layoutTotal, programNcaPfs0Offset } = buildFinalPfs0(TEMP_PROG, programSize, otherNcas, { name: TEMP_CNMT, nca: new Uint8Array(0) });
+    const id = await writeProgramNcaTwoPass({
         meta, adapter, ncaOffset: programNcaPfs0Offset,
         streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
-        progress: (p) => progress((pfs0Header.headerSize + p * programSize) / totalData, 'Writing Program NCA...'),
+        progress: progProgress(layoutHdr.headerSize, layoutTotal),
     });
+    log('info', `ContentId: ${id} (${programSize} bytes)`);
+    const rebuilt = await rebuildCnmtNca(base, update, keys, log, { hashHex: id, size: programSize });
+    const { pw, pfs0Header, totalData } = buildFinalPfs0(`${id.slice(0, 32)}.nca`, programSize, otherNcas, rebuilt);
+    await adapter.write(0, pfs0Header.buffer);
+    log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${pw.files.length} members`);
     return finalizeOutputNsP(adapter, { pfs0Header, pw, otherNcas, programSize, totalData, rebuilt, update, output, log, progress });
 }
 
@@ -363,6 +395,7 @@ export async function update(readers, output, options = {}) {
             const src = base.entries.find(x =>
                 x.name.toLowerCase().startsWith(e.ncaId) && !x.name.toLowerCase().endsWith('.cnmt.nca'));
             if (src) {
+                log('info', `Base Program NCA: ${src.name} (${src.size} bytes)`);
                 baseProgramEntry = { entry: e, src };
             }
         }
@@ -372,6 +405,7 @@ export async function update(readers, output, options = {}) {
             const src = update.entries.find(x =>
                 x.name.toLowerCase().startsWith(e.ncaId) && !x.name.toLowerCase().endsWith('.cnmt.nca'));
             if (src) {
+                log('info', `Update Program NCA: ${src.name} (${src.size} bytes)`);
                 updateProgramEntry = { entry: e, src };
                 break;
             }
@@ -551,6 +585,10 @@ export async function update(readers, output, options = {}) {
         // PFS0 htable, IVFC levels and the PFS0 Program/CNMT names are written with
         // seek-back; the contentId comes from re-reading the written NCA.
         const outRead = await buildRead(output);
+        // Append-only output (SW download): the PFS0 header must be written
+        // before the NCA (no seek-back), so the contentId must be final after
+        // Pass 1. Seekable outputs (FSA / memory) can write the header last.
+        const appendOnly = !!(output.writable && typeof output.writable.seek !== 'function');
         if (hasBktrRomfs && outRead !== null && updateMode !== 'buffered') {
             log('info', 'Streaming update (seekable output): ExeFS + RomFS streamed via BKTR merge (no data buffer)...');
             await new Promise(r => setTimeout(r, 0));
@@ -610,12 +648,14 @@ export async function update(readers, output, options = {}) {
         }
 
         // ── Two-pass path (sequential output + BKTR merge): no data buffer ──
-        // Pass 1: stream BKTR merge → compute contentId (hash metadata only).
+        // Pass 1: stream BKTR merge → compute hash metadata (+ contentId on
+        //   append-only output, where the PFS0 header must precede the NCA).
         // Pass 2: stream BKTR merge → write NCA sequentially to output.
         // Memory: ~200 KB + streaming buffers (vs ~700 MB for buffered path).
-        // 6× source reads (4 for contentId, 2 for write) — trades I/O for memory.
+        // Seekable: 2× romfs reads (contentId piggybacks on the write).
+        // Append-only (SW): 3× romfs reads (contentId must be final in Pass 1).
         if (hasBktrRomfs && outRead === null && updateMode !== 'buffered') {
-            log('info', 'Two-pass update (sequential output): BKTR merge, 6× source reads, ~200 KB memory...');
+            log('info', `Two-pass update (sequential output): BKTR merge, ${appendOnly ? 3 : 2}× romfs reads, ~200 KB memory...`);
             await new Promise(r => setTimeout(r, 0));
 
             const { romfsDataSize, exefsSize, programSize } = parseUpdateSectionSizes(updateHeaderDec, updateHeaderRaw, updateRomfsSec, updateExefsSec, keys);
@@ -636,12 +676,15 @@ export async function update(readers, output, options = {}) {
                 });
             };
 
-            const { contentId, size: computedSize, meta } = await computeProgramNcaContentId({
+            const { size: computedSize, contentId, meta } = await computeProgramNcaContentId({
                 exefsSize, romfsDataSize, titleId: base.cnmt.titleId, keys,
                 streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
                 progress: (p) => progress(p * 0.5),
+                contentIdInPass1: appendOnly,
             });
-            log('info', `ContentId: ${contentId} (${computedSize} bytes)`);
+            log('info', contentId
+                ? `ContentId: ${contentId} (${computedSize} bytes)`
+                : `Program NCA: ${computedSize} bytes (contentId computed in Pass 2)`);
 
             baseSource = null;
             updateSource = null;
@@ -649,13 +692,15 @@ export async function update(readers, output, options = {}) {
 
             return await writeTwoPassProgramAndFinish({
                 adapter, base, update, keys, log, progress, output,
-                contentId, programSize, meta, makeStreamExefs, makeStreamRomfs,
+                programSize, meta, makeStreamExefs, makeStreamRomfs,
+                contentId, appendOnly,
             });
         }
 
         // ── Non-BKTR two-pass streaming: base RomFS + update ExeFS ──────────
         // Same two-pass approach as BKTR but sources are base RomFS + update ExeFS
-        // (no merge needed). 6× source reads, ~200 KB memory.
+        // (no merge needed). Seekable: 2× romfs reads; append-only (SW): 3×.
+        // ~200 KB memory.
         if (!hasBktrRomfs) {
             log('info', 'Two-pass streaming (non-BKTR): base RomFS + update ExeFS...');
             await new Promise(r => setTimeout(r, 0));
@@ -681,12 +726,15 @@ export async function update(readers, output, options = {}) {
                 });
             };
 
-            const { contentId, size: computedSize, meta } = await computeProgramNcaContentId({
+            const { size: computedSize, contentId, meta } = await computeProgramNcaContentId({
                 exefsSize, romfsDataSize, titleId: base.cnmt.titleId, keys,
                 streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
                 progress: (p) => progress(p * 0.5),
+                contentIdInPass1: appendOnly,
             });
-            log('info', `ContentId: ${contentId} (${computedSize} bytes)`);
+            log('info', contentId
+                ? `ContentId: ${contentId} (${computedSize} bytes)`
+                : `Program NCA: ${computedSize} bytes (contentId computed in Pass 2)`);
 
             baseSource = null;
             updateSource = null;
@@ -694,7 +742,8 @@ export async function update(readers, output, options = {}) {
 
             return await writeTwoPassProgramAndFinish({
                 adapter, base, update, keys, log, progress, output,
-                contentId, programSize, meta, makeStreamExefs, makeStreamRomfs,
+                programSize, meta, makeStreamExefs, makeStreamRomfs,
+                contentId, appendOnly,
             });
         }
 
