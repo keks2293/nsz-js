@@ -1,5 +1,12 @@
  # NSZ to NSP Converter - Status Report
 
+     ## ✅ Recent Changes (2026-08-27)
+
+     26. **Two-pass BKTR update: 2× romfs decompressions on seekable output, no placeholder PFS0 header** — `fs/nca-pack.js`, `fs/update.js`, `crypto/sha256.js`, `scripts/test_twopass_fsa_sim.mjs` (new). Previously `computeProgramNcaContentId` decompressed the entire RomFS once (for IVFC hash levels) and hashed the full NCA to get `contentId`; then `writeProgramNcaTwoPass` decompressed RomFS again for writing = 3 total NCZ decompressions. Now: Pass 1 streams ExeFS + RomFS, builds IVFC hash levels + NCA header, hashes the NCA up to hashLevels, then `clone()`s the SHA256 state into `sha256Mid` (no full-NCA hash). Pass 2 restores `sha256Mid` and streams RomFS chunks (updating SHA256 + writing simultaneously) → `contentId` = 2 RomFS decompressions. The PFS0 header has no contentId field besides the `<contentId32>.nca` filename, so `writeTwoPassProgramAndFinish` branches on adapter capability (`appendOnly` = writable without `seek()`):
+        - **seekable (FSA / memory)**: layout computed in memory only (temp names 36/41 chars fix headerSize/offsets, same lengths as the real ones), NCA written first (adapter zero-fills `[0..programNcaPfs0Offset)`), real PFS0 header overwrites offset 0 at the end. `contentId` piggybacks on the Pass 2 write → 2× romfs reads.
+        - **append-only (SW download)**: the stream can only grow, so the PFS0 header must precede the NCA → `contentIdInPass1` re-streams RomFS into the contentId hash at the end of Pass 1 (contentId = sha256 of the whole NCA, must be final before the header), real PFS0 header written first, then the NCA — fully sequential. 3× romfs reads (the IVFC stream and the contentId re-stream can't merge: the contentId hash starts with encHeader, which only exists after the IVFC stream finalizes).
+        SHA256 `clone()` copies h0-h7 + block state (~150 bytes). Verified byte-identical (all sha `3bae0bac…` / contentId `6e41adaf…` / 701,770,512 B): `test_twopass_sw_sim` (backward=0, gapFills=0, both detach modes), `test_update_sw_sim` (seekback ≡ two-pass ≡ buffered), `test_twopass_fsa_sim` (FSA sim: seek + positioned write, no read — covers the seekable-no-read branch; 1 legal backward write at offset 0), `test_update_e2e`.
+
      ## ✅ Recent Changes (2026-08-22)
 
      21. **Refactor: deduplicate shared NCA key/crypto + converter + update logic** — behavior-preserving cleanup, verified byte-identical on all paths.

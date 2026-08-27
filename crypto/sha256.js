@@ -108,6 +108,18 @@ export class SHA256 {
         this.h7 = this.h7 + h | 0;
     }
 
+    clone() {
+        const c = new SHA256();
+        c.h0 = this.h0; c.h1 = this.h1; c.h2 = this.h2; c.h3 = this.h3;
+        c.h4 = this.h4; c.h5 = this.h5; c.h6 = this.h6; c.h7 = this.h7;
+        c.blocks = this.blocks.slice();
+        c.block = this.block; c.start = this.start;
+        c.bytes = this.bytes; c.hBytes = this.hBytes;
+        c.lastByteIndex = this.lastByteIndex;
+        c.hashed = this.hashed;
+        return c;
+    }
+
     update(data) {
         if (this.finalized) return this;
         if (typeof data === 'string') data = new TextEncoder().encode(data);
