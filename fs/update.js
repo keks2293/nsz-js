@@ -8,8 +8,7 @@ import { sha256 } from '../crypto/sha256.js';
 import { mergeRomFS } from './bktr-merge.js';
 import { FileRangeSource, NczStreamSource, ViewRangeSource, SparseNcaView } from './range-source.js';
 import { preparePlaintextProgramNca, writePlaintextProgramNca, packProgramNcaStream, computeProgramNcaContentId, writeProgramNcaTwoPass, extractExefsStream, extractRomfsStream, createExefsAcidFilter, packMetaNca, extractExefs, extractRomfs, processNpdmAcid, twoPassLayout } from './nca-pack.js';
-import { AesXts } from '../crypto/aes-ops.mjs';
-import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE } from './nca-utils.js';
+import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE, decryptNcaHeaderBytes, findRomfsFsHeader } from './nca-utils.js';
 
 function u32le(v) {
     const b = new Uint8Array(4);
@@ -31,8 +30,7 @@ function programNcaSize(exefsSize, romfsDataSize) {
 // Extract romfsDataSize / exefsSize from the decrypted update NCA header.
 // Used by the BKTR streaming paths (identical logic).
 function parseUpdateSectionSizes(updateHeaderDec, updateHeaderRaw, updateRomfsSec, updateExefsSec, keys) {
-    const hdrKey = typeof keys.header_key === 'string' ? hexToBytes(keys.header_key) : keys.header_key;
-    const decBytes = new AesXts(hdrKey).decrypt(updateHeaderRaw, 0);
+    const decBytes = decryptNcaHeaderBytes(updateHeaderRaw, keys);
     const romfsIdx = updateHeaderDec.sections.indexOf(updateRomfsSec);
     const romfsFsHdr = decBytes.subarray(0x400 + romfsIdx * 0x200, 0x400 + (romfsIdx + 1) * 0x200);
     const romfsDataSize = Number(new DataView(romfsFsHdr.buffer, romfsFsHdr.byteOffset + 0x98, 8).getBigUint64(0, true));
@@ -665,16 +663,11 @@ export async function update(readers, output, options = {}) {
             log('info', 'Two-pass streaming (non-BKTR): base RomFS + update ExeFS...');
             await new Promise(r => setTimeout(r, 0));
 
-            const hdrKey = typeof keys.header_key === 'string' ? hexToBytes(keys.header_key) : keys.header_key;
-            const baseDecBytes = new AesXts(hdrKey).decrypt(baseHeaderRaw, 0);
-            const updateDecBytes = new AesXts(hdrKey).decrypt(updateHeaderRaw, 0);
+            const baseDecBytes = decryptNcaHeaderBytes(baseHeaderRaw, keys);
+            const updateDecBytes = decryptNcaHeaderBytes(updateHeaderRaw, keys);
 
-            let baseRomfsFsHdr = null;
-            for (let i = 0; i < 4; i++) {
-                const fh = baseDecBytes.subarray(0x400 + i * 0x200, 0x400 + i * 0x200 + 0x200);
-                if (fh[0x03] === 3) { baseRomfsFsHdr = fh; break; }
-            }
-            if (!baseRomfsFsHdr) throw new Error('update: base NCA has no RomFS section');
+            const { idx: romfsIdx } = findRomfsFsHeader(baseHeaderDec, 'base');
+            const baseRomfsFsHdr = baseDecBytes.subarray(0x400 + romfsIdx * 0x200, 0x400 + (romfsIdx + 1) * 0x200);
             const romfsDataSize = Number(new DataView(baseRomfsFsHdr.buffer, baseRomfsFsHdr.byteOffset + 0x98, 8).getBigUint64(0, true));
 
             const updateExefsFsHdr = updateDecBytes.subarray(0x400, 0x600);

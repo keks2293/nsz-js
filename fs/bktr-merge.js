@@ -1,7 +1,7 @@
-import { AesXts, AesCtr } from '../crypto/aes-ops.mjs';
+import { AesCtr } from '../crypto/aes-ops.mjs';
 import { decryptNcaHeader } from './nca.js';
 import { BufferRangeSource } from './range-source.js';
-import { hexToBytes } from './nca-utils.js';
+import { decryptNcaHeaderBytes, reversedSectionCtr, extractTitlekeyFromTik, deriveTitlekeyFromKeyArea } from './nca-utils.js';
 import {
     parseBktrHeader,
     decryptBktrTableData,
@@ -10,8 +10,6 @@ import {
     findSubsectionEntry,
     subEntryIdx,
     decryptPatchRegionData,
-    extractTitlekeyFromTik,
-    deriveTitlekeyFromKeyArea,
     lookupTitlekeyFromDatabase,
 } from './bktr.js';
 
@@ -51,11 +49,9 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
     };
     const updateRomfsSecIdx = updateHeader.sections.indexOf(updateRomfsSec);
 
-    // Decrypt NCA headers
-    const hdrKey = typeof keys.header_key === 'string' ? hexToBytes(keys.header_key) : keys.header_key;
-    const xts = new AesXts(hdrKey);
-    const updateDecHeader = xts.decrypt(updateNcaData.headerRaw, 0);
-    const baseDecHeader = xts.decrypt(baseNcaData.headerRaw, 0);
+    // Decrypt NCA headers (raw bytes)
+    const updateDecHeader = decryptNcaHeaderBytes(updateNcaData.headerRaw, keys);
+    const baseDecHeader = decryptNcaHeaderBytes(baseNcaData.headerRaw, keys);
 
     // Update FsHeader
     const updateFsHdr = updateDecHeader.subarray(0x400 + updateRomfsSecIdx * 0x200, 0x400 + updateRomfsSecIdx * 0x200 + 0x200);
@@ -83,9 +79,7 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
     // Stratosphere uses secure_value as ctr[0:4] BE in AesCtrEx counter
     const secureValue = new DataView(updateFsHdr.buffer, updateFsHdr.byteOffset + 0x144, 4).getUint32(0, true);
     // section_ctr for BKTR table decryption (regular AES-CTR, reversed)
-    const sectionCtrRaw = updateFsHdr.subarray(0x140, 0x148);
-    const updateNonce = new Uint8Array(8);
-    for (let j = 0; j < 8; j++) updateNonce[j] = sectionCtrRaw[7 - j];
+    const updateNonce = reversedSectionCtr(updateFsHdr);
 
     // Load titlekeys database if provided
     let titlekeysMap = null;

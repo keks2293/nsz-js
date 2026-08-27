@@ -3,7 +3,7 @@
 
 import { AesEcb } from '../crypto/aes128.js';
 import { AesCtr } from '../crypto/aes-ops.mjs';
-import { hexToBytes } from './nca-utils.js';
+import { hexToBytes, reversedSectionCtr } from './nca-utils.js';
 
 export function readLeU64(buf, o) {
     return Number(new DataView(buf.buffer, buf.byteOffset + o, 8).getBigUint64(0, true));
@@ -260,62 +260,11 @@ export function lookupTitlekeyFromDatabase(rightsId, titlekeysMap) {
     return titlekeysMap.get(rid) || null;
 }
 
-export function deriveTitlekeyFromKeyArea(decHeader, keys) {
-    // Encrypted key area (4 x 16B) at NCA header offset 0x300-0x340.
-    // hactool (nca.c:683-686, 532): kaek = key_area_keys[master_key][kaek_ind]
-    // (header crypto_type 0,1 -> master key 0, 2 -> mk1, 3 -> mk2; kaek_ind
-    // 0/1/2 = application/ocean/system), key area decrypted with AES-128-ECB,
-    // titlekey = decrypted entry [2] (bytes 32-48) for CTR-encrypted sections.
-    const keyArea = decHeader.subarray(0x300, 0x340);
-    if (keyArea.length < 0x40) return null;
-    const cryptoType = decHeader[0x206];
-    const kaekInd = decHeader[0x207];
-    const mk = cryptoType <= 1 ? 0 : cryptoType - 1;
-    const kakHex = (keys.keyAreaKeys && keys.keyAreaKeys[mk] && (keys.keyAreaKeys[mk][kaekInd] || keys.keyAreaKeys[mk][0])) || null;
-    if (!kakHex) return null;
-    const kak = hexToBytes(kakHex);
-    const unwrapped = new AesEcb(kak).decrypt(keyArea);
-    return unwrapped.subarray(0x20, 0x30);
-}
-
-// Extract titlekey from a tik file.
-//
-// Matches yanu's TitleKey::try_new (sources/yanu crates, yanu_ticket.rs:32-72):
-//   RIGHTS_ID_OFFSET = 0x2A0, TITLE_KEY_OFFSET = 0x180.
-// Scene tickets are "dummy" (sigType 0x10004, all-0xFF signature, rightsId at 0x10 is
-// garbage/all-F) but DO carry a valid rightsId at 0x2A0 (== the NCA header rightsId at
-// 0x230) and a titlekek-encrypted titlekey at 0x180. yanu reads them with NO validation
-// (it just seek()+read_exact()) and stores "rights_id=key" into title.keys for
-// hac2l/hacPack. We therefore also read the rightsId at 0x2A0 for the expectedRightsId
-// check and do NOT reject the dummy tickets — the key at 0x180 is real.
-export function extractTitlekeyFromTik(tikData, keys, expectedRightsId = null) {
-    if (!tikData || tikData.length < 0x2B0) return null;
-    // Scene/prod tickets carry the mk2 titlekey. (Falling back to titlekek_SOURCE
-    // here is wrong — the source is a 16-byte seed, not a key.)
-    const titlekek = keys.titlekek_02;
-    if (!titlekek) return null;
-
-    // If expectedRightsId provided, verify against tik rights_id at 0x2A0 (yanu offset).
-    if (expectedRightsId) {
-        const rid = tikData.subarray(0x2A0, 0x2B0);
-        const ridStr = Array.from(rid).map(b => b.toString(16).padStart(2, '0')).join('');
-        if (ridStr.toLowerCase() !== expectedRightsId.toLowerCase()) {
-            return null; // Rights ID mismatch
-        }
-    }
-
-    const kek = typeof titlekek === 'string' ? hexToBytes(titlekek) : titlekek;
-    const ecb = new AesEcb(kek);
-    return ecb.decrypt(tikData.subarray(0x180, 0x190));
-}
-
 // Decrypt base romfs section using AES-CTR with titlekey
 export async function decryptBaseRomfs(baseNcaData, baseRomfsSecMeta, baseDecHeader, baseTitlekey) {
     const romfsSecFsHdrOffset = 0x400 + baseRomfsSecMeta.secIdx * 0x200;
     const baseFsHdr = baseDecHeader.subarray(romfsSecFsHdrOffset, romfsSecFsHdrOffset + 0x200);
-    const baseSectionCtrRaw = baseFsHdr.subarray(0x140, 0x148);
-    const baseNonce = new Uint8Array(8);
-    for (let j = 0; j < 8; j++) baseNonce[j] = baseSectionCtrRaw[7 - j];
+    const baseNonce = reversedSectionCtr(baseFsHdr);
 
     const c = new AesCtr(baseTitlekey, baseNonce);
     c.seek(baseRomfsSecMeta.offset);

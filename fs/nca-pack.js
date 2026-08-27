@@ -2,7 +2,7 @@ import { AesXts, AesCtr } from '../crypto/aes-ops.mjs';
 import { AesEcb } from '../crypto/aes128.js';
 import { sha256, SHA256, digest32 } from '../crypto/sha256.js';
 import { PFS0, PFS0Writer } from './pfs0.js';
-import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE } from './nca-utils.js';
+import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE, toKeyBytes, decryptNcaHeaderBytes, resolveTitlekey, reversedSectionCtr, findRomfsFsHeader } from './nca-utils.js';
 
 // Yanu update pipeline uses only:
 //   PROGRAM (--plaintext) → ExeFS + RomFS, CRYPT_NONE sections ✅
@@ -354,12 +354,9 @@ function fillSectionHashes(header) {
     header.set(digest32(header.subarray(0x600, 0x800)), 0x2A0);
 }
 
-// Normalize header_key to Uint8Array and XTS-encrypt the NCA header.
+// XTS-encrypt the NCA header with header_key.
 function encryptNcaHeader(header, keys) {
-    const hdrKey = typeof keys.header_key === 'string'
-        ? hexToBytes(keys.header_key)
-        : (keys.header_key instanceof Uint8Array ? keys.header_key : new Uint8Array(keys.header_key));
-    return new AesXts(hdrKey).encrypt(header);
+    return new AesXts(toKeyBytes(keys.header_key)).encrypt(header);
 }
 
 // ── NCA header builder ───────────────────────────────────────────────────────
@@ -384,7 +381,7 @@ function encryptNcaHeader(header, keys) {
 //   _0x340[0xC0] padding
 //   fs_headers[4] @0x400
 
-function buildNcaHeader(titleId, sections, keys) {
+function buildNcaHeader(titleId, sections, keys, contentType = 0x00) {
     const header = new Uint8Array(NCA_HEADER_SIZE);
 
     // fixed_key_sig = all zeros (The-4n/hacPack default)
@@ -396,8 +393,8 @@ function buildNcaHeader(titleId, sections, keys) {
     header[0x200] = 0x4E; header[0x201] = 0x43; header[0x202] = 0x41; header[0x203] = 0x33;
     // distribution = 0 (not gamecard)
     header[0x204] = 0x00;
-    // content_type = 0 (Program)
-    header[0x205] = 0x00;
+    // content_type: 0=Program, 1=Meta
+    header[0x205] = contentType;
     // crypto_type = 0 (keygen 1)
     header[0x206] = 0x00;
     // kaek_ind = 0
@@ -435,12 +432,7 @@ function buildNcaHeader(titleId, sections, keys) {
     keyBlock.set(keyareakey, 0x20); // slot 2 = keyareakey
 
     // ECB-encrypt entire key block with key_area_key_application_00
-    const kak00 = typeof keys.key_area_key_application_00 === 'string'
-        ? hexToBytes(keys.key_area_key_application_00)
-        : (keys.key_area_key_application_00 instanceof Uint8Array
-            ? keys.key_area_key_application_00
-            : new Uint8Array(keys.key_area_key_application_00));
-    const ecb = new AesEcb(kak00);
+    const ecb = new AesEcb(toKeyBytes(keys.key_area_key_application_00));
     const encKeyBlock = new Uint8Array(0x40);
     for (let blk = 0; blk < 4; blk++) {
         const chunk = keyBlock.subarray(blk * 0x10, (blk + 1) * 0x10);
@@ -594,48 +586,12 @@ export async function packMetaNca(cnmtData, pfs0FileName, titleId, keys, log) {
         pfs0Offset, pfs0Size,
     });
 
-    // ── NCA header ─────────────────────────────────────────────────────────
-    const header = new Uint8Array(NCA_HEADER_SIZE);
-    header.fill(0, 0, 0x200); // fixed_key_sig + npdm_key_sig = zeros
-    header[0x200] = 0x4E; header[0x201] = 0x43; header[0x202] = 0x41; header[0x203] = 0x33; // NCA3
-    header[0x204] = 0x00; // distribution = 0
-    header[0x205] = 0x01; // content_type = Meta
-    header[0x206] = 0x00; // crypto_type = 0 (kg1)
-    header[0x207] = 0x00; // kaek_ind = 0
-    writeU64LE(header, 0x208, ncaSize); // nca_size
-
-    const tidBytes = hexToBytes(titleId.toLowerCase());
-    const tidRev = new Uint8Array(8);
-    for (let i = 0; i < 8; i++) tidRev[i] = tidBytes[7 - i];
-    header.set(tidRev, 0x210);
-    const hv = new DataView(header.buffer, header.byteOffset);
-    hv.setUint32(0x21C, 0x000C1100, true); // sdk_version
-    header[0x220] = 0x00; // crypto_type2 = 0
-    header.fill(0, 0x230, 0x240); // rights_id = 0
-
-    writeU32LE(header, 0x240, Math.floor(sectionStart / 0x200));
-    writeU32LE(header, 0x244, Math.floor(sectionEnd / 0x200));
-    header[0x248] = 0x01; // _0x8[0] = 1
-
-    const secHash = sha256(fsHeader);
-    header.set(hexToBytes(secHash), 0x280);
-
-    // Key area
-    const keyareakey = new Uint8Array(16).fill(0x04);
-    const keyBlock = new Uint8Array(0x40);
-    keyBlock.set(keyareakey, 0x20);
-    const kak00 = typeof keys.key_area_key_application_00 === 'string'
-        ? hexToBytes(keys.key_area_key_application_00)
-        : (keys.key_area_key_application_00 instanceof Uint8Array
-            ? keys.key_area_key_application_00
-            : new Uint8Array(keys.key_area_key_application_00));
-    const ecb = new AesEcb(kak00);
-    const encKeyBlock = new Uint8Array(0x40);
-    for (let blk = 0; blk < 4; blk++) {
-        const chunk = keyBlock.subarray(blk * 0x10, (blk + 1) * 0x10);
-        encKeyBlock.set(ecb.encrypt(chunk), blk * 0x10);
-    }
-    header.set(encKeyBlock, 0x300);
+    // ── NCA header (content_type = Meta) ────────────────────────────────────
+    const header = buildNcaHeader(titleId, [
+        { offset: sectionStart, endOffset: sectionEnd, size: sectionDataSize },
+    ], keys, 0x01);
+    writeU64LE(header, 0x208, ncaSize);
+    header.set(digest32(fsHeader), 0x280);
     header.set(fsHeader, 0x400);
 
     // ── Section data (CTR-encrypted) ───────────────────────────────────────
@@ -687,20 +643,6 @@ export async function packMetaNca(cnmtData, pfs0FileName, titleId, keys, log) {
 //    yanu: not used in modern NCAs
 //    Our code: not implemented
 
-function deriveTitlekey(decHeader, keys) {
-    if (!keys) return null;
-    // Encrypted key area (4 x 16B) at 0x300-0x340, AES-128-ECB with kaek
-    // = key_area_keys[master_key][kaek_ind]; titlekey = entry [2] (hactool nca.c:683-686, 532).
-    const cryptoType = decHeader[0x206];
-    const kaekInd = decHeader[0x207];
-    const mk = cryptoType <= 1 ? 0 : cryptoType - 1;
-    const kakHex = keys.keyAreaKeys && keys.keyAreaKeys[mk] && (keys.keyAreaKeys[mk][kaekInd] || keys.keyAreaKeys[mk][0]);
-    if (!kakHex) return null;
-    const kak = typeof kakHex === 'string' ? hexToBytes(kakHex) : kakHex;
-    const unwrapped = new AesEcb(kak).decrypt(decHeader.subarray(0x300, 0x340));
-    return unwrapped.subarray(0x20, 0x30);
-}
-
 // Accept either a full NCA buffer (Uint8Array) or an NcaInput
 // { headerRaw: Uint8Array(0xC00), source: RangeSource }.
 function ncaHeaderRaw(nca) {
@@ -713,25 +655,11 @@ async function ncaRead(nca, offset, length) {
 }
 
 export async function extractExefs(ncaData, keys, tikData = null) {
-    const hdrKey = typeof keys.header_key === 'string'
-        ? hexToBytes(keys.header_key)
-        : new Uint8Array(keys.header_key);
-    const xts = new AesXts(hdrKey);
-    const decHeader = xts.decrypt(ncaHeaderRaw(ncaData), 0);
-
-    let titlekey = null;
-    if (tikData && tikData.length >= 0x190) {
-        const titlekek = typeof keys.titlekek_02 === 'string' ? hexToBytes(keys.titlekek_02) : keys.titlekek_02;
-        titlekey = new AesEcb(titlekek).decrypt(tikData.subarray(0x180, 0x190));
-    }
-    if (!titlekey) {
-        titlekey = deriveTitlekey(decHeader, keys);
-    }
+    const decHeader = decryptNcaHeaderBytes(ncaHeaderRaw(ncaData), keys);
+    const titlekey = resolveTitlekey(tikData, decHeader, keys);
 
     const exeFsFsHdr = decHeader.subarray(0x400, 0x600);
-    const sectionCtrRaw = exeFsFsHdr.subarray(0x140, 0x148);
-    const sectionCtrRev = new Uint8Array(8);
-    for (let i = 0; i < 8; i++) sectionCtrRev[i] = sectionCtrRaw[7 - i];
+    const sectionCtrRev = reversedSectionCtr(exeFsFsHdr);
 
     const sectionStart = Number(new DataView(exeFsFsHdr.buffer, exeFsFsHdr.byteOffset + 0x40, 8).getBigUint64(0, true));
     const sectionSize = Number(new DataView(exeFsFsHdr.buffer, exeFsFsHdr.byteOffset + 0x48, 8).getBigUint64(0, true));
@@ -755,25 +683,11 @@ export async function extractExefs(ncaData, keys, tikData = null) {
 // [sectionStart, sectionStart+sectionSize)) in order to onChunk(chunk, offInData)
 // instead of returning one big buffer. Only transient decrypt chunks are kept.
 export async function extractExefsStream(ncaData, keys, tikData, onChunk) {
-    const hdrKey = typeof keys.header_key === 'string'
-        ? hexToBytes(keys.header_key)
-        : new Uint8Array(keys.header_key);
-    const xts = new AesXts(hdrKey);
-    const decHeader = xts.decrypt(ncaHeaderRaw(ncaData), 0);
-
-    let titlekey = null;
-    if (tikData && tikData.length >= 0x190) {
-        const titlekek = typeof keys.titlekek_02 === 'string' ? hexToBytes(keys.titlekek_02) : keys.titlekek_02;
-        titlekey = new AesEcb(titlekek).decrypt(tikData.subarray(0x180, 0x190));
-    }
-    if (!titlekey) {
-        titlekey = deriveTitlekey(decHeader, keys);
-    }
+    const decHeader = decryptNcaHeaderBytes(ncaHeaderRaw(ncaData), keys);
+    const titlekey = resolveTitlekey(tikData, decHeader, keys);
 
     const exeFsFsHdr = decHeader.subarray(0x400, 0x600);
-    const sectionCtrRaw = exeFsFsHdr.subarray(0x140, 0x148);
-    const sectionCtrRev = new Uint8Array(8);
-    for (let i = 0; i < 8; i++) sectionCtrRev[i] = sectionCtrRaw[7 - i];
+    const sectionCtrRev = reversedSectionCtr(exeFsFsHdr);
 
     const sectionStart = Number(new DataView(exeFsFsHdr.buffer, exeFsFsHdr.byteOffset + 0x40, 8).getBigUint64(0, true));
     const sectionSize = Number(new DataView(exeFsFsHdr.buffer, exeFsFsHdr.byteOffset + 0x48, 8).getBigUint64(0, true));
@@ -807,32 +721,11 @@ export async function extractExefsStream(ncaData, keys, tikData, onChunk) {
 }
 
 export async function extractRomfs(ncaData, keys, tikData = null) {
-    const hdrKey = typeof keys.header_key === 'string'
-        ? hexToBytes(keys.header_key)
-        : new Uint8Array(keys.header_key);
-    const xts = new AesXts(hdrKey);
-    const decHeader = xts.decrypt(ncaHeaderRaw(ncaData), 0);
+    const decHeader = decryptNcaHeaderBytes(ncaHeaderRaw(ncaData), keys);
+    const titlekey = resolveTitlekey(tikData, decHeader, keys);
 
-    let titlekey = null;
-    if (tikData && tikData.length >= 0x190) {
-        const titlekek = typeof keys.titlekek_02 === 'string' ? hexToBytes(keys.titlekek_02) : keys.titlekek_02;
-        titlekey = new AesEcb(titlekek).decrypt(tikData.subarray(0x180, 0x190));
-    }
-    if (!titlekey) {
-        titlekey = deriveTitlekey(decHeader, keys);
-    }
-
-    let romfsIdx = -1;
-    let romfsFsHdr = null;
-    for (let i = 0; i < 4; i++) {
-        const fh = decHeader.subarray(0x400 + i * 0x200, 0x400 + i * 0x200 + 0x200);
-        if (fh[0x03] === 3) { romfsIdx = i; romfsFsHdr = fh; break; }
-    }
-    if (romfsIdx < 0) throw new Error('extractRomfs: RomFS section not found');
-
-    const sectionCtrRaw = romfsFsHdr.subarray(0x140, 0x148);
-    const sectionCtrRev = new Uint8Array(8);
-    for (let i = 0; i < 8; i++) sectionCtrRev[i] = sectionCtrRaw[7 - i];
+    const { idx: romfsIdx, fsHdr: romfsFsHdr } = findRomfsFsHeader(decHeader, 'extractRomfs');
+    const sectionCtrRev = reversedSectionCtr(romfsFsHdr);
 
     const mediaOffset = new DataView(decHeader.buffer, decHeader.byteOffset + 0x240 + romfsIdx * 0x10, 4).getUint32(0, true);
     const mediaEnd = new DataView(decHeader.buffer, decHeader.byteOffset + 0x240 + romfsIdx * 0x10 + 4, 4).getUint32(0, true);
@@ -849,32 +742,11 @@ export async function extractRomfs(ncaData, keys, tikData = null) {
 }
 
 export async function extractRomfsStream(ncaData, keys, tikData, onChunk) {
-    const hdrKey = typeof keys.header_key === 'string'
-        ? hexToBytes(keys.header_key)
-        : new Uint8Array(keys.header_key);
-    const xts = new AesXts(hdrKey);
-    const decHeader = xts.decrypt(ncaHeaderRaw(ncaData), 0);
+    const decHeader = decryptNcaHeaderBytes(ncaHeaderRaw(ncaData), keys);
+    const titlekey = resolveTitlekey(tikData, decHeader, keys);
 
-    let titlekey = null;
-    if (tikData && tikData.length >= 0x190) {
-        const titlekek = typeof keys.titlekek_02 === 'string' ? hexToBytes(keys.titlekek_02) : keys.titlekek_02;
-        titlekey = new AesEcb(titlekek).decrypt(tikData.subarray(0x180, 0x190));
-    }
-    if (!titlekey) {
-        titlekey = deriveTitlekey(decHeader, keys);
-    }
-
-    let romfsIdx = -1;
-    let romfsFsHdr = null;
-    for (let i = 0; i < 4; i++) {
-        const fh = decHeader.subarray(0x400 + i * 0x200, 0x400 + i * 0x200 + 0x200);
-        if (fh[0x03] === 3) { romfsIdx = i; romfsFsHdr = fh; break; }
-    }
-    if (romfsIdx < 0) throw new Error('extractRomfsStream: RomFS section not found');
-
-    const sectionCtrRaw = romfsFsHdr.subarray(0x140, 0x148);
-    const sectionCtrRev = new Uint8Array(8);
-    for (let i = 0; i < 8; i++) sectionCtrRev[i] = sectionCtrRaw[7 - i];
+    const { idx: romfsIdx, fsHdr: romfsFsHdr } = findRomfsFsHeader(decHeader, 'extractRomfsStream');
+    const sectionCtrRev = reversedSectionCtr(romfsFsHdr);
 
     const mediaOffset = new DataView(decHeader.buffer, decHeader.byteOffset + 0x240 + romfsIdx * 0x10, 4).getUint32(0, true);
     const mediaEnd = new DataView(decHeader.buffer, decHeader.byteOffset + 0x240 + romfsIdx * 0x10 + 4, 4).getUint32(0, true);

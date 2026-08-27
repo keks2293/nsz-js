@@ -1,7 +1,7 @@
-import { AesEcb } from '../crypto/aes128.js';
-import { AesXts, AesCtr } from '../crypto/aes-ops.mjs';
+import { AesCtr } from '../crypto/aes-ops.mjs';
 import { PFS0 } from './pfs0.js';
 import { Cnmt } from './cnmt.js';
+import { toKeyBytes, deriveTitlekeyFromKeyArea, decryptNcaHeaderBytes } from './nca-utils.js';
 
 const FsType = Object.freeze({ NONE: 0, PFS0: 2, ROMFS: 3 });
 
@@ -61,24 +61,13 @@ export class NCAHeader {
             });
         }
 
+        // Raw key-area bytes + master key index (exposed for inspection)
         const keyBlock = arr.slice(0x300, 0x340);
         const masterKey = Math.max(cryptoType, cryptoType2) - 1;
         const mk = masterKey < 0 ? 0 : masterKey;
 
-        // Decrypt key block to get titleKeyDec
-        // hactool (nca.c:685): kaek = key_area_keys[master_key][kaek_ind]
-        let titleKeyDec = null;
-        if (keys) {
-            const kakHex = keys.keyAreaKeys?.[mk]?.[keyIndex] || keys.keyAreaKeys?.[mk]?.[0];
-            if (kakHex) {
-                const kak = typeof kakHex === 'string'
-                    ? KeysParser_hexToBytes(kakHex)
-                    : kakHex;
-                const ecb = new AesEcb(kak);
-                const unwrapped = ecb.decrypt(keyBlock);
-                titleKeyDec = unwrapped.slice(32, 48);
-            }
-        }
+        // Decrypt key area to get titleKeyDec (hactool nca.c:685)
+        const titleKeyDec = deriveTitlekeyFromKeyArea(arr, keys);
 
         // Parse section headers (0x200 bytes each at offset 0x400)
         const sections = [];
@@ -143,27 +132,15 @@ export class NCAHeader {
     }
 }
 
-// Inline hex-to-bytes to avoid importing KeysParser (circular dependency risk)
-function KeysParser_hexToBytes(hex) {
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < hex.length; i += 2) {
-        bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-    }
-    return bytes;
-}
-
 export function decryptNcaHeader(raw, keys = null) {
     if (!keys || !keys.header_key) return null;
-    const headerKey = typeof keys.header_key === 'string'
-        ? KeysParser_hexToBytes(keys.header_key)
-        : (keys.header_key instanceof Uint8Array ? keys.header_key : new Uint8Array(keys.header_key));
+    const headerKey = toKeyBytes(keys.header_key);
     if (headerKey.length !== 32) return null;
     const arr = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
     const len = Math.min(0xC00, arr.length);
     // Header is ALWAYS XTS-encrypted (hacPack encrypts unconditionally).
     // cryptoType byte = keygen index, NOT "no encryption".
-    const xts = new AesXts(headerKey);
-    const decrypted = xts.decrypt(arr.subarray(0, len), 0);
+    const decrypted = decryptNcaHeaderBytes(arr.subarray(0, len), keys);
     return NCAHeader.parse(decrypted, keys);
 }
 
