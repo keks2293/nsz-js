@@ -384,10 +384,8 @@ function encryptNcaHeader(header, keys) {
 function buildNcaHeader(titleId, sections, keys, contentType = 0x00) {
     const header = new Uint8Array(NCA_HEADER_SIZE);
 
-    // fixed_key_sig = all zeros (The-4n/hacPack default)
-    header.fill(0, 0, 0x100);
-    // npdm_key_sig = all zeros
-    header.fill(0, 0x100, 0x200);
+    // fixed_key_sig + npdm_key_sig = all zeros (The-4n/hacPack default)
+    header.fill(0, 0, 0x200);
 
     // Magic: "NCA3"
     header[0x200] = 0x4E; header[0x201] = 0x43; header[0x202] = 0x41; header[0x203] = 0x33;
