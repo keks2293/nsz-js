@@ -1259,12 +1259,15 @@ export async function writeProgramNcaTwoPass({ meta, adapter, ncaOffset, streamE
             throw new Error(`writeProgramNcaTwoPass: non-sequential write at 0x${pos.toString(16)} (expected 0x${expected.toString(16)}, gap=${pos - expected}) — output would be corrupt`);
         }
         expected += data.byteLength;
-        _writeCount++;
-        const t0 = (_writeCount & 0xFF) === 0 ? _now() : 0;
+        // Capture the number BEFORE the await: while a write is slow the
+        // counter may keep moving (in-flight writes), so reading it after
+        // the await would print a stale number.
+        const n = ++_writeCount;
+        const t0 = (n & 0xFF) === 0 ? _now() : 0;
         const r = await adapter.write(pos, data);
         if (t0) {
             const ms = _now() - t0;
-            if (ms > 5000) _log('warn', `  [SLOW-WRITE] #${_writeCount} at 0x${pos.toString(16)} (${data.byteLength} bytes) took ${(ms / 1000).toFixed(1)}s`);
+            if (ms > 5000) _log('warn', `  [SLOW-WRITE] #${n} at 0x${pos.toString(16)} (${data.byteLength} bytes) took ${(ms / 1000).toFixed(1)}s`);
         }
         return r;
     };

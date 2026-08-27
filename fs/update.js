@@ -628,7 +628,7 @@ export async function update(readers, output, options = {}) {
                 streamRomfs: async (emit) => {
                     await mergeRomFS(baseInput, updateInput, {
                         keys, baseTik: baseTikData, updateTik: updateTikData,
-                        onChunk: (chunk, off) => emit(chunk, off),
+                        onChunk: async (chunk, off) => { await emit(chunk, off); },
                     });
                 },
                 log, progress,
@@ -701,7 +701,11 @@ export async function update(readers, output, options = {}) {
                     try {
                         await mergeRomFS(freshBase, updateInput, {
                             keys, baseTik: baseTikData, updateTik: updateTikData,
-                            onChunk: (chunk, off) => { _mergeBytes += chunk.length; emit(chunk, off); },
+                            // Await emit: a fire-and-forget onChunk lets the merge
+                            // run ahead of the output, queueing hundreds of MB of
+                            // pending writes in a slow (FSA) stream and making
+                            // "mergeRomFS done" fire before the writes land.
+                            onChunk: async (chunk, off) => { _mergeBytes += chunk.length; await emit(chunk, off); },
                         });
                     } finally {
                         clearInterval(_wd);
