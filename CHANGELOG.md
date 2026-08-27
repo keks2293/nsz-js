@@ -2,6 +2,9 @@
 
      ## ✅ Recent Changes (2026-08-29)
 
+     28. **Diagnostic: watchdog timers + slow-write warnings for freeze diagnosis** — `fs/nca-pack.js`, `fs/update.js`. Added a 15-second watchdog in `writeProgramNcaTwoPass` that logs the current phase (`header`/`htable`/`exefs`/`hashLevels`/`romfs_merge`/`romfs_padding`), total bytes written, and last write offset — if the process freezes, the last watchdog line shows exactly where. Added a `[SLOW-WRITE]` warning (every 256th write) if a single adapter.write takes > 5 seconds — helps identify FSA backpressure. Added a matching 15-second watchdog in the BKTR `makeStreamRomfs` wrapper that logs cumulative merge output — distinguishes "mergeRomFS stalled (pump issue)" from "adapter write stalled (FSA issue)". Watchdog run on Stardew Valley confirmed the freeze is gone; three `[SLOW-WRITE]` events (11.0s / 15.8s / 14.0s) were caught at a single FSA write, consistent with the freezes being FSA-write stalls rather than pump/decompression deadlocks.
+
+
      27. **Optimization: cache `parseNczSections` result on the reader** — `fs/ncz.js`. `parseNczSections` now memoizes its result on `reader._nczParsed`. Multiple independent `AdapterNCZReader`/reader instances each trigger their own parse, but the update path creates several reader objects over the same NCZ file; caching on the reader avoids re-parsing the section table when the same reader object is reused. (Note: the BKTR update still needs 2+ distinct reader objects for the base NCZ across merge passes, so the cache only helps same-object repeats.)
 
 

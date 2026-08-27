@@ -1252,12 +1252,21 @@ export async function writeProgramNcaTwoPass({ meta, adapter, ncaOffset, streamE
     // where the previous one ended. A mismatch means the output would be corrupt
     // (SW adapter fills the gap with zeros), so fail loudly instead.
     let expected = ncaOffset;
+    let _writeCount = 0;
+    const _now = typeof performance !== 'undefined' ? () => performance.now() : () => Date.now();
     const w = async (pos, data) => {
         if (pos !== expected) {
             throw new Error(`writeProgramNcaTwoPass: non-sequential write at 0x${pos.toString(16)} (expected 0x${expected.toString(16)}, gap=${pos - expected}) — output would be corrupt`);
         }
         expected += data.byteLength;
-        return await adapter.write(pos, data);
+        _writeCount++;
+        const t0 = (_writeCount & 0xFF) === 0 ? _now() : 0;
+        const r = await adapter.write(pos, data);
+        if (t0) {
+            const ms = _now() - t0;
+            if (ms > 5000) _log('warn', `  [SLOW-WRITE] #${_writeCount} at 0x${pos.toString(16)} (${data.byteLength} bytes) took ${(ms / 1000).toFixed(1)}s`);
+        }
+        return r;
     };
 
     // Progress + activity logs (a pass-2 merge can take a while with no other
@@ -1273,51 +1282,80 @@ export async function writeProgramNcaTwoPass({ meta, adapter, ncaOffset, streamE
         }
     };
 
-    const hdrLen = encHeader.byteLength;
-    await w(ncaOffset, encHeader);
-    track(hdrLen);
-    const htabLen = exeHash.hashTable.byteLength;
-    await w(ncaOffset + L.sec0Start, exeHash.hashTable);
-    track(htabLen);
-    await streamExefs(async (chunk, off) => {
-        const n = chunk.byteLength;
-        await w(ncaOffset + L.sec0DataOff + off, chunk);
-        track(n);
-    });
-    if (L.exePaddingSize > 0) {
-        await w(ncaOffset + L.sec0DataOff + L.exefsSize, new Uint8Array(L.exePaddingSize));
-        track(L.exePaddingSize);
+    // Watchdog: fires every 15 s while Pass 2 is running. If the process
+    // freezes, the last watchdog line shows exactly which phase/offset was
+    // active. The timer is cleared when the function completes or throws.
+    let _wdPhase = 'init';
+    let _wdBytes = 0;
+    let _wdLastWrite = 0;
+    const _wdTick = () => {
+        _log('info', `  [WATCHDOG] phase=${_wdPhase} written=${(_wdBytes / 1048576).toFixed(0)} MB lastWrite=0x${_wdLastWrite.toString(16)}`);
+    };
+    let _wdTimer = setInterval(_wdTick, 15_000);
+    const _wdDone = () => { clearInterval(_wdTimer); _wdTimer = null; };
+
+    try {
+        const hdrLen = encHeader.byteLength;
+        _wdPhase = 'header';
+        await w(ncaOffset, encHeader);
+        _wdBytes = hdrLen; _wdLastWrite = ncaOffset;
+        track(hdrLen);
+        const htabLen = exeHash.hashTable.byteLength;
+        _wdPhase = 'htable';
+        await w(ncaOffset + L.sec0Start, exeHash.hashTable);
+        _wdBytes += htabLen; _wdLastWrite = ncaOffset + L.sec0Start;
+        track(htabLen);
+        _wdPhase = 'exefs';
+        await streamExefs(async (chunk, off) => {
+            const n = chunk.byteLength;
+            await w(ncaOffset + L.sec0DataOff + off, chunk);
+            _wdBytes += n; _wdLastWrite = ncaOffset + L.sec0DataOff + off;
+            track(n);
+        });
+        if (L.exePaddingSize > 0) {
+            await w(ncaOffset + L.sec0DataOff + L.exefsSize, new Uint8Array(L.exePaddingSize));
+            _wdBytes += L.exePaddingSize;
+            track(L.exePaddingSize);
+        }
+        _wdPhase = 'hashLevels';
+        let lvOff = 0;
+        for (let i = 0; i < romIvfc.hashLevels.length; i++) {
+            const lvl = romIvfc.hashLevels[i];
+            // Capture the length BEFORE the write: the SW adapter transfers the
+            // buffer (detaches it), which zeroes .length on the caller's view —
+            // `lvOff += lvl.length` after the write would add 0.
+            const lvlLen = lvl.length;
+            await w(ncaOffset + L.sec1Start + lvOff, lvl);
+            lvOff += lvlLen;
+            _wdBytes += lvlLen; _wdLastWrite = ncaOffset + L.sec1Start + lvOff;
+            track(lvlLen);
+        }
+        _wdPhase = 'romfs_merge';
+        _log('info', `  RomFS streaming: ${(L.romfsDataSize / 1048576).toFixed(0)} MB to merge/write...`);
+        // Seekable output: restore the SHA256 mid-state (has header + exefs +
+        // hashLevels) and let romChunks + romPadding be hashed alongside the
+        // write → contentId for free. Append-only output: contentId was
+        // precomputed in Pass 1 — write only.
+        const sha = contentId === null ? sha256Mid.clone() : null;
+        await streamRomfs(async (chunk, off) => {
+            if (sha) sha.update(chunk);
+            await w(ncaOffset + L.sec1DataOff + off, chunk);
+            _wdBytes += chunk.byteLength; _wdLastWrite = ncaOffset + L.sec1DataOff + off;
+            track(chunk.byteLength);
+        });
+        _wdPhase = 'romfs_padding';
+        if (L.romPaddingSize > 0) {
+            const pad = new Uint8Array(L.romPaddingSize);
+            if (sha) sha.update(pad);
+            await w(ncaOffset + L.sec1DataOff + L.romfsDataSize, pad);
+        }
+        _wdPhase = 'done';
+        if (sha) contentId = sha.hex();
+        _prog(1);
+        return contentId;
+    } finally {
+        _wdDone();
     }
-    let lvOff = 0;
-    for (let i = 0; i < romIvfc.hashLevels.length; i++) {
-        const lvl = romIvfc.hashLevels[i];
-        // Capture the length BEFORE the write: the SW adapter transfers the
-        // buffer (detaches it), which zeroes .length on the caller's view —
-        // `lvOff += lvl.length` after the write would add 0.
-        const lvlLen = lvl.length;
-        await w(ncaOffset + L.sec1Start + lvOff, lvl);
-        lvOff += lvlLen;
-        track(lvlLen);
-    }
-    _log('info', `  RomFS streaming: ${(L.romfsDataSize / 1048576).toFixed(0)} MB to merge/write...`);
-    // Seekable output: restore the SHA256 mid-state (has header + exefs +
-    // hashLevels) and let romChunks + romPadding be hashed alongside the
-    // write → contentId for free. Append-only output: contentId was
-    // precomputed in Pass 1 — write only.
-    const sha = contentId === null ? sha256Mid.clone() : null;
-    await streamRomfs(async (chunk, off) => {
-        if (sha) sha.update(chunk);
-        await w(ncaOffset + L.sec1DataOff + off, chunk);
-        track(chunk.byteLength);
-    });
-    if (L.romPaddingSize > 0) {
-        const pad = new Uint8Array(L.romPaddingSize);
-        if (sha) sha.update(pad);
-        await w(ncaOffset + L.sec1DataOff + L.romfsDataSize, pad);
-    }
-    if (sha) contentId = sha.hex();
-    _prog(1);
-    return contentId;
 }
 
 export async function extractControl(updateNcaData, keys) {
