@@ -1021,22 +1021,9 @@ export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romf
     const _log = typeof log === 'function' ? log : () => {};
 
     // ── Layout (from sizes only) ───────────────────────────────────────────
-    const exeHtableSize = pad200(Math.ceil(exefsSize / PFS0_EXEFS_HASH_BLOCK_SIZE) * 0x20);
-    const exeSectionSize = pad200(exeHtableSize + exefsSize);
-    const sec0Start = NCA_HEADER_SIZE;
-    const sec1Start = sec0Start + exeSectionSize;
-    const sec0DataOff = sec0Start + exeHtableSize;
-    const h1 = pad4000(Math.ceil(romfsDataSize / 0x4000) * 0x20);
-    const h2 = pad4000(Math.ceil(h1 / 0x4000) * 0x20);
-    const h3 = pad4000(Math.ceil(h2 / 0x4000) * 0x20);
-    const h4 = pad4000(Math.ceil(h3 / 0x4000) * 0x20);
-    const h5 = pad4000(Math.ceil(h4 / 0x4000) * 0x20);
-    const hashLevelsSize = h1 + h2 + h3 + h4 + h5;
-    const sec1DataOff = sec1Start + hashLevelsSize;
-    const romSectionSize = pad4000(hashLevelsSize + romfsDataSize);
-    const ncaSize = sec1Start + romSectionSize;
-    const exePaddingSize = exeSectionSize - (exeHtableSize + exefsSize);
-    const romPaddingSize = romSectionSize - (hashLevelsSize + romfsDataSize);
+    const { exeHtableSize, exeSectionSize, sec0Start, sec1Start, sec0DataOff, sec1DataOff,
+            hashLevelsSize, romSectionSize, ncaSize, exePaddingSize, romPaddingSize }
+        = computeProgramNcaLayout(exefsSize, romfsDataSize);
     _log('info', `  Streaming NCA layout: ExeFS=0x${exeSectionSize.toString(16)} (htable 0x${exeHtableSize.toString(16)}), RomFS=0x${romSectionSize.toString(16)} (levels 0x${hashLevelsSize.toString(16)}), total=0x${ncaSize.toString(16)}`);
 
     const pfs0 = new StreamingPfs0Hasher(PFS0_EXEFS_HASH_BLOCK_SIZE);
@@ -1125,7 +1112,7 @@ export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romf
 // Memory: ~200 KB (hash levels + header only).
 // streamExefs / streamRomfs must be re-callable (up to 3× each for SW).
 
-export function twoPassLayout(exefsSize, romfsDataSize) {
+export function computeProgramNcaLayout(exefsSize, romfsDataSize) {
     const exeHtableSize = pad200(Math.ceil(exefsSize / PFS0_EXEFS_HASH_BLOCK_SIZE) * 0x20);
     const exeSectionSize = pad200(exeHtableSize + exefsSize);
     const sec0Start = NCA_HEADER_SIZE;
@@ -1153,7 +1140,7 @@ export function twoPassLayout(exefsSize, romfsDataSize) {
 // RomFS into the contentId hash here instead of deferring it to Pass 2.
 export async function computeProgramNcaContentId({ exefsSize, romfsDataSize, titleId, keys, streamExefs, streamRomfs, log, progress, contentIdInPass1 = false }) {
     const _log = typeof log === 'function' ? log : () => {};
-    const L = twoPassLayout(exefsSize, romfsDataSize);
+    const L = computeProgramNcaLayout(exefsSize, romfsDataSize);
     _log('info', `  Two-pass NCA layout: ExeFS=0x${L.exeSectionSize.toString(16)} (htable 0x${L.exeHtableSize.toString(16)}), RomFS=0x${L.romSectionSize.toString(16)} (levels 0x${L.hashLevelsSize.toString(16)}), total=0x${L.ncaSize.toString(16)}`);
 
     _log('info', '  Pass 1: Computing hash metadata (1 romfs pass)...');

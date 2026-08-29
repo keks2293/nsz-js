@@ -7,7 +7,7 @@ import { Cnmt } from './cnmt.js';
 import { sha256 } from '../crypto/sha256.js';
 import { mergeRomFS } from './bktr-merge.js';
 import { FileRangeSource, NczStreamSource, ViewRangeSource, SparseNcaView } from './range-source.js';
-import { preparePlaintextProgramNca, writePlaintextProgramNca, packProgramNcaStream, computeProgramNcaContentId, writeProgramNcaTwoPass, extractExefsStream, extractRomfsStream, createExefsAcidFilter, packMetaNca, extractExefs, extractRomfs, processNpdmAcid, twoPassLayout } from './nca-pack.js';
+import { preparePlaintextProgramNca, writePlaintextProgramNca, packProgramNcaStream, computeProgramNcaContentId, writeProgramNcaTwoPass, extractExefsStream, extractRomfsStream, createExefsAcidFilter, packMetaNca, extractExefs, extractRomfs, processNpdmAcid, computeProgramNcaLayout } from './nca-pack.js';
 import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE, decryptNcaHeaderBytes, findRomfsFsHeader } from './nca-utils.js';
 import { writeFromReader } from './convert-common.js';
 
@@ -25,7 +25,7 @@ function u16le(v) {
 
 // Total plaintext Program NCA size from ExeFS and RomFS data sizes.
 function programNcaSize(exefsSize, romfsDataSize) {
-    return twoPassLayout(exefsSize, romfsDataSize).ncaSize;
+    return computeProgramNcaLayout(exefsSize, romfsDataSize).ncaSize;
 }
 
 // Extract romfsDataSize / exefsSize from the decrypted update NCA header.
