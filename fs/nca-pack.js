@@ -2,7 +2,7 @@ import { AesXts, AesCtr } from '../crypto/aes-ops.mjs';
 import { AesEcb } from '../crypto/aes128.js';
 import { sha256, SHA256, digest32 } from '../crypto/sha256.js';
 import { PFS0, PFS0Writer } from './pfs0.js';
-import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE, toKeyBytes, decryptNcaHeaderBytes, resolveTitlekey, reversedSectionCtr, findRomfsFsHeader } from './nca-utils.js';
+import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE, toKeyBytes, decryptNcaHeaderBytes, resolveTitlekey, reversedSectionCtr, findRomfsFsHeader, MAGIC_IVFC, IVFC_HEADER_SIZE, IVFC_ID, IVFC_MASTER_HASH_SIZE, IVFC_NUM_LEVELS, IVFC_BLOCK_SIZE_LOG2, IVFC_HASH_BLOCK_SIZE, IVFC_HASH_SIZE, IVFC_LEVELS_OFFSET, IVFC_MASTER_HASH_OFFSET, IVFC_MAX_LEVEL, IVFC_LEVEL_HDR } from './nca-utils.js';
 
 // Yanu update pipeline uses only:
 //   PROGRAM (--plaintext) → ExeFS + RomFS, CRYPT_NONE sections ✅
@@ -35,24 +35,6 @@ const HASH_TYPE = { PFS0: 0x02, ROMFS: 0x03 };
 const CRYPT = { NONE: 0x01, CTR: 0x03 };
 // content_type field: 0=Program, 1=Meta (hacPack nca.c:249,617).
 const CONTENT_TYPE = { PROGRAM: 0x00, META: 0x01 };
-
-// ── IVFC constants (hacpack ivfc.h / nca.c) ───────────────────────────────────
-const MAGIC_IVFC = 0x43465649;        // "IVFC"
-const IVFC_HEADER_SIZE = 0xE0;
-const IVFC_ID = 0x20000;
-const IVFC_MASTER_HASH_SIZE = 0x20;
-const IVFC_NUM_LEVELS = 0x07;         // 6 level slots; 7 is the canonical field value
-const IVFC_BLOCK_SIZE_LOG2 = 0x0E;    // block_size field = log2(0x4000)
-const IVFC_HASH_BLOCK_SIZE = 0x4000;  // hacpack ivfc.h IVFC_HASH_BLOCK_SIZE
-const IVFC_HASH_SIZE = 0x20;          // sha256 digest per block
-// ivfc_hdr_t (ivfc.h): magic@0x00, id@0x04, master_hash_size@0x08, num_levels@0x0C,
-// level_headers[IVFC_MAX_LEVEL]@0x10, _0xA0[0x20]@0xA0, master_hash@0xC0 (total 0xE0)
-const IVFC_LEVELS_OFFSET = 0x10;
-const IVFC_MASTER_HASH_OFFSET = 0xC0;
-const IVFC_MAX_LEVEL = 6;             // hacpack ivfc.h; level [5] = DATA level
-// ivfc_level_hdr_t (ivfc.h): logical_offset(u64)@+0x00, hash_data_size(u64)@+0x08,
-// block_size(u32)@+0x10, reserved(u32)@+0x14 → 0x18 bytes
-const IVFC_LEVEL_HDR = { SIZE: 0x18, LOGICAL_OFFSET: 0x00, HASH_DATA_SIZE: 0x08, BLOCK_SIZE: 0x10 };
 
 // ── PFS0 constants (hacpack pfs0.h) ───────────────────────────────────────────
 const PFS0_EXEFS_HASH_BLOCK_SIZE = 0x10000;

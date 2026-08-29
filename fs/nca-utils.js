@@ -5,6 +5,26 @@ import { AesXts } from '../crypto/aes-ops.mjs';
 
 export const NCA_HEADER_SIZE = 0xC00;
 
+// ── IVFC format constants (hacpack ivfc.h / nca.c) ─────────────────────────────
+// ivfc_hdr_t: magic@0x00, id@0x04, master_hash_size@0x08, num_levels@0x0C,
+// level_headers[IVFC_MAX_LEVEL]@0x10, _0xA0[0x20]@0xA0, master_hash@0xC0 (total 0xE0).
+// Shared by the packer (nca-pack.js buildIvfcHeader) and the BKTR reader
+// (bktr-merge.js), which parses the same layout from a stored superblock.
+export const MAGIC_IVFC = 0x43465649;        // "IVFC"
+export const IVFC_HEADER_SIZE = 0xE0;
+export const IVFC_ID = 0x20000;
+export const IVFC_MASTER_HASH_SIZE = 0x20;
+export const IVFC_NUM_LEVELS = 0x07;         // 6 level slots; 7 is the canonical field value
+export const IVFC_BLOCK_SIZE_LOG2 = 0x0E;    // block_size field = log2(0x4000)
+export const IVFC_HASH_BLOCK_SIZE = 0x4000;  // hacpack ivfc.h IVFC_HASH_BLOCK_SIZE
+export const IVFC_HASH_SIZE = 0x20;          // sha256 digest per block
+export const IVFC_LEVELS_OFFSET = 0x10;
+export const IVFC_MASTER_HASH_OFFSET = 0xC0;
+export const IVFC_MAX_LEVEL = 6;             // hacpack ivfc.h; level [5] = DATA level
+// ivfc_level_hdr_t: logical_offset(u64)@+0x00, hash_data_size(u64)@+0x08,
+// block_size(u32)@+0x10, reserved(u32)@+0x14 → 0x18 bytes
+export const IVFC_LEVEL_HDR = { SIZE: 0x18, LOGICAL_OFFSET: 0x00, HASH_DATA_SIZE: 0x08, BLOCK_SIZE: 0x10 };
+
 export function hexToBytes(hex) {
     const buf = new Uint8Array(hex.length / 2);
     for (let i = 0; i < hex.length; i += 2) {

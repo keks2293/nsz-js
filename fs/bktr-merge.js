@@ -1,7 +1,7 @@
 import { AesCtr } from '../crypto/aes-ops.mjs';
 import { decryptNcaHeader } from './nca.js';
 import { BufferRangeSource } from './range-source.js';
-import { decryptNcaHeaderBytes, reversedSectionCtr, extractTitlekeyFromTik, deriveTitlekeyFromKeyArea } from './nca-utils.js';
+import { decryptNcaHeaderBytes, reversedSectionCtr, extractTitlekeyFromTik, deriveTitlekeyFromKeyArea, IVFC_LEVEL_HDR, IVFC_LEVELS_OFFSET, IVFC_MAX_LEVEL } from './nca-utils.js';
 import {
     parseBktrHeader,
     decryptBktrTableData,
@@ -24,6 +24,7 @@ function toNcaInput(nca) {
 }
 
 const BKTR_HEADER_OFFSET = 0x100;
+const BKTR_MAGIC = 0x52544B42; // "BKTR"
 
 export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
     const { keys, onChunk, baseTitlekey: providedBaseTitlekey, updateTitlekey: providedUpdateTitlekey, baseTik, updateTik, titlekeysFile } = options;
@@ -57,23 +58,21 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
     const updateFsHdr = updateDecHeader.subarray(0x400 + updateRomfsSecIdx * 0x200, 0x400 + updateRomfsSecIdx * 0x200 + 0x200);
 
     // Parse IVFC header from the BKTR superblock (bktr_superblock_t = ivfc_header @ superblock+0x0, see nca.h).
-    // The BKTR superblock starts at FsHeader+0x8; ivfc_hdr_t (ivfc.h) is:
-    //   magic(4)@+0, id(4)@+4, master_hash_size(4)@+8, num_levels(4)@+0xC,
-    //   level_headers[6]@+0x10 (each 0x18: logical_offset u64, hash_data_size u64, block_size u32, reserved u32),
-    //   master_hash(0x20)@+0xC0.
-    // Level 5 is the DATA level: the actual RomFS image. hactool uses it as the RomFS base
+    // The BKTR superblock starts at FsHeader+0x8; ivfc_hdr_t/ivfc_level_hdr_t layout:
+    // see the IVFC constants in nca-pack.js (single source, shared with the builder).
+    // Level IVFC_MAX_LEVEL-1 is the DATA level: the actual RomFS image. hactool uses it as the RomFS base
     // (nca.c:1240 "ctx->bktr_ctx.romfs_offset = ctx->bktr_ctx.ivfc_levels[IVFC_MAX_LEVEL-1].data_offset").
     const ivfcBase = updateFsHdr.byteOffset + 0x8;
     const readLevelU64 = (levelIdx, fieldOff) =>
-        Number(new DataView(updateFsHdr.buffer, ivfcBase + 0x10 + levelIdx * 0x18 + fieldOff, 8).getBigUint64(0, true));
-    const dataLevelOffset = readLevelU64(5, 0x00); // logical_offset of level 5 = where RomFS data starts
-    const dataLevelSize = readLevelU64(5, 0x08);   // hash_data_size of level 5 = size of RomFS data
+        Number(new DataView(updateFsHdr.buffer, ivfcBase + IVFC_LEVELS_OFFSET + levelIdx * IVFC_LEVEL_HDR.SIZE + fieldOff, 8).getBigUint64(0, true));
+    const dataLevelOffset = readLevelU64(IVFC_MAX_LEVEL - 1, IVFC_LEVEL_HDR.LOGICAL_OFFSET); // where RomFS data starts
+    const dataLevelSize = readLevelU64(IVFC_MAX_LEVEL - 1, IVFC_LEVEL_HDR.HASH_DATA_SIZE);   // size of RomFS data
 
     // Parse BKTR headers
     const relocHeader = parseBktrHeader(updateFsHdr, BKTR_HEADER_OFFSET);
     const subHeader = parseBktrHeader(updateFsHdr, BKTR_HEADER_OFFSET + 0x20);
-    if (relocHeader.magic !== 0x52544B42) throw new Error(`BKTR: reloc magic 0x${relocHeader.magic.toString(16).padStart(8, '0')}`);
-    if (subHeader.magic !== 0x52544B42) throw new Error(`BKTR: sub magic 0x${subHeader.magic.toString(16).padStart(8, '0')}`);
+    if (relocHeader.magic !== BKTR_MAGIC) throw new Error(`BKTR: reloc magic 0x${relocHeader.magic.toString(16).padStart(8, '0')}`);
+    if (subHeader.magic !== BKTR_MAGIC) throw new Error(`BKTR: sub magic 0x${subHeader.magic.toString(16).padStart(8, '0')}`);
 
     // AesCtrUpperIv: FsHeader[0x140:0x148] = {generation(u32 LE), secure_value(u32 LE)}
     // Stratosphere uses secure_value as ctr[0:4] BE in AesCtrEx counter
