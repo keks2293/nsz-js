@@ -29,6 +29,34 @@ function programNcaSize(exefsSize, romfsDataSize) {
     return computeProgramNcaLayout(exefsSize, romfsDataSize).ncaSize;
 }
 
+// Read the first NCA_HEADER_SIZE bytes of a Program NCA, returning its raw
+// plaintext header plus (for NCZ) the parsed section table. NCZ needs a short
+// sequential decompression up to the header; a raw NCA container is read
+// directly. Returns { raw, parsed } where parsed is the NCZ fn section table
+// (reused downstream for the range source) or null for a raw container.
+async function readPlaintextNcaHeader(containerReader, src) {
+    if (src.name.toLowerCase().endsWith('.ncz')) {
+        const nczReader = new AdapterNCZReader(containerReader, src.offset, src.size);
+        const parsed = await parseNczSections(nczReader);
+        const raw = new Uint8Array(NCA_HEADER_SIZE);
+        const decomp = new NCZDecompressor(nczReader);
+        await decomp.decompress(
+            () => {},
+            (chunk, offset) => {
+                if (offset >= NCA_HEADER_SIZE) return;
+                const end = Math.min(offset + chunk.length, NCA_HEADER_SIZE);
+                raw.set(chunk.subarray(0, end - offset), offset);
+            },
+            parsed,
+        );
+        return { raw, parsed };
+    }
+    return {
+        raw: await containerReader.read(src.offset, Math.min(src.size, NCA_HEADER_SIZE)),
+        parsed: null,
+    };
+}
+
 // Extract romfsDataSize / exefsSize from the decrypted update NCA header.
 // Used by the BKTR streaming paths (identical logic).
 function parseUpdateSectionSizes(updateHeaderDec, updateHeaderRaw, updateRomfsSec, updateExefsSec, keys) {
@@ -417,32 +445,16 @@ export async function update(readers, output, options = {}) {
     let hasBktrRomfs = false;
     let updateHasRomfs = false;
     let updateHasExefs = false;
+    // The update Program NCA header is read here once (for the BKTR check) and
+    // reused by the merge block below — no second decompression of the update NCZ.
+    let updateHeaderRaw = null;
+    let updateHeaderDec = null;
     if (updateProgramEntry && bktrMerge) {
-        let rawHeader;
-        if (updateProgramEntry.src.name.toLowerCase().endsWith('.ncz')) {
-            // NCZ: decompress first to get the real NCA header
-            log('info', 'Decompressing update Program NCA header for BKTR check...');
-            const nczReader = new AdapterNCZReader(update.reader, updateProgramEntry.src.offset, updateProgramEntry.src.size);
-            const parsed = await parseNczSections(nczReader);
-            const decomp = new NCZDecompressor(nczReader);
-            const headerSize = 0xC00;
-            rawHeader = new Uint8Array(headerSize);
-            await decomp.decompress(
-                () => {},
-                (chunk, offset) => {
-                    if (offset >= headerSize) return;
-                    const end = Math.min(offset + chunk.length, headerSize);
-                    rawHeader.set(chunk.subarray(0, end - offset), offset);
-                },
-                parsed,
-            );
-        } else {
-            rawHeader = await update.reader.read(
-                updateProgramEntry.src.offset,
-                Math.min(updateProgramEntry.src.size, 0xC00)
-            );
-        }
-        const uHeader = decryptNcaHeader(rawHeader, keys);
+        log('info', 'Reading update Program NCA header for BKTR check...');
+        const { raw } = await readPlaintextNcaHeader(update.reader, updateProgramEntry.src);
+        updateHeaderRaw = raw;
+        const uHeader = decryptNcaHeader(raw, keys);
+        updateHeaderDec = uHeader;
         if (uHeader) {
             hasBktrRomfs = !!uHeader.sections.find(s => s.fsType === 3 && s.cryptoType === 4);
             updateHasRomfs = !!uHeader.sections.find(s => s.fsType === 3 && s.size > 0);
@@ -490,39 +502,21 @@ export async function update(readers, output, options = {}) {
 
         // ── Extract base Program NCA header ──────────────────────────────────
         log('info', `Reading base Program NCA header (${baseIsNcz ? 'from NCZ' : 'direct'})...`);
-        let baseHeaderRaw;
-        let baseParsed = null;
-        if (baseIsNcz) {
-            baseParsed = await parseNczSections(baseReader);
-            baseHeaderRaw = new Uint8Array(NCA_HEADER_SIZE);
-            const decomp = new NCZDecompressor(baseReader);
-            await decomp.decompress(() => {}, (chunk, offset) => {
-                if (offset >= NCA_HEADER_SIZE) return;
-                const end = Math.min(offset + chunk.length, NCA_HEADER_SIZE);
-                baseHeaderRaw.set(chunk.subarray(0, end - offset), offset);
-            }, baseParsed);
-        } else {
-            baseHeaderRaw = await base.reader.read(baseProgramEntry.src.offset, NCA_HEADER_SIZE);
-        }
+        const baseHdr = await readPlaintextNcaHeader(base.reader, baseProgramEntry.src);
+        const baseHeaderRaw = baseHdr.raw;
+        let baseParsed = baseHdr.parsed;
         const baseHeaderDec = decryptNcaHeader(baseHeaderRaw, keys);
         if (!baseHeaderDec) throw new Error('update: cannot decrypt base Program NCA header');
 
         // ── Extract update Program NCA header ────────────────────────────────
+        // The header was already read + decrypted for the BKTR check above; reuse
+        // it here, so the update NCZ is only decompressed once for its header.
         log('info', `Reading update Program NCA header (${updateIsNcz ? 'from NCZ' : 'direct'})...`);
-        let updateHeaderRaw;
-        if (updateIsNcz) {
-            const parsed = await parseNczSections(updateReader);
-            updateHeaderRaw = new Uint8Array(NCA_HEADER_SIZE);
-            const decomp = new NCZDecompressor(updateReader);
-            await decomp.decompress(() => {}, (chunk, offset) => {
-                if (offset >= NCA_HEADER_SIZE) return;
-                const end = Math.min(offset + chunk.length, NCA_HEADER_SIZE);
-                updateHeaderRaw.set(chunk.subarray(0, end - offset), offset);
-            }, parsed);
-        } else {
-            updateHeaderRaw = await update.reader.read(updateProgramEntry.src.offset, NCA_HEADER_SIZE);
+        if (!updateHeaderDec) {
+            const uHdr = await readPlaintextNcaHeader(update.reader, updateProgramEntry.src);
+            updateHeaderRaw = uHdr.raw;
+            updateHeaderDec = decryptNcaHeader(updateHeaderRaw, keys);
         }
-        const updateHeaderDec = decryptNcaHeader(updateHeaderRaw, keys);
         if (!updateHeaderDec) throw new Error('update: cannot decrypt update Program NCA header');
 
         // ── Build NCA range sources (the NSZ→NSP converter's streaming discipline) ──
