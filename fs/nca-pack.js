@@ -1291,8 +1291,16 @@ export async function writeProgramNcaTwoPass({ meta, adapter, ncaOffset, streamE
     let _wdPhase = 'init';
     let _wdBytes = 0;
     let _wdLastWrite = 0;
+    let _wdLastBytes = 0;
+    let _wdStallTicks = 0;
     const _wdTick = () => {
-        _log('info', `  [WATCHDOG] phase=${_wdPhase} written=${(_wdBytes / 1048576).toFixed(0)} MB lastWrite=0x${_wdLastWrite.toString(16)}`);
+        _wdStallTicks = _wdBytes === _wdLastBytes ? _wdStallTicks + 1 : 0;
+        _wdLastBytes = _wdBytes;
+        const line = `  [WATCHDOG] phase=${_wdPhase} written=${(_wdBytes / 1048576).toFixed(0)} MB lastWrite=0x${_wdLastWrite.toString(16)}`;
+        // An FSA op that never resolves can't be cancelled from JS, so after 5
+        // zero-progress ticks (75 s) escalate: the run is hung.
+        if (_wdStallTicks >= 5) _log('error', line + ` — STALLED ${_wdStallTicks * 15}s, no progress (phase ${_wdPhase}) — run is hung, retry`);
+        else _log('info', line);
     };
     let _wdTimer = setInterval(_wdTick, 15_000);
     const _wdDone = () => { clearInterval(_wdTimer); _wdTimer = null; };
