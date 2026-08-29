@@ -117,6 +117,7 @@ export class NczStreamSource {
         this._nextRange = 0;
         this._discardedUpTo = 0;
         this._pumpStarted = false;
+        this._pumpStopped = false;
         this._pumpError = null;
     }
     get length() { return this._parsed.ncaSize; }
@@ -152,9 +153,22 @@ export class NczStreamSource {
             if (this._pumpStarted && offset < this._discardedUpTo) {
                 throw new Error('NczStreamSource: non-monotonic read — bytes already discarded (NCZ is sequential)');
             }
+            if (this._pumpStopped) {
+                throw new Error(`NczStreamSource: read [0x${offset.toString(16)}, 0x${end.toString(16)}) requested after the pump finished all registered ranges — register ranges up front (NCZ is sequential, bytes are discarded)`);
+            }
             idx = this.registerRange(offset, length);
         }
         const r = this._ranges[idx];
+        // Fast path: the pump (unthrottled, runs ahead of a slow consumer) may
+        // have filled this range before any read of it. r.ready was never
+        // created, so awaiting it would deadlock — return the buffered data.
+        if (r.filled === r.data.length) {
+            markMerge(`NczStreamSource: range #${idx} already filled`);
+            return sub ? r.data.subarray(sub.off, sub.off + sub.len) : r.data;
+        }
+        if (this._pumpError) {
+            throw this._pumpError;
+        }
         if (!this._pumpStarted) {
             this._pumpStarted = true;
             this._pump();
@@ -199,7 +213,7 @@ export class NczStreamSource {
                 throw new Error(STOP_PUMP);
             }
         }, this._parsed).catch(e => {
-            if (e && e.message === STOP_PUMP) return; // normal early stop
+            if (e && e.message === STOP_PUMP) { this._pumpStopped = true; return; } // normal early stop
             this._pumpError = e;
             for (const r of this._ranges) {
                 if (r.reject) r.reject(e);
