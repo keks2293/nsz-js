@@ -168,63 +168,62 @@ async function rebuildCnmtNca(baseMeta, updateMeta, keys, log, mergedProgram = n
 }
 
 
-// Extract a specific section from a potentially-NCZ-compressed NCA.
-// For NCZ: streams through decompression but only buffers the requested section range.
-// For plain NCA: direct read.
-// Returns Uint8Array of the section data (NCA section bytes, decrypted).
-async function extractNcaSection(reader, ncaOffset, ncaSize, isNcz, keys, log) {
+// Extract several non-overlapping NCA sections from one NCZ in a SINGLE
+// sequential decompression pass. `ranges` is an array of { offset, size } in
+// strictly increasing, non-overlapping order. NCZ decompression is strictly
+// sequential — a section past the file start can only be reached by decoding
+// everything before it — so pulling several sections in one pass avoids a full
+// re-decompression for each extra section (e.g. update BKTR + ExeFS). Returns
+// the raw section buffers in the same order as `ranges`.
+async function extractNcaSections(reader, ranges, isNcz, keys, log) {
     if (!isNcz) {
-        return await reader.read(ncaOffset, ncaSize);
+        const bufs = [];
+        for (const r of ranges) bufs.push(await reader.read(r.offset, r.size));
+        return bufs;
     }
 
-    // NCZ: stream decompression, buffer only [ncaOffset, ncaOffset + ncaSize]
     const parsed = await parseNczSections(reader);
-    if (ncaOffset + ncaSize > parsed.ncaSize) {
-        throw new Error(`extractNcaSection: section range [${ncaOffset}, ${ncaOffset + ncaSize}) exceeds NCA size ${parsed.ncaSize}`);
+    const last = ranges[ranges.length - 1];
+    const lastEnd = last.offset + last.size;
+    if (lastEnd > parsed.ncaSize) {
+        throw new Error(`extractNcaSections: last section range [${last.offset}, ${lastEnd}) exceeds NCA size ${parsed.ncaSize}`);
     }
 
-    const sectionBuffer = new Uint8Array(ncaSize);
-    let sectionFilled = 0;
-    let done = false;
-    const sectionEnd = ncaOffset + ncaSize;
-
+    const buffers = ranges.map(r => new Uint8Array(r.size));
+    const filled = ranges.map(() => 0);
     const decomp = new NCZDecompressor(reader);
     try {
         await decomp.decompress(
             () => {},
             (chunk, offset) => {
-                // Early stop: once past our section end, no more data needed
-                // (NCZ is sequential: all blocks after our section can be skipped)
-                if (offset >= sectionEnd) {
-                    done = true;
-                    throw new Error('SECTION_COMPLETE');
+                if (offset >= lastEnd) throw new Error('SECTIONS_COMPLETE');
+                for (let i = 0; i < ranges.length; i++) {
+                    const r = ranges[i];
+                    const chunkEnd = offset + chunk.length;
+                    if (chunkEnd <= r.offset) continue;          // before this section
+                    if (offset >= r.offset + r.size) continue;  // after this section
+                    const startInChunk = Math.max(0, r.offset - offset);
+                    const endInChunk = Math.min(chunk.length, r.offset + r.size - offset);
+                    const data = chunk.subarray(startInChunk, endInChunk);
+                    const target = offset - r.offset + startInChunk;
+                    buffers[i].set(data, target);
+                    filled[i] += data.length;
                 }
-
-                // Check if chunk overlaps with our target section
-                const chunkEnd = offset + chunk.length;
-                if (chunkEnd <= ncaOffset) return; // before our section
-
-                const startInChunk = Math.max(0, ncaOffset - offset);
-                const endInChunk = Math.min(chunk.length, sectionEnd - offset);
-                const data = chunk.subarray(startInChunk, endInChunk);
-                const targetOffset = Math.max(0, offset - ncaOffset);
-
-                sectionBuffer.set(data, targetOffset);
-                sectionFilled += data.length;
             },
             parsed,
         );
     } catch (e) {
-        if (e.message !== 'SECTION_COMPLETE') throw e;
+        if (e.message !== 'SECTIONS_COMPLETE') throw e;
     }
 
-    if (sectionFilled !== ncaSize) {
-        throw new Error(`extractNcaSection: incomplete section data (${sectionFilled}/${ncaSize})`);
+    for (let i = 0; i < ranges.length; i++) {
+        if (filled[i] !== ranges[i].size) {
+            throw new Error(`extractNcaSections: incomplete section data (${filled[i]}/${ranges[i].size})`);
+        }
     }
-
-    log('info', `Extracted NCA section [0x${ncaOffset.toString(16)}, 0x${(ncaOffset + ncaSize).toString(16)}) = ${ncaSize} bytes (streaming NCZ)`);
-    return sectionBuffer;
+    return buffers;
 }
+
 
 // (SparseNcaView moved to ./range-source.js)
 
@@ -544,24 +543,18 @@ export async function update(readers, output, options = {}) {
 
         let updateSource;
         if (updateIsNcz) {
-            let updateBktrData = null;
+            const updRanges = [];
             if (hasBktrRomfs && updateRomfsSec) {
-                log('info', `Extracting update BKTR section (0x${updateRomfsSec.offset.toString(16)}..0x${(updateRomfsSec.endOffset).toString(16)})...`);
-                await new Promise(r => setTimeout(r, 0));
-                updateBktrData = await extractNcaSection(
-                    updateReader, updateRomfsSec.offset, updateRomfsSec.endOffset - updateRomfsSec.offset,
-                    updateIsNcz, keys, log
-                );
+                updRanges.push({ offset: updateRomfsSec.offset, size: updateRomfsSec.endOffset - updateRomfsSec.offset });
             }
-            log('info', `Extracting update ExeFS section (0x${updateExefsSec.offset.toString(16)}..0x${(updateExefsSec.endOffset).toString(16)})...`);
+            updRanges.push({ offset: updateExefsSec.offset, size: updateExefsSec.endOffset - updateExefsSec.offset });
+            log('info', `Extracting update NCZ sections in one pass: ${updRanges.map(r => `[0x${r.offset.toString(16)}..0x${(r.offset + r.size).toString(16)})`).join(', ')}...`);
             await new Promise(r => setTimeout(r, 0));
-            const updateExefsData = await extractNcaSection(
-                updateReader, updateExefsSec.offset, updateExefsSec.endOffset - updateExefsSec.offset,
-                updateIsNcz, keys, log
-            );
+            const updData = await extractNcaSections(updateReader, updRanges, updateIsNcz, keys, log);
             const updateSections = [];
-            if (updateBktrData) updateSections.push({ offset: updateRomfsSec.offset, data: updateBktrData });
-            updateSections.push({ offset: updateExefsSec.offset, data: updateExefsData });
+            let u = 0;
+            if (hasBktrRomfs && updateRomfsSec) updateSections.push({ offset: updateRomfsSec.offset, data: updData[u++] });
+            updateSections.push({ offset: updateExefsSec.offset, data: updData[u++] });
             const updateView = new SparseNcaView(updateHeaderRaw, updateSections);
             updateSource = new ViewRangeSource(updateView);
             log('info', `Update .nsz: ${updateSections.length} section(s) served from zero-copy sparse view (${updateView.length} bytes) — patch access is non-monotonic, so these stay buffered`);
