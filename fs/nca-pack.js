@@ -44,6 +44,24 @@ const IVFC_ID = 0x20000;
 const IVFC_MASTER_HASH_SIZE = 0x20;
 const IVFC_NUM_LEVELS = 0x07;         // 6 level slots; 7 is the canonical field value
 const IVFC_BLOCK_SIZE_LOG2 = 0x0E;    // block_size field = log2(0x4000)
+const IVFC_HASH_BLOCK_SIZE = 0x4000;  // hacpack ivfc.h IVFC_HASH_BLOCK_SIZE
+const IVFC_HASH_SIZE = 0x20;          // sha256 digest per block
+// ivfc_hdr_t (ivfc.h): magic@0x00, id@0x04, master_hash_size@0x08, num_levels@0x0C,
+// level_headers[IVFC_MAX_LEVEL]@0x10, _0xA0[0x20]@0xA0, master_hash@0xC0 (total 0xE0)
+const IVFC_LEVELS_OFFSET = 0x10;
+const IVFC_MASTER_HASH_OFFSET = 0xC0;
+const IVFC_MAX_LEVEL = 6;             // hacpack ivfc.h; level [5] = DATA level
+// ivfc_level_hdr_t (ivfc.h): logical_offset(u64)@+0x00, hash_data_size(u64)@+0x08,
+// block_size(u32)@+0x10, reserved(u32)@+0x14 → 0x18 bytes
+const IVFC_LEVEL_HDR = { SIZE: 0x18, LOGICAL_OFFSET: 0x00, HASH_DATA_SIZE: 0x08, BLOCK_SIZE: 0x10 };
+
+// ── PFS0 constants (hacpack pfs0.h) ───────────────────────────────────────────
+const PFS0_EXEFS_HASH_BLOCK_SIZE = 0x10000;
+const PFS0_META_HASH_BLOCK_SIZE = 0x1000;
+
+// ── NCA keygen constants (hacpack settings) ───────────────────────────────────
+const KEYAREAKEY = new Uint8Array(16).fill(0x04); // keyareakey — key-area slot 2 + CNMT CTR key
+const SDK_VERSION = 0x000C1100;                    // hacpack main.c:116 default
 
 // ── IVFC hash tree ───────────────────────────────────────────────────────────
 // 5 hash levels + 1 data level (the romfs image).
@@ -66,29 +84,19 @@ function buildIvfcHeader(dataSizes, masterHash) {
     v.setUint32(8, IVFC_MASTER_HASH_SIZE, true); // master_hash_size
     v.setUint32(12, IVFC_NUM_LEVELS, true);      // num_levels
 
-    const LOGICAL_OFFSET = 0x00;
-    const HASH_DATA_SIZE = 0x08;
-    const BLOCK_SIZE = 0x10;
-    const HEADER_PER_LEVEL = 0x18;
-    const numLevels = 6;
-
     let cumulativeOffset = 0;
-    for (let lvl = 0; lvl < numLevels; lvl++) {
-        const base = 0x10 + lvl * HEADER_PER_LEVEL;
-        // Each level header (ivfc.h): logical_offset(u64)@+0x00, hash_data_size(u64)@+0x08,
-        // block_size(u32)@+0x10, reserved(u32)@+0x14 = 0x18 bytes
-        v.setBigUint64(base + LOGICAL_OFFSET, BigInt(cumulativeOffset), true);
-        v.setBigUint64(base + HASH_DATA_SIZE, BigInt(dataSizes[lvl]), true);
-        v.setUint32(base + BLOCK_SIZE, IVFC_BLOCK_SIZE_LOG2, true);
+    for (let lvl = 0; lvl < IVFC_MAX_LEVEL; lvl++) {
+        const base = IVFC_LEVELS_OFFSET + lvl * IVFC_LEVEL_HDR.SIZE;
+        v.setBigUint64(base + IVFC_LEVEL_HDR.LOGICAL_OFFSET, BigInt(cumulativeOffset), true);
+        v.setBigUint64(base + IVFC_LEVEL_HDR.HASH_DATA_SIZE, BigInt(dataSizes[lvl]), true);
+        v.setUint32(base + IVFC_LEVEL_HDR.BLOCK_SIZE, IVFC_BLOCK_SIZE_LOG2, true);
         cumulativeOffset += dataSizes[lvl];
     }
-    ivfcHeader.set(masterHash, 0xC0);
+    ivfcHeader.set(masterHash, IVFC_MASTER_HASH_OFFSET);
     return ivfcHeader;
 }
 
 export function buildIvfcHashTree(romfsData) {
-    const blockSize = 0x4000;
-    const hashSize = 0x20;
     const numHashLevels = 5;
 
     // Build hash levels from bottom up (data → hash4 → ... → hash0)
@@ -97,11 +105,11 @@ export function buildIvfcHashTree(romfsData) {
     const allSizes = [romfsData.length];
 
     for (let lvl = 0; lvl < numHashLevels; lvl++) {
-        const numBlocks = Math.ceil(currentData.length / blockSize);
-        const hashFile = new Uint8Array(numBlocks * hashSize);
+        const numBlocks = Math.ceil(currentData.length / IVFC_HASH_BLOCK_SIZE);
+        const hashFile = new Uint8Array(numBlocks * IVFC_HASH_SIZE);
         for (let b = 0; b < numBlocks; b++) {
-            const blockStart = b * blockSize;
-            const blockEnd = Math.min(blockStart + blockSize, currentData.length);
+            const blockStart = b * IVFC_HASH_BLOCK_SIZE;
+            const blockEnd = Math.min(blockStart + IVFC_HASH_BLOCK_SIZE, currentData.length);
             // The last partial block is zero-padded to blockSize before hashing:
             // Nintendo hashes a full blockSize (blockEnd - blockStart bytes of
             // real data, then zeros up to 0x4000).
@@ -117,10 +125,10 @@ export function buildIvfcHashTree(romfsData) {
             // read bytes to sha_update (no padding); the packer must therefore
             // zero-pad each level to a 0x4000 multiple before hashing. We do the
             // padding inline here.
-            const block = new Uint8Array(blockSize);
+            const block = new Uint8Array(IVFC_HASH_BLOCK_SIZE);
             block.set(currentData.subarray(blockStart, blockEnd));
             const hash = digest32(block);
-            hashFile.set(hash, b * hashSize);
+            hashFile.set(hash, b * IVFC_HASH_SIZE);
         }
         const paddedSize = pad4000(hashFile.length);
         const paddedFile = new Uint8Array(paddedSize);
@@ -183,25 +191,23 @@ export function buildPfs0HashTable(pfs0Data, hashBlock) {
 // the data. Only level-1 (H1, ~size/0x200000) + one 0x4000 block buffer is kept.
 export class StreamingIvfcHasher {
     constructor(dataSize) {
-        this.blockSize = 0x4000;
-        this.hashSize = 0x20;
         this.dataSize = dataSize;
-        const numBlocks = Math.ceil(dataSize / this.blockSize);
-        this.h1 = new Uint8Array(numBlocks * this.hashSize);
-        this.buf = new Uint8Array(this.blockSize);
+        const numBlocks = Math.ceil(dataSize / IVFC_HASH_BLOCK_SIZE);
+        this.h1 = new Uint8Array(numBlocks * IVFC_HASH_SIZE);
+        this.buf = new Uint8Array(IVFC_HASH_BLOCK_SIZE);
         this.bufLen = 0;
         this.blockIdx = 0;
     }
     update(chunk) {
         let off = 0;
         while (off < chunk.length) {
-            const space = this.blockSize - this.bufLen;
+            const space = IVFC_HASH_BLOCK_SIZE - this.bufLen;
             const n = Math.min(space, chunk.length - off);
             this.buf.set(chunk.subarray(off, off + n), this.bufLen);
             this.bufLen += n;
             off += n;
-            if (this.bufLen === this.blockSize) {
-                this.h1.set(digest32(this.buf), this.blockIdx * this.hashSize);
+            if (this.bufLen === IVFC_HASH_BLOCK_SIZE) {
+                this.h1.set(digest32(this.buf), this.blockIdx * IVFC_HASH_SIZE);
                 this.blockIdx++;
                 this.bufLen = 0;
             }
@@ -209,9 +215,9 @@ export class StreamingIvfcHasher {
     }
     finalize() {
         if (this.bufLen > 0) {
-            const padded = new Uint8Array(this.blockSize);
+            const padded = new Uint8Array(IVFC_HASH_BLOCK_SIZE);
             padded.set(this.buf.subarray(0, this.bufLen));
-            this.h1.set(digest32(padded), this.blockIdx * this.hashSize);
+            this.h1.set(digest32(padded), this.blockIdx * IVFC_HASH_SIZE);
             this.blockIdx++;
         }
         // Build H1..H5 (each level = sha256 of 0x4000 blocks of the previous, padded level).
@@ -222,10 +228,10 @@ export class StreamingIvfcHasher {
             const padded = new Uint8Array(paddedSize);
             padded.set(current);
             levels.push(padded);
-            const numBlocks = Math.ceil(padded.length / this.blockSize);
-            const next = new Uint8Array(numBlocks * this.hashSize);
+            const numBlocks = Math.ceil(padded.length / IVFC_HASH_BLOCK_SIZE);
+            const next = new Uint8Array(numBlocks * IVFC_HASH_SIZE);
             for (let b = 0; b < numBlocks; b++) {
-                next.set(digest32(padded.subarray(b * this.blockSize, (b + 1) * this.blockSize)), b * this.hashSize);
+                next.set(digest32(padded.subarray(b * IVFC_HASH_BLOCK_SIZE, (b + 1) * IVFC_HASH_BLOCK_SIZE)), b * IVFC_HASH_SIZE);
             }
             current = next;
         }
@@ -244,7 +250,7 @@ export class StreamingIvfcHasher {
 // update(chunk); finalize() yields the (padded) hash table + master hash. The last
 // partial block is hashed as-is (NO zero-padding), matching buildPfs0HashTable.
 export class StreamingPfs0Hasher {
-    constructor(hashBlock = 0x10000) {
+    constructor(hashBlock = PFS0_EXEFS_HASH_BLOCK_SIZE) {
         this.hashBlock = hashBlock;
         this.hashSize = 0x20;
         this.buf = new Uint8Array(hashBlock);
@@ -363,6 +369,17 @@ function encryptNcaHeader(header, keys) {
 // NOT to confuse with the ACID key pair INSIDE main.npdm (ExeFS content) — a
 // different region, zeroed by processNpdmAcid()/createExefsAcidFilter().
 //
+// Keygen policy: repacked NCAs are always keygen 1 — crypto_type(0x206),
+// kaek_ind(0x207) and crypto_type2(0x220) all stay zero. These fields do not
+// mean "no encryption"; they are the tag selecting which fixed prod.keys key
+// decrypts this NCA, so the tag must match the header_key we XTS-encrypt with
+// (encryptNcaHeader()/decryptNcaHeaderBytes() — the only header key in this
+// toolchain). The update path packs sections CRYPT_NONE (hacpack --plaintext),
+// so no titlekey is involved, and the key area is the hacpack --plaintext
+// standard: slot 2 = keyareakey (0x04*16), ECB key_area_key_application_00
+// (nca.c:399-401, 774-779). keygen 2+ (hacpack nca_set_keygen, nca.c:893)
+// would require header_key_2 — out of scope here.
+//
 // The buffer is fresh (zero by spec); the explicit sig fill below stays as the
 // visible statement of the zero-sig decision. Other zero regions (padding,
 // rights_id, unused section hashes) rely on the fresh allocation.
@@ -379,20 +396,16 @@ function buildNcaHeader(titleId, sections, keys, contentType = CONTENT_TYPE.PROG
     header[0x204] = 0x00;
     // content_type (CONTENT_TYPE)
     header[0x205] = contentType;
-    // crypto_type = 0 (keygen 1)
-    header[0x206] = 0x00;
-    // kaek_ind = 0
-    header[0x207] = 0x00;
+    // crypto_type(0x206)/kaek_ind(0x207)/crypto_type2(0x220) stay zero — keygen 1
+    // (keygen policy above; fresh buffer)
     // title_id (big-endian u64)
     const tidBytes = hexToBytes(titleId.toLowerCase());
     const tidRev = new Uint8Array(8);
     for (let i = 0; i < 8; i++) tidRev[i] = tidBytes[7 - i];
     header.set(tidRev, 0x210);
-    // sdk_version = 0x000C1100 (hacPack default)
+    // sdk_version (hacpack main.c:116 default)
     const hv = new DataView(header.buffer, header.byteOffset);
-    hv.setUint32(0x21C, 0x000C1100, true);
-    // crypto_type2 = 0
-    header[0x220] = 0x00;
+    hv.setUint32(0x21C, SDK_VERSION, true);
     // rights_id [0x230..0x240) stays zero (fresh buffer, no titlekey)
 
     // Section entries
@@ -409,10 +422,9 @@ function buildNcaHeader(titleId, sections, keys, contentType = CONTENT_TYPE.PROG
     // writes slots 0/1 later; slots 2/3 remain zero (fresh buffer).
 
     // Key area: encrypted_keys[4][0x10]
-    // Default: [0, 0, keyareakey(0x04*16), 0]
-    const keyareakey = new Uint8Array(16).fill(0x04);
+    // Default: [0, 0, KEYAREAKEY, 0]
     const keyBlock = new Uint8Array(0x40);
-    keyBlock.set(keyareakey, 0x20); // slot 2 = keyareakey
+    keyBlock.set(KEYAREAKEY, 0x20); // slot 2 = keyareakey
 
     // ECB-encrypt entire key block with key_area_key_application_00
     const ecb = new AesEcb(toKeyBytes(keys.key_area_key_application_00));
@@ -443,7 +455,7 @@ export async function packPlaintextProgramNca(exefsData, romfsData, controlData,
 
     // ── Section 0: ExeFS (PFS0) ────────────────────────────────────────────
     _log('info', '  Building ExeFS PFS0 hash table...');
-    const exeHash = buildPfs0HashTable(exefsData, 0x10000);
+    const exeHash = buildPfs0HashTable(exefsData, PFS0_EXEFS_HASH_BLOCK_SIZE);
     const exeHtablePadded = exeHash.hashTable; // padded to 0x200
     const exePfs0Offset = exeHtablePadded.length;
     const exeSectionSize = pad200(exePfs0Offset + exefsData.length);
@@ -478,7 +490,7 @@ export async function packPlaintextProgramNca(exefsData, romfsData, controlData,
     // ── FsHeader 0: ExeFS (PFS0, CRYPT_NONE) ───────────────────────────────
     const exeFsHeader = buildPfs0FsHeader(CRYPT.NONE);
     fillPfs0Superblock(exeFsHeader, exeHash.masterHash, {
-        blockSize: 0x10000, hashTableSize: exeHash.rawHashSize,
+        blockSize: PFS0_EXEFS_HASH_BLOCK_SIZE, hashTableSize: exeHash.rawHashSize,
         pfs0Offset: exePfs0Offset, pfs0Size: exefsData.length,
     });
     header.set(exeFsHeader, 0x400);
@@ -536,14 +548,13 @@ export async function packMetaNca(cnmtData, pfs0FileName, titleId, keys, log) {
     newPfs0.set(pfs0Header.buffer, 0);
     newPfs0.set(cnmtData, pfs0Header.headerSize);
 
-    // ── PFS0 hash table (block_size=0x1000, PFS0_META_HASH_BLOCK_SIZE) ──────
-    const hashBlock = 0x1000;
+    // ── PFS0 hash table (PFS0_META_HASH_BLOCK_SIZE) ─────────────────────────
     const hashSize = 0x20;
-    const numBlocks = Math.ceil(newPfs0.length / hashBlock);
+    const numBlocks = Math.ceil(newPfs0.length / PFS0_META_HASH_BLOCK_SIZE);
     const htableRaw = new Uint8Array(numBlocks * hashSize);
     for (let b = 0; b < numBlocks; b++) {
-        const blockStart = b * hashBlock;
-        const blockEnd = Math.min(blockStart + hashBlock, newPfs0.length);
+        const blockStart = b * PFS0_META_HASH_BLOCK_SIZE;
+        const blockEnd = Math.min(blockStart + PFS0_META_HASH_BLOCK_SIZE, newPfs0.length);
         const block = newPfs0.subarray(blockStart, blockEnd);
         const hash = digest32(block);
         htableRaw.set(hash, b * hashSize);
@@ -565,7 +576,7 @@ export async function packMetaNca(cnmtData, pfs0FileName, titleId, keys, log) {
     // ── FsHeader (PFS0, CRYPT_CTR) ─────────────────────────────────────────
     const fsHeader = buildPfs0FsHeader(CRYPT.CTR);
     fillPfs0Superblock(fsHeader, masterHash, {
-        blockSize: 0x1000, hashTableSize: htableRaw.length,
+        blockSize: PFS0_META_HASH_BLOCK_SIZE, hashTableSize: htableRaw.length,
         pfs0Offset, pfs0Size,
     });
 
@@ -581,9 +592,8 @@ export async function packMetaNca(cnmtData, pfs0FileName, titleId, keys, log) {
     const secDec = new Uint8Array(sectionDataSize);
     secDec.set(htablePadded, 0);
     secDec.set(newPfs0, pfs0Offset);
-    const ctrKey = new Uint8Array(16).fill(0x04);
     const zerosNonce = new Uint8Array(8);
-    const ctrEnc = new AesCtr(ctrKey, zerosNonce);
+    const ctrEnc = new AesCtr(KEYAREAKEY, zerosNonce);
     ctrEnc.seek(sectionStart);
     const secEnc = await ctrEnc.encrypt(secDec);
 
@@ -891,7 +901,7 @@ export async function preparePlaintextProgramNca(exefsData, romfsData, controlDa
 
     // ── Pass 1: Compute hashes (same as buffer version) ────────────────────
     _log('info', '  Computing ExeFS PFS0 hash table...');
-    const exeHash = buildPfs0HashTable(exefsData, 0x10000);
+    const exeHash = buildPfs0HashTable(exefsData, PFS0_EXEFS_HASH_BLOCK_SIZE);
     const exeHtablePadded = exeHash.hashTable;
     const exePfs0Offset = exeHtablePadded.length;
     const exeSectionSize = pad200(exePfs0Offset + exefsData.length);
@@ -922,7 +932,7 @@ export async function preparePlaintextProgramNca(exefsData, romfsData, controlDa
     // ── FsHeader 0: ExeFS (PFS0) ──────────────────────────────────────────
     const exeFsHeader = buildPfs0FsHeader(CRYPT.NONE);
     fillPfs0Superblock(exeFsHeader, exeHash.masterHash, {
-        blockSize: 0x10000, hashTableSize: exeHash.rawHashSize,
+        blockSize: PFS0_EXEFS_HASH_BLOCK_SIZE, hashTableSize: exeHash.rawHashSize,
         pfs0Offset: exePfs0Offset, pfs0Size: exefsData.length,
     });
     header.set(exeFsHeader, 0x400);
@@ -1040,7 +1050,7 @@ export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romf
     const _log = typeof log === 'function' ? log : () => {};
 
     // ── Layout (from sizes only) ───────────────────────────────────────────
-    const exeHtableSize = pad200(Math.ceil(exefsSize / 0x10000) * 0x20);
+    const exeHtableSize = pad200(Math.ceil(exefsSize / PFS0_EXEFS_HASH_BLOCK_SIZE) * 0x20);
     const exeSectionSize = pad200(exeHtableSize + exefsSize);
     const sec0Start = NCA_HEADER_SIZE;
     const sec1Start = sec0Start + exeSectionSize;
@@ -1058,7 +1068,7 @@ export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romf
     const romPaddingSize = romSectionSize - (hashLevelsSize + romfsDataSize);
     _log('info', `  Streaming NCA layout: ExeFS=0x${exeSectionSize.toString(16)} (htable 0x${exeHtableSize.toString(16)}), RomFS=0x${romSectionSize.toString(16)} (levels 0x${hashLevelsSize.toString(16)}), total=0x${ncaSize.toString(16)}`);
 
-    const pfs0 = new StreamingPfs0Hasher(0x10000);
+    const pfs0 = new StreamingPfs0Hasher(PFS0_EXEFS_HASH_BLOCK_SIZE);
     const ivfc = new StreamingIvfcHasher(romfsDataSize);
 
     // ── Stream ExeFS data → output + PFS0 hasher ───────────────────────────
@@ -1095,7 +1105,7 @@ export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romf
     ], keys);
     const exeFsHeader = buildPfs0FsHeader(CRYPT.NONE);
     fillPfs0Superblock(exeFsHeader, exeHash.masterHash, {
-        blockSize: 0x10000, hashTableSize: exeHash.rawHashSize,
+        blockSize: PFS0_EXEFS_HASH_BLOCK_SIZE, hashTableSize: exeHash.rawHashSize,
         pfs0Offset: exeHtableSize, pfs0Size: exefsSize,
     });
     header.set(exeFsHeader, 0x400);
@@ -1145,7 +1155,7 @@ export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romf
 // streamExefs / streamRomfs must be re-callable (up to 3× each for SW).
 
 export function twoPassLayout(exefsSize, romfsDataSize) {
-    const exeHtableSize = pad200(Math.ceil(exefsSize / 0x10000) * 0x20);
+    const exeHtableSize = pad200(Math.ceil(exefsSize / PFS0_EXEFS_HASH_BLOCK_SIZE) * 0x20);
     const exeSectionSize = pad200(exeHtableSize + exefsSize);
     const sec0Start = NCA_HEADER_SIZE;
     const sec1Start = sec0Start + exeSectionSize;
@@ -1176,7 +1186,7 @@ export async function computeProgramNcaContentId({ exefsSize, romfsDataSize, tit
     _log('info', `  Two-pass NCA layout: ExeFS=0x${L.exeSectionSize.toString(16)} (htable 0x${L.exeHtableSize.toString(16)}), RomFS=0x${L.romSectionSize.toString(16)} (levels 0x${L.hashLevelsSize.toString(16)}), total=0x${L.ncaSize.toString(16)}`);
 
     _log('info', '  Pass 1: Computing hash metadata (1 romfs pass)...');
-    const pfs0 = new StreamingPfs0Hasher(0x10000);
+    const pfs0 = new StreamingPfs0Hasher(PFS0_EXEFS_HASH_BLOCK_SIZE);
     await streamExefs(async (chunk, off) => { pfs0.update(chunk); });
     const exeHash = pfs0.finalize();
 
@@ -1195,7 +1205,7 @@ export async function computeProgramNcaContentId({ exefsSize, romfsDataSize, tit
     ], keys);
     const exeFsHeader = buildPfs0FsHeader(CRYPT.NONE);
     fillPfs0Superblock(exeFsHeader, exeHash.masterHash, {
-        blockSize: 0x10000, hashTableSize: exeHash.rawHashSize,
+        blockSize: PFS0_EXEFS_HASH_BLOCK_SIZE, hashTableSize: exeHash.rawHashSize,
         pfs0Offset: L.exeHtableSize, pfs0Size: exefsSize,
     });
     header.set(exeFsHeader, 0x400);
