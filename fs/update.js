@@ -10,6 +10,7 @@ import { FileRangeSource, NczStreamSource, ViewRangeSource, SparseNcaView } from
 import { preparePlaintextProgramNca, writePlaintextProgramNca, packProgramNcaStream, computeProgramNcaContentId, writeProgramNcaTwoPass, extractExefsStream, extractRomfsStream, createExefsAcidFilter, packMetaNca, extractExefs, extractRomfs, processNpdmAcid, twoPassLayout } from './nca-pack.js';
 import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE, decryptNcaHeaderBytes, findRomfsFsHeader } from './nca-utils.js';
 import { writeFromReader } from './convert-common.js';
+import { trace } from './debug-trace.js';
 
 function u32le(v) {
     const b = new Uint8Array(4);
@@ -701,7 +702,7 @@ export async function update(readers, output, options = {}) {
                     const _wd = setInterval(() => {
                         _stallTicks = _mergeBytes === _lastBytes ? _stallTicks + 1 : 0;
                         _lastBytes = _mergeBytes;
-                        const line = `[makeStreamRomfs] watchdog: merge emitted ${(_mergeBytes / 1048576).toFixed(0)} MB, state=${_mergeState.desc}`;
+                        const line = `[makeStreamRomfs] watchdog: merge emitted ${(_mergeBytes / 1048576).toFixed(0)} MB, state=${_mergeState.desc} | merge=${trace.merge} | pump=${trace.pump}`;
                         // An FSA op that never resolves can't be cancelled from JS, so
                         // after 5 zero-progress ticks (75 s) escalate: the run is hung.
                         if (_stallTicks >= 5) log('error', line + ` — STALLED ${_stallTicks * 15}s, no progress (blocked on "${_mergeState.desc}") — run is hung, retry`);
@@ -729,7 +730,7 @@ export async function update(readers, output, options = {}) {
                     const _wd = setInterval(() => {
                         _stallTicks = _mergeBytes === _lastBytes ? _stallTicks + 1 : 0;
                         _lastBytes = _mergeBytes;
-                        const line = `[makeStreamRomfs] watchdog: base romfs emitted ${(_mergeBytes / 1048576).toFixed(0)} MB, state=${_mergeState.desc}`;
+                        const line = `[makeStreamRomfs] watchdog: base romfs emitted ${(_mergeBytes / 1048576).toFixed(0)} MB, state=${_mergeState.desc} | merge=${trace.merge} | pump=${trace.pump}`;
                         if (_stallTicks >= 5) log('error', line + ` — STALLED ${_stallTicks * 15}s, no progress (blocked on "${_mergeState.desc}") — run is hung, retry`);
                         else log('info', line);
                     }, 15_000);

@@ -3,6 +3,7 @@ import { AesEcb } from '../crypto/aes128.js';
 import { sha256, SHA256, digest32 } from '../crypto/sha256.js';
 import { PFS0, PFS0Writer } from './pfs0.js';
 import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE, toKeyBytes, decryptNcaHeaderBytes, resolveTitlekey, reversedSectionCtr, findRomfsFsHeader } from './nca-utils.js';
+import { trace, markMerge } from './debug-trace.js';
 
 // Yanu update pipeline uses only:
 //   PROGRAM (--plaintext) → ExeFS + RomFS, CRYPT_NONE sections ✅
@@ -698,7 +699,9 @@ export async function extractExefsStream(ncaData, keys, tikData, onChunk) {
         let done = 0;
         while (done < sectionSize) {
             const n = Math.min(0x100000, sectionSize - done);
+            markMerge(`extractExefsStream: read @0x${(sectionOffset + sectionStart + done).toString(16)}`);
             const raw = await ncaRead(ncaData, sectionOffset + sectionStart + done, n);
+            markMerge(`extractExefsStream: emit @0x${done.toString(16)}`);
             await onChunk(raw, done);
             done += n;
         }
@@ -710,8 +713,11 @@ export async function extractExefsStream(ncaData, keys, tikData, onChunk) {
     let done = 0;
     while (done < sectionSize) {
         const n = Math.min(0x100000, sectionSize - done);
+        markMerge(`extractExefsStream: read @0x${(sectionOffset + sectionStart + done).toString(16)}`);
         const cipher = await ncaRead(ncaData, sectionOffset + sectionStart + done, n);
+        markMerge(`extractExefsStream: AES-CTR ${cipher.length}B @0x${(sectionOffset + sectionStart + done).toString(16)}`);
         const dec = await c.decrypt(cipher);
+        markMerge(`extractExefsStream: emit @0x${done.toString(16)}`);
         await onChunk(dec, done);
         done += n;
     }
@@ -755,7 +761,9 @@ export async function extractRomfsStream(ncaData, keys, tikData, onChunk) {
         let done = 0;
         while (done < mediaSize) {
             const n = Math.min(0x100000, mediaSize - done);
+            markMerge(`extractRomfsStream: read @0x${(sectionOffset + done).toString(16)}`);
             const raw = await ncaRead(ncaData, sectionOffset + done, n);
+            markMerge(`extractRomfsStream: emit @0x${done.toString(16)}`);
             await onChunk(raw, done);
             done += n;
         }
@@ -767,8 +775,11 @@ export async function extractRomfsStream(ncaData, keys, tikData, onChunk) {
     let done = 0;
     while (done < mediaSize) {
         const n = Math.min(0x100000, mediaSize - done);
+        markMerge(`extractRomfsStream: read @0x${(sectionOffset + done).toString(16)}`);
         const cipher = await ncaRead(ncaData, sectionOffset + done, n);
+        markMerge(`extractRomfsStream: AES-CTR ${cipher.length}B @0x${(sectionOffset + done).toString(16)}`);
         const dec = await c.decrypt(cipher);
+        markMerge(`extractRomfsStream: emit @0x${done.toString(16)}`);
         await onChunk(dec, done);
         done += n;
     }
@@ -1296,7 +1307,7 @@ export async function writeProgramNcaTwoPass({ meta, adapter, ncaOffset, streamE
     const _wdTick = () => {
         _wdStallTicks = _wdBytes === _wdLastBytes ? _wdStallTicks + 1 : 0;
         _wdLastBytes = _wdBytes;
-        const line = `  [WATCHDOG] phase=${_wdPhase} written=${(_wdBytes / 1048576).toFixed(0)} MB lastWrite=0x${_wdLastWrite.toString(16)}`;
+        const line = `  [WATCHDOG] phase=${_wdPhase} written=${(_wdBytes / 1048576).toFixed(0)} MB lastWrite=0x${_wdLastWrite.toString(16)} | merge=${trace.merge} | pump=${trace.pump}`;
         // An FSA op that never resolves can't be cancelled from JS, so after 5
         // zero-progress ticks (75 s) escalate: the run is hung.
         if (_wdStallTicks >= 5) _log('error', line + ` — STALLED ${_wdStallTicks * 15}s, no progress (phase ${_wdPhase}) — run is hung, retry`);

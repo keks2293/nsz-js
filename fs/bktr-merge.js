@@ -1,6 +1,7 @@
 import { AesCtr } from '../crypto/aes-ops.mjs';
 import { decryptNcaHeader } from './nca.js';
 import { BufferRangeSource } from './range-source.js';
+import { markMerge } from './debug-trace.js';
 import { decryptNcaHeaderBytes, reversedSectionCtr, extractTitlekeyFromTik, deriveTitlekeyFromKeyArea } from './nca-utils.js';
 import {
     parseBktrHeader,
@@ -29,7 +30,8 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
     const { keys, onChunk, baseTitlekey: providedBaseTitlekey, updateTitlekey: providedUpdateTitlekey, baseTik, updateTik, titlekeysFile, state } = options;
     // Optional mutable { desc } — the caller's watchdog prints it to show which
     // await the merge is currently blocked on (diagnostics, no behavior change).
-    const _mark = (d) => { if (state) state.desc = d; };
+    // Also mirrored into the global trace so the write-side watchdog sees it too.
+    const _mark = (d) => { markMerge(d); if (state) state.desc = d; };
 
     if (!keys) throw new Error('BKTR: keys required');
 
@@ -201,9 +203,10 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
 
                 const fileOffset = updateRomfsSec.offset + currentPhys;
                 _mark('patch read @0x' + fileOffset.toString(16));
+                const patchRaw = await updateNcaData.source.read(fileOffset, readLen);
+                _mark('patch decrypt @0x' + fileOffset.toString(16));
                 const chunk = await decryptPatchRegionData(
-                    await updateNcaData.source.read(fileOffset, readLen),
-                    updateTitlekey, secureValue, subEntry, fileOffset
+                    patchRaw, updateTitlekey, secureValue, subEntry, fileOffset
                 );
                 if (streaming) {
                     const a = Math.max(writePos, dataStart);

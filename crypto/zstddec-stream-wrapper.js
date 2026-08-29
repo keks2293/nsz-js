@@ -13,7 +13,7 @@ function memView(instance) {
     return new DataView(instance.exports.memory.buffer);
 }
 
-export async function* decodeStream(readChunk) {
+export async function* decodeStream(readChunk, mark = () => {}) {
     const instance = ZstdDecompressor.instance;
     if (!instance) throw new Error('Call initZstddec() first');
     const $ = instance.exports;
@@ -26,6 +26,7 @@ export async function* decodeStream(readChunk) {
     let ret = 0;
     try {
         while (true) {
+            mark('zstd: awaiting input chunk');
             const array = await readChunk();
             if (!array || !array.byteLength) break;
             const cp = $.malloc(array.byteLength);
@@ -42,6 +43,7 @@ export async function* decodeStream(readChunk) {
                 if (ret < 0) throw new Error(`ZSTD_decompressStream failed: ${ret}`);
                 mv = memView(instance);
                 const outputPos = mv.getUint32(outP + offPos, true);
+                mark(`zstd: yielded ${outputPos}B`);
                 yield new Uint8Array(instance.exports.memory.buffer, outBuf, outputPos);
             }
             $.free(cp);
