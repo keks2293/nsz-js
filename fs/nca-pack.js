@@ -12,7 +12,7 @@ import { trace, markMerge } from './debug-trace.js';
 // NOT needed for yanu update:
 //   CONTROL/DATA/MANUAL/PUBLICDATA — copied from update container as-is
 //   Encrypted sections — yanu uses --plaintext only
-//   ACID signature (npdm_key_sig) — Atmosphere ignores it
+//   NCA header RSA signatures — left all-zero (hacpack NCA_SIG_TYPE_ZERO default)
 //   NCA0 format — obsolete
 //   Sparse storage — not used in modern NCAs
 //   Compressed storage — not used in modern NCAs
@@ -38,6 +38,37 @@ function pad4000(n) {
 //   [0] = top hash level 0, [1]..[4] = hash levels 1..4, [5] = DATA level
 // Each hash_data_size = padded file size for hash levels, = raw romfs size for data.
 // Master hash = sha256(entire top hash level-0 file (all 0x4000 bytes)).
+
+// Assemble the 0xE0 IVFC header from the 6 level sizes (write order H5..H1, then
+// the data level) + master hash. Shared by the buffered buildIvfcHashTree() and
+// the streaming StreamingIvfcHasher so the header bytes can never diverge.
+function buildIvfcHeader(dataSizes, masterHash) {
+    const ivfcHeader = new Uint8Array(0xE0);
+    const v = new DataView(ivfcHeader.buffer);
+    v.setUint32(0, 0x43465649, true);       // magic "IVFC"
+    v.setUint32(4, 0x20000, true);          // id
+    v.setUint32(8, 0x20, true);             // master_hash_size
+    v.setUint32(12, 7, true);               // num_levels
+
+    const LOGICAL_OFFSET = 0x00;
+    const HASH_DATA_SIZE = 0x08;
+    const BLOCK_SIZE = 0x10;
+    const HEADER_PER_LEVEL = 0x18;
+    const numLevels = 6;
+
+    let cumulativeOffset = 0;
+    for (let lvl = 0; lvl < numLevels; lvl++) {
+        const base = 0x10 + lvl * HEADER_PER_LEVEL;
+        // Each level header (ivfc.h): logical_offset(u64)@+0x00, hash_data_size(u64)@+0x08,
+        // block_size(u32)@+0x10, reserved(u32)@+0x14 = 0x18 bytes
+        v.setBigUint64(base + LOGICAL_OFFSET, BigInt(cumulativeOffset), true);
+        v.setBigUint64(base + HASH_DATA_SIZE, BigInt(dataSizes[lvl]), true);
+        v.setUint32(base + BLOCK_SIZE, 0x0E, true);
+        cumulativeOffset += dataSizes[lvl];
+    }
+    ivfcHeader.set(masterHash, 0xC0);
+    return ivfcHeader;
+}
 
 export function buildIvfcHashTree(romfsData) {
     const blockSize = 0x4000;
@@ -87,38 +118,11 @@ export function buildIvfcHashTree(romfsData) {
     const reversedFiles = allFiles.reverse();
     const reversedSizes = allSizes.reverse();
 
-    // Build IVFC header (0xE0 bytes)
-    const ivfcHeader = new Uint8Array(0xE0);
-    const ivfcView = new DataView(ivfcHeader.buffer);
-    ivfcView.setUint32(0, 0x43465649, true);       // magic "IVFC"
-    ivfcView.setUint32(4, 0x20000, true);          // id
-    ivfcView.setUint32(8, 0x20, true);             // master_hash_size
-    ivfcView.setUint32(12, 7, true);               // num_levels
-
-    const LOGICAL_OFFSET = 0x00;
-    const HASH_DATA_SIZE = 0x08;
-    const BLOCK_SIZE = 0x10;
-    const HEADER_PER_LEVEL = 0x18;
-    const numLevels = 6;
-
-    let cumulativeOffset = 0;
-    for (let lvl = 0; lvl < numLevels; lvl++) {
-        const base = 0x10 + lvl * HEADER_PER_LEVEL;
-        // Each level header (ivfc.h): logical_offset(u64)@+0x00, hash_data_size(u64@+0x08, block_size(u32@+0x10, reserved(u32)@+0x14 = 0x18 bytes
-        ivfcView.setBigUint64(base + LOGICAL_OFFSET, BigInt(cumulativeOffset), true);
-        ivfcView.setBigUint64(base + HASH_DATA_SIZE, BigInt(reversedSizes[lvl]), true);
-        ivfcView.setUint32(base + 0x10, 0x0E, true);
-        cumulativeOffset += reversedSizes[lvl];
-    }
-
-    // Master hash = sha256(top hash level 0 (all 0x4000 bytes))
-    ivfcHeader.set(digest32(reversedFiles[0]), 0xC0);
+    // Master hash = sha256(top hash level H5, all 0x4000 bytes)
+    const ivfcHeader = buildIvfcHeader(reversedSizes, digest32(reversedFiles[0]));
 
     // Physical layout: concatenate all level files
-    let physicalSize = 0;
-    for (let lvl = 0; lvl < numLevels; lvl++) {
-        physicalSize += reversedFiles[lvl].length;
-    }
+    const physicalSize = reversedFiles.reduce((a, f) => a + f.length, 0);
 
     return { ivfcHeader, levelFiles: reversedFiles, dataSizes: reversedSizes, physicalSize };
 }
@@ -128,6 +132,17 @@ export function buildIvfcHashTree(romfsData) {
 // Each block of hash_block_size gets sha256 hash (no zero-padding of last block).
 // Hash table is then padded to 0x200 boundary.
 // Master hash = sha256 of (hash_table[0..hash_table_size]) — raw hash bytes only.
+
+// Pad the raw hash table to 0x200 and compute the master hash — sha256 of the
+// RAW (unpadded) table bytes only. Shared by the buffered buildPfs0HashTable()
+// and the streaming StreamingPfs0Hasher.finalize().
+function finalizePfs0HashTable(rawHashTable) {
+    const paddedSize = pad200(rawHashTable.length);
+    const padded = new Uint8Array(paddedSize);
+    padded.set(rawHashTable);
+    const masterHash = digest32(rawHashTable);
+    return { hashTable: padded, rawHashSize: rawHashTable.length, masterHash };
+}
 
 export function buildPfs0HashTable(pfs0Data, hashBlock) {
     const hashSize = 0x20;
@@ -142,17 +157,7 @@ export function buildPfs0HashTable(pfs0Data, hashBlock) {
         hashTable.set(hash, b * hashSize);
     }
 
-    const paddedSize = pad200(hashTable.length);
-    const padded = new Uint8Array(paddedSize);
-    padded.set(hashTable);
-
-    const masterHash = digest32(hashTable.subarray(0, hashTable.length));
-
-    return {
-        hashTable: padded,
-        rawHashSize: hashTable.length,
-        masterHash,
-    };
+    return finalizePfs0HashTable(hashTable);
 }
 
 // ── Streaming IVFC hash tree ─────────────────────────────────────────────────
@@ -212,27 +217,9 @@ export class StreamingIvfcHasher {
         const hashLevels = [levels[4], levels[3], levels[2], levels[1], levels[0]];
         const dataSizes = [levels[4].length, levels[3].length, levels[2].length, levels[1].length, levels[0].length, this.dataSize];
         const masterHash = digest32(levels[4]);
-        const ivfcHeader = this._buildHeader(dataSizes, masterHash);
+        const ivfcHeader = buildIvfcHeader(dataSizes, masterHash);
         const physicalSize = dataSizes.reduce((a, b) => a + b, 0);
         return { hashLevels, dataSizes, masterHash, ivfcHeader, physicalSize };
-    }
-    _buildHeader(dataSizes, masterHash) {
-        const ivfcHeader = new Uint8Array(0xE0);
-        const v = new DataView(ivfcHeader.buffer);
-        v.setUint32(0, 0x43465649, true); // "IVFC"
-        v.setUint32(4, 0x20000, true);    // id
-        v.setUint32(8, 0x20, true);       // master_hash_size
-        v.setUint32(12, 7, true);         // num_levels (matches buildIvfcHashTree)
-        let cumulativeOffset = 0;
-        for (let lvl = 0; lvl < 6; lvl++) {
-            const base = 0x10 + lvl * 0x18;
-            v.setBigUint64(base + 0x00, BigInt(cumulativeOffset), true);
-            v.setBigUint64(base + 0x08, BigInt(dataSizes[lvl]), true);
-            v.setUint32(base + 0x10, 0x0E, true);
-            cumulativeOffset += dataSizes[lvl];
-        }
-        ivfcHeader.set(masterHash, 0xC0);
-        return ivfcHeader;
     }
 }
 
@@ -278,11 +265,7 @@ export class StreamingPfs0Hasher {
             this._writeHash(digest32(this.buf.subarray(0, this.bufLen)));
         }
         const hashTable = this._hashBuf.subarray(0, this._hashCount * this.hashSize);
-        const paddedSize = pad200(hashTable.length);
-        const padded = new Uint8Array(paddedSize);
-        padded.set(hashTable);
-        const masterHash = digest32(hashTable); // raw (unpadded) hash table
-        return { hashTable: padded, rawHashSize: hashTable.length, masterHash };
+        return finalizePfs0HashTable(hashTable);
     }
 }
 
@@ -293,46 +276,21 @@ export class StreamingPfs0Hasher {
 //   superblock(union) @0x08 (0x138 bytes),
 //   section_ctr[8] @0x140, _0x148[0xB8] @0x148  → total 0x200
 
-function buildPfs0FsHeader(cryptType) {
+// Common part of both FsHeader variants: version=2, fs_type, hash_type,
+// crypt_type. The buffer is fresh (already zero), so _0x5, the unused
+// superblock tail and section_ctr need no explicit fills.
+function buildFsHeader(fsType, hashType, cryptType) {
     const fh = new Uint8Array(0x200);
     const v = new DataView(fh.buffer);
-
-    // version = 2 (u16 LE)
-    v.setUint16(0, 2, true);
-    // fs_type = 1 (PFS0)
-    fh[0x02] = 1;
-    // hash_type = 2 (PFS0)
-    fh[0x03] = 2;
-    // crypt_type
+    v.setUint16(0, 2, true);   // version
+    fh[0x02] = fsType;
+    fh[0x03] = hashType;
     fh[0x04] = cryptType;
-    // _0x5[3] = 0
-    fh.fill(0, 0x05, 0x08);
-    // section_ctr = 0
-    fh.fill(0, 0x140, 0x148);
-    // _0x148[0xB8] = 0 (already zeroed)
-
     return fh;
 }
 
-function buildRomfsFsHeader(cryptType) {
-    const fh = new Uint8Array(0x200);
-    const v = new DataView(fh.buffer);
-
-    // version = 2 (u16 LE)
-    v.setUint16(0, 2, true);
-    // fs_type = 0 (ROMFS)
-    fh[0x02] = 0;
-    // hash_type = 3 (ROMFS/IVFC)
-    fh[0x03] = 3;
-    // crypt_type
-    fh[0x04] = cryptType;
-    // _0x5[3] = 0
-    fh.fill(0, 0x05, 0x08);
-    // section_ctr = 0
-    fh.fill(0, 0x140, 0x148);
-
-    return fh;
-}
+function buildPfs0FsHeader(cryptType) { return buildFsHeader(1, 2, cryptType); } // fs_type=1 PFS0, hash_type=2
+function buildRomfsFsHeader(cryptType) { return buildFsHeader(0, 3, cryptType); } // fs_type=0 ROMFS, hash_type=3 (IVFC)
 
 // ── Shared NCA header helpers ────────────────────────────────────────────────
 
@@ -362,8 +320,8 @@ function encryptNcaHeader(header, keys) {
 
 // ── NCA header builder ───────────────────────────────────────────────────────
 // nca_header_t layout (from nca.h):
-//   fixed_key_sig[0x100] @0x00 = all zeros (The-4n/hacPack default: NCA_SIG_TYPE_ZERO)
-//   npdm_key_sig[0x100] @0x100 = all zeros
+//   fixed_key_sig[0x100] @0x00 — RSA sig 1 (fixed key)
+//   npdm_key_sig[0x100] @0x100 — RSA sig 2 (NPDM ACID key)
 //   magic(NCA3) @0x200
 //   distribution(u8, 0) @0x204
 //   content_type(u8) @0x205
@@ -375,12 +333,23 @@ function encryptNcaHeader(header, keys) {
 //   sdk_version(u32) @0x21C
 //   crypto_type2(u8) @0x220
 //   _0x221[0xF] padding
-//   rights_id[0x10] @0x230 (all zeros for no-titlekey)
+//   rights_id[0x10] @0x230 (all zeros — no titlekey)
 //   section_entries[4] @0x240
 //   section_hashes[4][0x20] @0x280
 //   encrypted_keys[4][0x10] @0x300
 //   _0x340[0xC0] padding
 //   fs_headers[4] @0x400
+//
+// Signature policy: repacked NCAs always ship with BOTH sig regions zeroed
+// (hacpack NCA_SIG_TYPE_ZERO, yanu parity) — that is the only sig mode here.
+// NCAs copied verbatim (merge/convert/update's other members) keep their
+// original headers and never go through this function.
+// NOT to confuse with the ACID key pair INSIDE main.npdm (ExeFS content) — a
+// different region, zeroed by processNpdmAcid()/createExefsAcidFilter().
+//
+// The buffer is fresh (zero by spec); the explicit sig fill below stays as the
+// visible statement of the zero-sig decision. Other zero regions (padding,
+// rights_id, unused section hashes) rely on the fresh allocation.
 
 function buildNcaHeader(titleId, sections, keys, contentType = 0x00) {
     const header = new Uint8Array(NCA_HEADER_SIZE);
@@ -408,8 +377,7 @@ function buildNcaHeader(titleId, sections, keys, contentType = 0x00) {
     hv.setUint32(0x21C, 0x000C1100, true);
     // crypto_type2 = 0
     header[0x220] = 0x00;
-    // rights_id = all zeros
-    header.fill(0, 0x230, 0x240);
+    // rights_id [0x230..0x240) stays zero (fresh buffer, no titlekey)
 
     // Section entries
     const validSecs = sections.filter(s => s.size > 0);
@@ -421,8 +389,8 @@ function buildNcaHeader(titleId, sections, keys, contentType = 0x00) {
         header[base + 8] = 0x01; // _0x8[0] = 1 (hacPack always sets this)
     }
 
-    // reserved (0x280..0x2FF) = all zeros — section hashes filled later
-    header.fill(0, 0x280, 0x300);
+    // Section hashes [0x280..0x300): stay zero here — fillSectionHashes()
+    // writes slots 0/1 later; slots 2/3 remain zero (fresh buffer).
 
     // Key area: encrypted_keys[4][0x10]
     // Default: [0, 0, keyareakey(0x04*16), 0]
@@ -622,10 +590,10 @@ export async function packMetaNca(cnmtData, pfs0FileName, titleId, keys, log) {
 //    yanu: always uses --plaintext → sections plaintext, FsHeader.cryptType=CRYPT_NONE
 //    Our code: only packPlaintextProgramNca implemented
 //
-// 2. ACID signature (npdm_key_sig @0x100):
-//    hacpack: RSA-2048-PSS-SHA256(header[0:0x200]) with ACID private key
-//    yanu: keeps hacpack's default (zeros) → Atmosphere ignores
-//    Our code: header[0x100:0x200] = all zeros (correct for yanu)
+// 2. NCA header signatures (fixed_key_sig @0x00, npdm_key_sig @0x100):
+//    hacpack: can RSA-sign (sig 1 / sig 2); default NCA_SIG_TYPE_ZERO leaves both
+//    all-zero. yanu keeps that default → we do the same; see the signature-policy
+//    block above buildNcaHeader (the only sig mode we implement).
 //
 // 3. NCA0/NCA0_BETA format:
 //    hacpack: not supported (NCA3 only)
@@ -787,6 +755,8 @@ export async function extractRomfsStream(ncaData, keys, tikData, onChunk) {
 }
 
 // ── NPDM ACID zeroing (hacpack parity) ───────────────────────────────────────
+// NOTE: this is the ACID key pair INSIDE main.npdm (ExeFS content) — NOT the
+// npdm_key_sig field of the NCA header (a different region; see buildNcaHeader).
 // When packing a Program NCA, hacpack (The-4n, v1.36) zeros the ACID
 // signature + key in main.npdm by default: signature[0x100] + modulus[0x100]
 // starting at acid_offset (NPDM header field at +0x78). Its opt-out flags
