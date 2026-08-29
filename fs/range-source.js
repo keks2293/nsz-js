@@ -115,9 +115,7 @@ export class NczStreamSource {
         this._log = log;
         this._ranges = [];
         this._nextRange = 0;
-        this._discardedUpTo = 0;
         this._pumpStarted = false;
-        this._pumpStopped = false;
         this._pumpError = null;
     }
     get length() { return this._parsed.ncaSize; }
@@ -147,16 +145,12 @@ export class NczStreamSource {
         let sub = null;
         if (idx < 0) {
             idx = this._ranges.findIndex(r => r.start <= offset && end <= r.end);
-            if (idx >= 0) sub = { off: offset - this._ranges[idx].start, len: length };
-        }
-        if (idx < 0) {
-            if (this._pumpStarted && offset < this._discardedUpTo) {
-                throw new Error('NczStreamSource: non-monotonic read — bytes already discarded (NCZ is sequential)');
+            if (idx < 0) {
+                // All ranges are pre-registered up front (strictly increasing) by
+                // the caller — a read outside them is a usage error, not lazy-fill.
+                throw new Error(`NczStreamSource: read [0x${offset.toString(16)}, 0x${end.toString(16)}) has no registered range — register ranges up front (NCZ is sequential)`);
             }
-            if (this._pumpStopped) {
-                throw new Error(`NczStreamSource: read [0x${offset.toString(16)}, 0x${end.toString(16)}) requested after the pump finished all registered ranges — register ranges up front (NCZ is sequential, bytes are discarded)`);
-            }
-            idx = this.registerRange(offset, length);
+            sub = { off: offset - this._ranges[idx].start, len: length };
         }
         const r = this._ranges[idx];
         // Fast path: the pump (unthrottled, runs ahead of a slow consumer) may
@@ -190,7 +184,6 @@ export class NczStreamSource {
             while (this._nextRange < this._ranges.length) {
                 const r = this._ranges[this._nextRange];
                 if (cEnd <= r.start) {
-                    this._discardedUpTo = cEnd;
                     break; // chunk precedes the range — discard
                 }
                 if (cStart > r.end) {
@@ -213,7 +206,7 @@ export class NczStreamSource {
                 throw new Error(STOP_PUMP);
             }
         }, this._parsed).catch(e => {
-            if (e && e.message === STOP_PUMP) { this._pumpStopped = true; return; } // normal early stop
+            if (e && e.message === STOP_PUMP) { return; } // normal early stop — all ranges filled
             this._pumpError = e;
             for (const r of this._ranges) {
                 if (r.reject) r.reject(e);
