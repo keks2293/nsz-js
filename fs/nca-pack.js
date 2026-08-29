@@ -28,6 +28,22 @@ function pad4000(n) {
     return (n + 0x3FFF) & ~0x3FFF;
 }
 
+// ── NCA section constants (hacpack nca.h) ─────────────────────────────────────
+// fs_type / hash_type / crypt_type for the fs_headers[] entries.
+const FS_TYPE = { ROMFS: 0x00, PFS0: 0x01 };
+const HASH_TYPE = { PFS0: 0x02, ROMFS: 0x03 };
+const CRYPT = { NONE: 0x01, CTR: 0x03 };
+// content_type field: 0=Program, 1=Meta (hacPack nca.c:249,617).
+const CONTENT_TYPE = { PROGRAM: 0x00, META: 0x01 };
+
+// ── IVFC constants (hacpack ivfc.h / nca.c) ───────────────────────────────────
+const MAGIC_IVFC = 0x43465649;        // "IVFC"
+const IVFC_HEADER_SIZE = 0xE0;
+const IVFC_ID = 0x20000;
+const IVFC_MASTER_HASH_SIZE = 0x20;
+const IVFC_NUM_LEVELS = 0x07;         // 6 level slots; 7 is the canonical field value
+const IVFC_BLOCK_SIZE_LOG2 = 0x0E;    // block_size field = log2(0x4000)
+
 // ── IVFC hash tree ───────────────────────────────────────────────────────────
 // 5 hash levels + 1 data level (the romfs image).
 // Each hash level hashes 16KB (0x4000) blocks from the level below.
@@ -42,12 +58,12 @@ function pad4000(n) {
 // the data level) + master hash. Shared by the buffered buildIvfcHashTree() and
 // the streaming StreamingIvfcHasher so the header bytes can never diverge.
 function buildIvfcHeader(dataSizes, masterHash) {
-    const ivfcHeader = new Uint8Array(0xE0);
+    const ivfcHeader = new Uint8Array(IVFC_HEADER_SIZE);
     const v = new DataView(ivfcHeader.buffer);
-    v.setUint32(0, 0x43465649, true);       // magic "IVFC"
-    v.setUint32(4, 0x20000, true);          // id
-    v.setUint32(8, 0x20, true);             // master_hash_size
-    v.setUint32(12, 7, true);               // num_levels
+    v.setUint32(0, MAGIC_IVFC, true);            // magic
+    v.setUint32(4, IVFC_ID, true);               // id
+    v.setUint32(8, IVFC_MASTER_HASH_SIZE, true); // master_hash_size
+    v.setUint32(12, IVFC_NUM_LEVELS, true);      // num_levels
 
     const LOGICAL_OFFSET = 0x00;
     const HASH_DATA_SIZE = 0x08;
@@ -62,7 +78,7 @@ function buildIvfcHeader(dataSizes, masterHash) {
         // block_size(u32)@+0x10, reserved(u32)@+0x14 = 0x18 bytes
         v.setBigUint64(base + LOGICAL_OFFSET, BigInt(cumulativeOffset), true);
         v.setBigUint64(base + HASH_DATA_SIZE, BigInt(dataSizes[lvl]), true);
-        v.setUint32(base + BLOCK_SIZE, 0x0E, true);
+        v.setUint32(base + BLOCK_SIZE, IVFC_BLOCK_SIZE_LOG2, true);
         cumulativeOffset += dataSizes[lvl];
     }
     ivfcHeader.set(masterHash, 0xC0);
@@ -270,7 +286,7 @@ export class StreamingPfs0Hasher {
 
 // ── FsHeader builders ────────────────────────────────────────────────────────
 // nca_fs_header_t layout (from nca.h):
-//   version(u16) @0x00, fs_type(u8) @0x02, hash_type(u8=2/3) @0x03,
+//   version(u16) @0x00, fs_type(u8) @0x02, hash_type(u8) @0x03,
 //   crypt_type(u8) @0x04, _0x5[3] @0x05,
 //   superblock(union) @0x08 (0x138 bytes),
 //   section_ctr[8] @0x140, _0x148[0xB8] @0x148  → total 0x200
@@ -288,8 +304,8 @@ function buildFsHeader(fsType, hashType, cryptType) {
     return fh;
 }
 
-function buildPfs0FsHeader(cryptType) { return buildFsHeader(1, 2, cryptType); } // fs_type=1 PFS0, hash_type=2
-function buildRomfsFsHeader(cryptType) { return buildFsHeader(0, 3, cryptType); } // fs_type=0 ROMFS, hash_type=3 (IVFC)
+function buildPfs0FsHeader(cryptType) { return buildFsHeader(FS_TYPE.PFS0, HASH_TYPE.PFS0, cryptType); }
+function buildRomfsFsHeader(cryptType) { return buildFsHeader(FS_TYPE.ROMFS, HASH_TYPE.ROMFS, cryptType); }
 
 // ── Shared NCA header helpers ────────────────────────────────────────────────
 
@@ -350,7 +366,7 @@ function encryptNcaHeader(header, keys) {
 // visible statement of the zero-sig decision. Other zero regions (padding,
 // rights_id, unused section hashes) rely on the fresh allocation.
 
-function buildNcaHeader(titleId, sections, keys, contentType = 0x00) {
+function buildNcaHeader(titleId, sections, keys, contentType = CONTENT_TYPE.PROGRAM) {
     const header = new Uint8Array(NCA_HEADER_SIZE);
 
     // fixed_key_sig + npdm_key_sig = all zeros (The-4n/hacPack default)
@@ -360,7 +376,7 @@ function buildNcaHeader(titleId, sections, keys, contentType = 0x00) {
     header[0x200] = 0x4E; header[0x201] = 0x43; header[0x202] = 0x41; header[0x203] = 0x33;
     // distribution = 0 (not gamecard)
     header[0x204] = 0x00;
-    // content_type: 0=Program, 1=Meta
+    // content_type (CONTENT_TYPE)
     header[0x205] = contentType;
     // crypto_type = 0 (keygen 1)
     header[0x206] = 0x00;
@@ -459,7 +475,7 @@ export async function packPlaintextProgramNca(exefsData, romfsData, controlData,
     ], keys);
 
     // ── FsHeader 0: ExeFS (PFS0, CRYPT_NONE) ───────────────────────────────
-    const exeFsHeader = buildPfs0FsHeader(0x01); // CRYPT_NONE
+    const exeFsHeader = buildPfs0FsHeader(CRYPT.NONE);
     fillPfs0Superblock(exeFsHeader, exeHash.masterHash, {
         blockSize: 0x10000, hashTableSize: exeHash.rawHashSize,
         pfs0Offset: exePfs0Offset, pfs0Size: exefsData.length,
@@ -467,7 +483,7 @@ export async function packPlaintextProgramNca(exefsData, romfsData, controlData,
     header.set(exeFsHeader, 0x400);
 
     // ── FsHeader 1: RomFS (IVFC, CRYPT_NONE) ───────────────────────────────
-    const romFsHeader = buildRomfsFsHeader(0x01); // CRYPT_NONE
+    const romFsHeader = buildRomfsFsHeader(CRYPT.NONE);
     romFsHeader.set(romIvfc.ivfcHeader, 0x08);
     header.set(romFsHeader, 0x600);
 
@@ -546,7 +562,7 @@ export async function packMetaNca(cnmtData, pfs0FileName, titleId, keys, log) {
     _log('info', `  CNMT section: htable=${htablePadded.length} B, PFS0=${pfs0Size} B, total=${sectionDataSize} B, NCA=${ncaSize} B`);
 
     // ── FsHeader (PFS0, CRYPT_CTR) ─────────────────────────────────────────
-    const fsHeader = buildPfs0FsHeader(0x03); // CRYPT_CTR
+    const fsHeader = buildPfs0FsHeader(CRYPT.CTR);
     fillPfs0Superblock(fsHeader, masterHash, {
         blockSize: 0x1000, hashTableSize: htableRaw.length,
         pfs0Offset, pfs0Size,
@@ -555,7 +571,7 @@ export async function packMetaNca(cnmtData, pfs0FileName, titleId, keys, log) {
     // ── NCA header (content_type = Meta) ────────────────────────────────────
     const header = buildNcaHeader(titleId, [
         { offset: sectionStart, endOffset: sectionEnd, size: sectionDataSize },
-    ], keys, 0x01);
+    ], keys, CONTENT_TYPE.META);
     writeU64LE(header, 0x208, ncaSize);
     header.set(digest32(fsHeader), 0x280);
     header.set(fsHeader, 0x400);
@@ -893,7 +909,7 @@ export async function preparePlaintextProgramNca(exefsData, romfsData, controlDa
     ], keys);
 
     // ── FsHeader 0: ExeFS (PFS0) ──────────────────────────────────────────
-    const exeFsHeader = buildPfs0FsHeader(0x01);
+    const exeFsHeader = buildPfs0FsHeader(CRYPT.NONE);
     fillPfs0Superblock(exeFsHeader, exeHash.masterHash, {
         blockSize: 0x10000, hashTableSize: exeHash.rawHashSize,
         pfs0Offset: exePfs0Offset, pfs0Size: exefsData.length,
@@ -901,7 +917,7 @@ export async function preparePlaintextProgramNca(exefsData, romfsData, controlDa
     header.set(exeFsHeader, 0x400);
 
     // ── FsHeader 1: RomFS (IVFC) ──────────────────────────────────────────
-    const romFsHeader = buildRomfsFsHeader(0x01);
+    const romFsHeader = buildRomfsFsHeader(CRYPT.NONE);
     romFsHeader.set(romIvfc.ivfcHeader, 0x08);
     header.set(romFsHeader, 0x600);
 
@@ -1066,13 +1082,13 @@ export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romf
         { offset: sec0Start, endOffset: sec0End, size: exeSectionSize },
         { offset: sec1Start, endOffset: sec1End, size: romSectionSize },
     ], keys);
-    const exeFsHeader = buildPfs0FsHeader(0x01);
+    const exeFsHeader = buildPfs0FsHeader(CRYPT.NONE);
     fillPfs0Superblock(exeFsHeader, exeHash.masterHash, {
         blockSize: 0x10000, hashTableSize: exeHash.rawHashSize,
         pfs0Offset: exeHtableSize, pfs0Size: exefsSize,
     });
     header.set(exeFsHeader, 0x400);
-    const romFsHeader = buildRomfsFsHeader(0x01);
+    const romFsHeader = buildRomfsFsHeader(CRYPT.NONE);
     romFsHeader.set(romIvfc.ivfcHeader, 0x08);
     header.set(romFsHeader, 0x600);
     fillSectionHashes(header);
@@ -1166,13 +1182,13 @@ export async function computeProgramNcaContentId({ exefsSize, romfsDataSize, tit
         { offset: L.sec0Start, endOffset: sec0End, size: L.exeSectionSize },
         { offset: L.sec1Start, endOffset: sec1End, size: L.romSectionSize },
     ], keys);
-    const exeFsHeader = buildPfs0FsHeader(0x01);
+    const exeFsHeader = buildPfs0FsHeader(CRYPT.NONE);
     fillPfs0Superblock(exeFsHeader, exeHash.masterHash, {
         blockSize: 0x10000, hashTableSize: exeHash.rawHashSize,
         pfs0Offset: L.exeHtableSize, pfs0Size: exefsSize,
     });
     header.set(exeFsHeader, 0x400);
-    const romFsHeader = buildRomfsFsHeader(0x01);
+    const romFsHeader = buildRomfsFsHeader(CRYPT.NONE);
     romFsHeader.set(romIvfc.ivfcHeader, 0x08);
     header.set(romFsHeader, 0x600);
     fillSectionHashes(header);
