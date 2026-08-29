@@ -695,12 +695,21 @@ export async function update(readers, output, options = {}) {
                         : baseInput;
                     log('info', '[makeStreamRomfs] mergeRomFS starting...');
                     let _mergeBytes = 0;
+                    let _lastBytes = 0;
+                    let _stallTicks = 0;
+                    const _mergeState = { desc: 'init' };
                     const _wd = setInterval(() => {
-                        log('info', `[makeStreamRomfs] watchdog: merge emitted ${(_mergeBytes / 1048576).toFixed(0)} MB so far`);
+                        _stallTicks = _mergeBytes === _lastBytes ? _stallTicks + 1 : 0;
+                        _lastBytes = _mergeBytes;
+                        const line = `[makeStreamRomfs] watchdog: merge emitted ${(_mergeBytes / 1048576).toFixed(0)} MB, state=${_mergeState.desc}`;
+                        // An FSA op that never resolves can't be cancelled from JS, so
+                        // after 5 zero-progress ticks (75 s) escalate: the run is hung.
+                        if (_stallTicks >= 5) log('error', line + ` — STALLED ${_stallTicks * 15}s, no progress (blocked on "${_mergeState.desc}") — run is hung, retry`);
+                        else log('info', line);
                     }, 15_000);
                     try {
                         await mergeRomFS(freshBase, updateInput, {
-                            keys, baseTik: baseTikData, updateTik: updateTikData,
+                            keys, baseTik: baseTikData, updateTik: updateTikData, state: _mergeState,
                             // Await emit: a fire-and-forget onChunk lets the merge
                             // run ahead of the output, queueing hundreds of MB of
                             // pending writes in a slow (FSA) stream and making
@@ -713,9 +722,27 @@ export async function update(readers, output, options = {}) {
                     }
                 }
                 : () => async (emit) => {
-                    await extractRomfsStream(baseInput, keys, baseTikData, async (chunk, off) => {
-                        await emit(chunk, off);
-                    });
+                    let _mergeBytes = 0;
+                    let _lastBytes = 0;
+                    let _stallTicks = 0;
+                    const _mergeState = { desc: 'extract base romfs' };
+                    const _wd = setInterval(() => {
+                        _stallTicks = _mergeBytes === _lastBytes ? _stallTicks + 1 : 0;
+                        _lastBytes = _mergeBytes;
+                        const line = `[makeStreamRomfs] watchdog: base romfs emitted ${(_mergeBytes / 1048576).toFixed(0)} MB, state=${_mergeState.desc}`;
+                        if (_stallTicks >= 5) log('error', line + ` — STALLED ${_stallTicks * 15}s, no progress (blocked on "${_mergeState.desc}") — run is hung, retry`);
+                        else log('info', line);
+                    }, 15_000);
+                    try {
+                        await extractRomfsStream(baseInput, keys, baseTikData, async (chunk, off) => {
+                            _mergeBytes += chunk.length;
+                            _mergeState.desc = 'emit @romfs 0x' + off.toString(16);
+                            await emit(chunk, off);
+                        });
+                    } finally {
+                        clearInterval(_wd);
+                        log('info', `[makeStreamRomfs] base romfs done (${(_mergeBytes / 1048576).toFixed(0)} MB emitted)`);
+                    }
                 };
 
             const { size: computedSize, contentId, meta } = await computeProgramNcaContentId({

@@ -26,7 +26,10 @@ function toNcaInput(nca) {
 const BKTR_HEADER_OFFSET = 0x100;
 
 export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
-    const { keys, onChunk, baseTitlekey: providedBaseTitlekey, updateTitlekey: providedUpdateTitlekey, baseTik, updateTik, titlekeysFile } = options;
+    const { keys, onChunk, baseTitlekey: providedBaseTitlekey, updateTitlekey: providedUpdateTitlekey, baseTik, updateTik, titlekeysFile, state } = options;
+    // Optional mutable { desc } — the caller's watchdog prints it to show which
+    // await the merge is currently blocked on (diagnostics, no behavior change).
+    const _mark = (d) => { if (state) state.desc = d; };
 
     if (!keys) throw new Error('BKTR: keys required');
 
@@ -102,6 +105,7 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
     if (!baseTitlekey) throw new Error('BKTR: cannot get base titlekey (provide titlekeysFile or valid baseTik)');
 
     // Decrypt BKTR tables (read only the table ranges from the update source)
+    _mark('decrypting BKTR tables');
     const relocAbsOffset = updateRomfsSec.offset + relocHeader.offset;
     const subAbsOffset = updateRomfsSec.offset + subHeader.offset;
     const relocTableBuf = await decryptBktrTableData(
@@ -196,6 +200,7 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
                 const readLen = Math.min(remainingInSub, remainingToWrite, BASE_DECRYPT_CHUNK);
 
                 const fileOffset = updateRomfsSec.offset + currentPhys;
+                _mark('patch read @0x' + fileOffset.toString(16));
                 const chunk = await decryptPatchRegionData(
                     await updateNcaData.source.read(fileOffset, readLen),
                     updateTitlekey, secureValue, subEntry, fileOffset
@@ -203,7 +208,10 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
                 if (streaming) {
                     const a = Math.max(writePos, dataStart);
                     const b = Math.min(writePos + readLen, dataEnd);
-                    if (b > a) await onChunk(chunk.subarray(a - writePos, b - writePos), a - dataStart);
+                    if (b > a) {
+                        _mark('emit @romfs 0x' + (a - dataStart).toString(16));
+                        await onChunk(chunk.subarray(a - writePos, b - writePos), a - dataStart);
+                    }
                 } else {
                     merged.set(chunk, writePos);
                 }
@@ -225,13 +233,17 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
             let done = 0;
             while (done < readSize) {
                 const n = Math.min(BASE_DECRYPT_CHUNK, readSize - done);
+                _mark('base read @0x' + (baseRomfsSecMeta.offset + baseOffset + done).toString(16));
                 const cipher = await baseNcaData.source.read(baseRomfsSecMeta.offset + baseOffset + done, n);
                 baseCtr.seek(baseRomfsSecMeta.offset + baseOffset + done);
                 const dec = await baseCtr.decrypt(cipher);
                 if (streaming) {
                     const a = Math.max(pos + done, dataStart);
                     const b = Math.min(pos + done + n, dataEnd);
-                    if (b > a) await onChunk(dec.subarray(a - (pos + done), b - (pos + done)), a - dataStart);
+                    if (b > a) {
+                        _mark('emit @romfs 0x' + (a - dataStart).toString(16));
+                        await onChunk(dec.subarray(a - (pos + done), b - (pos + done)), a - dataStart);
+                    }
                 } else {
                     merged.set(dec, pos + done);
                 }
