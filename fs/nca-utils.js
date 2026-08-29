@@ -65,8 +65,8 @@ export function deriveTitlekeyFromKeyArea(decHeader, keys) {
     const cryptoType = decHeader[0x206];
     const cryptoType2 = decHeader[0x220];
     const kaekInd = decHeader[0x207];
-    const maxCt = Math.max(cryptoType, cryptoType2);
-    const mk = maxCt > 0 ? maxCt - 1 : 0;
+    let mk = Math.max(cryptoType, cryptoType2);
+    if (mk) mk--;
     const kakHex = keys.keyAreaKeys && keys.keyAreaKeys[mk] && (keys.keyAreaKeys[mk][kaekInd] || keys.keyAreaKeys[mk][0]);
     if (!kakHex) return null;
     const keyArea = decHeader.subarray(0x300, 0x340);
