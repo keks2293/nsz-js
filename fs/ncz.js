@@ -1,5 +1,6 @@
 import { AesCtr, aesBackend } from '../crypto/aes-ops.mjs';
 import { decompressBlock, decompressStream } from '../crypto/zstd.js';
+import { markPump } from './debug-trace.js';
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
 const SECTION_CHUNK_SIZE = 0x1000000; // 16MB
 
@@ -233,10 +234,12 @@ class NCZDecompressor {
                     if (aesCtr !== lastAesCtr || ncaPos !== lastDecryptEnd) {
                         aesCtr.seek(ncaPos);
                     }
+                    markPump(`ncz: AES-CTR(${aesCtr._backend}) ${data.length}B @nca 0x${ncaPos.toString(16)}`);
                     data = await aesCtr.decrypt(data);
                     lastDecryptEnd = ncaPos + data.length;
                     lastAesCtr = aesCtr;
                 }
+                markPump(`ncz: writeChunk ${data.length}B @nca 0x${ncaPos.toString(16)}`);
                 await writeChunk(data, ncaPos);
                 offset += subSize;
                 if (progressCallback) progressCallback((decompOffset + offset) / ncaSize);
@@ -250,11 +253,12 @@ class NCZDecompressor {
         for await (const chunk of decompressStream(async () => {
             if (toRead <= 0) return null;
             const size = Math.min(toRead, READ_CHUNK_SIZE);
+            markPump(`ncz: input read @0x${pos.toString(16)} len ${size}`);
             const data = await this.reader.read(pos, size);
             pos += data.length;
             toRead -= data.length;
             return data;
-        })) {
+        }, (d) => { markPump(d); })) {
             decompOffset = await processChunk(chunk, decompOffset);
         }
     }
@@ -294,13 +298,16 @@ class NCZDecompressor {
 
             while (i < end) {
                 const chunkSize = Math.min(SECTION_CHUNK_SIZE, end - i);
+                markPump(`ncz[block]: read @nca 0x${i.toString(16)}`);
                 const chunk = await reader.read(chunkSize);
                 if (!chunk || chunk.length === 0) break;
                 // Capture before writeChunk: for plaintext sections data === chunk,
                 // and the SW adapter transfers it (detached .length would stall i).
                 const chunkLen = chunk.length;
 
+                if (aesCtr) markPump(`ncz[block]: AES-CTR ${chunkLen}B @nca 0x${i.toString(16)}`);
                 const data = aesCtr ? await aesCtr.decrypt(chunk) : chunk;
+                markPump(`ncz[block]: writeChunk ${data.length}B @nca 0x${i.toString(16)}`);
                 await writeChunk(data, i);
 
                 i += chunkLen;

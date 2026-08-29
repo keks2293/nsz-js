@@ -115,14 +115,14 @@ async function* decompressNodeStream(readChunk) {
 // decompressed chunks. Single platform dispatch: Node uses in-process
 // node:zlib, browser uses the zstddec WASM streaming wrapper. Consumers don't
 // import platform-specific modules nor branch on isNode.
-async function* decompressStream(readChunk) {
+async function* decompressStream(readChunk, mark) {
     if (isNode) {
         yield* decompressNodeStream(readChunk);
         return;
     }
     const { initZstddec, decodeStream } = await import('./zstddec-stream-wrapper.js');
     await initZstddec();
-    yield* decodeStream(readChunk);
+    yield* decodeStream(readChunk, mark);
 }
 
 export { ZstdDecompressor, decompressBlock, decompressStream };
