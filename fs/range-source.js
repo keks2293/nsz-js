@@ -18,7 +18,6 @@
 // (decompress chunk-by-chunk, consume, never buffer the whole NCA).
 
 import { NCZDecompressor } from './ncz.js';
-import { markMerge, markPump } from './debug-trace.js';
 
 // Lazy zero-copy "sparse NCA" view. Serves subarray() over [header @0, sections at
 // their original NCA offsets, zeros elsewhere] WITHOUT allocating an NCA-sized
@@ -163,7 +162,6 @@ export class NczStreamSource {
         // have filled this range before any read of it. r.ready was never
         // created, so awaiting it would deadlock — return the buffered data.
         if (r.filled === r.data.length) {
-            markMerge(`NczStreamSource: range #${idx} already filled`);
             return sub ? r.data.subarray(sub.off, sub.off + sub.len) : r.data;
         }
         if (this._pumpError) {
@@ -176,14 +174,11 @@ export class NczStreamSource {
         if (!r.ready) {
             r.ready = new Promise((resolve, reject) => { r.resolve = resolve; r.reject = reject; });
         }
-        markMerge(`NczStreamSource: waiting range #${idx}/${this._ranges.length} [0x${r.start.toString(16)}..0x${r.end.toString(16)}) filled ${r.filled}/${r.data.length}`);
         const data = await r.ready;
-        markMerge('NczStreamSource: range ready');
         return sub ? data.subarray(sub.off, sub.off + sub.len) : data;
     }
 
     _pump() {
-        markPump('pump: started');
         const decomp = new NCZDecompressor(this._reader);
         this._pumpPromise = decomp.decompress(() => {}, (chunk, offset) => {
             const cStart = offset, cEnd = offset + chunk.length;
@@ -202,7 +197,6 @@ export class NczStreamSource {
                 r.filled = b - r.start;
                 if (r.filled === r.data.length) {
                     this._nextRange++;
-                    markPump(`pump: range #${this._nextRange - 1}/${this._ranges.length} filled`);
                     if (r.resolve) r.resolve(r.data);
                     // chunk may cover the next range too — loop continues
                 } else {

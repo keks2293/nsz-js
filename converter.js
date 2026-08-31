@@ -1,5 +1,4 @@
 import { DataReader } from './fs/ncz.js';
-import { markPump } from './fs/debug-trace.js';
 import { SHA256 } from './crypto/sha256.js';
 import { KeysParser } from './keys.js';
 import { ZstdDecompressor } from './crypto/zstd.js';
@@ -11,12 +10,11 @@ import { update } from './fs/update.js';
 import { splitNSP as splitNSPFile } from './fs/split.js';
 
 class FileSliceReader extends DataReader {
-    constructor(file, baseOffset = 0, totalLength = null, label = null) {
+    constructor(file, baseOffset = 0, totalLength = null) {
         super();
         this.file = file;
         this.baseOffset = baseOffset;
         this._length = totalLength !== null ? totalLength : file.size - baseOffset;
-        this._label = label || file.name;
     }
 
     get length() {
@@ -25,7 +23,6 @@ class FileSliceReader extends DataReader {
 
     async read(offset, size) {
         const absOffset = this.baseOffset + offset;
-        markPump(`file read [${this._label}] @0x${absOffset.toString(16)} len ${size}`);
         const buffer = await this.file.slice(absOffset, absOffset + size).arrayBuffer();
         return new Uint8Array(buffer);
     }
