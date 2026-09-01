@@ -115,8 +115,16 @@ async function* decompressNodeStream(readChunk) {
 // decompressed chunks. Single platform dispatch: Node uses in-process
 // node:zlib, browser uses the zstddec WASM streaming wrapper. Consumers don't
 // import platform-specific modules nor branch on isNode.
+// Test/bench override: force the zstddec WASM path even under Node. node:zlib
+// silently tolerates trailing garbage after a frame (which is why the NCZ
+// reader-length bug sailed through the Node test suite), while the WASM wrapper
+// throws (-10, prefix_unknown). The override lets tests hit the strict path and
+// Node-side benchmarks AB node:zlib vs the WASM decoder.
+let forceWasm = false;
+function setZstdStreamForcedWasm(v = false) { forceWasm = v; }
+
 async function* decompressStream(readChunk) {
-    if (isNode) {
+    if (isNode && !forceWasm) {
         yield* decompressNodeStream(readChunk);
         return;
     }
@@ -125,4 +133,4 @@ async function* decompressStream(readChunk) {
     yield* decodeStream(readChunk);
 }
 
-export { ZstdDecompressor, decompressBlock, decompressStream };
+export { ZstdDecompressor, decompressBlock, decompressStream, setZstdStreamForcedWasm };

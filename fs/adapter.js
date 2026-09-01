@@ -19,10 +19,23 @@ async function buildAdapter(output, read, callbacks) {
         return { read, write, log, progress, createHash };
     }
     if (output.memory) {
-        const chunks = [];
+        const chunks = output._chunks || (output._chunks = []);
+        // Keep _chunks sorted by offset as writes arrive (seek-back writes land at
+        // the head/middle). Chunks are disjoint — each write is a distinct region —
+        // so insertion preserves order; the data itself is never copied, and Blob
+        // references the chunks in place.
+        const write = (offset, data) => {
+            let lo = 0, hi = chunks.length;
+            while (lo < hi) {
+                const mid = (lo + hi) >> 1;
+                if (chunks[mid].offset < offset) lo = mid + 1;
+                else hi = mid;
+            }
+            chunks.splice(lo, 0, { offset, data });
+        };
         return {
             read,
-            write: (offset, data) => { chunks.push({ offset, data }); },
+            write,
             log, progress, createHash,
             _chunks: chunks,
         };
@@ -31,10 +44,10 @@ async function buildAdapter(output, read, callbacks) {
 }
 
 function collectBlob(adapter, totalSize) {
-    const chunks = adapter._chunks.sort((a, b) => a.offset - b.offset);
-    const buf = new Uint8Array(totalSize);
-    for (const c of chunks) buf.set(c.data, c.offset);
-    return new Blob([buf], { type: 'application/octet-stream' });
+    // _chunks is kept sorted by offset at write time, so Blob can reference the
+    // chunk buffers in place — zero copy, no extra flat buffer. Any overlap would
+    // break this (doubled bytes), but writes are always into distinct regions.
+    return new Blob(adapter._chunks.map(c => c.data), { type: 'application/octet-stream' });
 }
 
 // Build a seekable read(offset, length) for the output, or null if the output
@@ -69,6 +82,28 @@ async function buildRead(output) {
                 filled += n;
             }
             reader.releaseLock();
+            return out.subarray(0, filled);
+        };
+    }
+    if (output.memory) {
+        // Memory output buffers every write into output._chunks (kept sorted by
+        // offset at write time, shared with buildAdapter). Read back by walking the
+        // sorted chunks and copying only the requested range — no flat copy of the
+        // whole output. Mirrors the fd read path and unlocks the streaming
+        // single-decompression update path (contentId by re-read) for in-memory
+        // browser outputs.
+        return (offset, length) => {
+            const chunks = output._chunks || [];
+            const out = new Uint8Array(length);
+            let filled = 0;
+            for (const c of chunks) {
+                if (c.offset >= offset + length) break;
+                if (c.offset + c.data.length <= offset) continue;
+                const s = Math.max(c.offset, offset);
+                const e = Math.min(c.offset + c.data.length, offset + length);
+                out.set(c.data.subarray(s - c.offset, e - c.offset), s - offset);
+                filled += e - s;
+            }
             return out.subarray(0, filled);
         };
     }

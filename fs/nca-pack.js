@@ -423,6 +423,35 @@ function buildNcaHeader(titleId, sections, keys, contentType = CONTENT_TYPE.PROG
     return header;
 }
 
+// Build + XTS-encrypt a (plaintext) Program NCA header: ExeFS (PFS0) FsHeader 0
+// + RomFS (IVFC) FsHeader 1 + section hashes + NCA size. Shared by all Program
+// NCA packers (buffered, prepared, streaming, two-pass) so the header layout
+// cannot drift between them. Section 0 (ExeFS) always starts at the header end
+// (NCA_HEADER_SIZE); section sizes fully determine the layout.
+function buildEncryptedProgramNcaHeader({ titleId, keys, exeHash, exePfs0Offset, exefsSize, romIvfc, exeSectionSize, romSectionSize }) {
+    const sec0Start = NCA_HEADER_SIZE;
+    const sec0End = sec0Start + exeSectionSize;
+    const sec1Start = sec0End;
+    const sec1End = sec1Start + romSectionSize;
+    const ncaSize = sec1End;
+    const header = buildNcaHeader(titleId, [
+        { offset: sec0Start, endOffset: sec0End, size: exeSectionSize },
+        { offset: sec1Start, endOffset: sec1End, size: romSectionSize },
+    ], keys);
+    const exeFsHeader = buildPfs0FsHeader(CRYPT.NONE);
+    fillPfs0Superblock(exeFsHeader, exeHash.masterHash, {
+        blockSize: PFS0_EXEFS_HASH_BLOCK_SIZE, hashTableSize: exeHash.rawHashSize,
+        pfs0Offset: exePfs0Offset, pfs0Size: exefsSize,
+    });
+    header.set(exeFsHeader, 0x400);
+    const romFsHeader = buildRomfsFsHeader(CRYPT.NONE);
+    romFsHeader.set(romIvfc.ivfcHeader, 0x08);
+    header.set(romFsHeader, 0x600);
+    fillSectionHashes(header);
+    writeU64LE(header, 0x208, ncaSize);
+    return encryptNcaHeader(header, keys);
+}
+
 // ── Main: packPlaintextProgramNca ────────────────────────────────────────────
 // Layout (matching hacPack --plaintext):
 //   Header (0xC00, XTS-encrypted)
@@ -434,81 +463,30 @@ export async function packPlaintextProgramNca(exefsData, romfsData, controlData,
     const _log = typeof log === 'function' ? log : () => {};
     _log('info', '----> Creating Program NCA:');
 
-    // ── Section 0: ExeFS (PFS0) ────────────────────────────────────────────
-    _log('info', '  Building ExeFS PFS0 hash table...');
-    const exeHash = buildPfs0HashTable(exefsData, PFS0_EXEFS_HASH_BLOCK_SIZE);
-    const exeHtablePadded = exeHash.hashTable; // padded to 0x200
-    const exePfs0Offset = exeHtablePadded.length;
-    const exeSectionSize = pad200(exePfs0Offset + exefsData.length);
-
-    _log('info', '  ExeFS: htable=' + exeHtablePadded.length + ' B, PFS0=' + exefsData.length + ' B, section=' + exeSectionSize + ' B');
-
-    // ── Section 1: RomFS (IVFC) ────────────────────────────────────────────
-    _log('info', '  Building IVFC hash tree (5 levels + data)...');
-    const romIvfc = buildIvfcHashTree(romfsData);
-    // Pad RomFS data level to 0x4000 (IVFC_HASH_BLOCK_SIZE) to match Nintendo's canonical
-    // layout (base NCA data level is 0x4000-aligned) and hacpack (romfs_build pads to
-    // IVFC_HASH_BLOCK_SIZE). pad200 left it 0x200-aligned.
-    const romSectionSize = pad4000(romIvfc.physicalSize);
-
-    _log('info', '  RomFS: levels=' + romIvfc.levelFiles.length + ', total=' + romIvfc.physicalSize + ' B, section=' + romSectionSize + ' B');
-
-    // ── Section layout ─────────────────────────────────────────────────────
-    const ncaHeader = new Uint8Array(NCA_HEADER_SIZE);
-    const sec0Start = NCA_HEADER_SIZE;
-    const sec0End = sec0Start + exeSectionSize;
-    const sec1Start = sec0End;
-    const sec1End = sec1Start + romSectionSize;
-    const ncaSize = sec1End;
-
-    // ── Build NCA header ───────────────────────────────────────────────────
-    _log('info', '  Building NCA header...');
-    const header = buildNcaHeader(titleId, [
-        { offset: sec0Start, endOffset: sec0End, size: exeSectionSize },
-        { offset: sec1Start, endOffset: sec1End, size: romSectionSize },
-    ], keys);
-
-    // ── FsHeader 0: ExeFS (PFS0, CRYPT_NONE) ───────────────────────────────
-    const exeFsHeader = buildPfs0FsHeader(CRYPT.NONE);
-    fillPfs0Superblock(exeFsHeader, exeHash.masterHash, {
-        blockSize: PFS0_EXEFS_HASH_BLOCK_SIZE, hashTableSize: exeHash.rawHashSize,
-        pfs0Offset: exePfs0Offset, pfs0Size: exefsData.length,
-    });
-    header.set(exeFsHeader, 0x400);
-
-    // ── FsHeader 1: RomFS (IVFC, CRYPT_NONE) ───────────────────────────────
-    const romFsHeader = buildRomfsFsHeader(CRYPT.NONE);
-    romFsHeader.set(romIvfc.ivfcHeader, 0x08);
-    header.set(romFsHeader, 0x600);
-
-    // ── Section hashes + NCA size ──────────────────────────────────────────
-    fillSectionHashes(header);
-    writeU64LE(header, 0x208, ncaSize);
+    // Reuse the shared hash/layout/header computation (identical bytes to
+    // preparePlaintextProgramNca), then assemble the full NCA buffer.
+    const prepared = await preparePlaintextProgramNca(exefsData, romfsData, controlData, titleId, keys, log);
+    const { encHeader, exeHtablePadded, exePfs0Offset, exefsData: exefs, romIvfc,
+            sec0Start, exePaddingSize } = prepared.data;
+    const ncaSize = prepared.size;
 
     // ── Assemble NCA: header + sections ────────────────────────────────────
     _log('info', '  Assembling NCA: header + sections...');
     const nca = new Uint8Array(ncaSize);
-    nca.set(header, 0);
+    nca.set(encHeader, 0);
 
-    // Section 0: ExeFS = hash_table + PFS0 data
+    // Section 0: ExeFS = hash_table + PFS0 data (+ padding zeros)
     nca.set(exeHtablePadded, sec0Start);
-    nca.set(exefsData, sec0Start + exePfs0Offset);
+    nca.set(exefs, sec0Start + exePfs0Offset);
 
-    // Section 1: RomFS = level files concatenated
-    let romPos = sec1Start;
+    // Section 1: RomFS = level files concatenated (starts at end of ExeFS section)
+    let romPos = sec0Start + exeHtablePadded.length + exefs.length + exePaddingSize;
     for (let lvl = 0; lvl < romIvfc.levelFiles.length; lvl++) {
         nca.set(romIvfc.levelFiles[lvl], romPos);
         romPos += romIvfc.levelFiles[lvl].length;
     }
 
-    // ── Encrypt header with XTS ────────────────────────────────────────────
-    _log('info', '  Encrypting header with XTS...');
-    nca.set(encryptNcaHeader(nca.subarray(0, NCA_HEADER_SIZE), keys), 0);
-
-    // ── Final hash ─────────────────────────────────────────────────────────
-    _log('info', '  Calculating NCA hash...');
-    const finalHash = sha256(nca);
-    _log('info', '  ----> Created Program NCA: ' + ncaSize + ' bytes sha256=' + finalHash);
+    _log('info', '  ----> Created Program NCA: ' + ncaSize + ' bytes sha256=' + prepared.hashHex);
     return nca;
 }
 
@@ -530,21 +508,11 @@ export async function packMetaNca(cnmtData, pfs0FileName, titleId, keys, log) {
     newPfs0.set(cnmtData, pfs0Header.headerSize);
 
     // ── PFS0 hash table (PFS0_META_HASH_BLOCK_SIZE) ─────────────────────────
-    const hashSize = 0x20;
-    const numBlocks = Math.ceil(newPfs0.length / PFS0_META_HASH_BLOCK_SIZE);
-    const htableRaw = new Uint8Array(numBlocks * hashSize);
-    for (let b = 0; b < numBlocks; b++) {
-        const blockStart = b * PFS0_META_HASH_BLOCK_SIZE;
-        const blockEnd = Math.min(blockStart + PFS0_META_HASH_BLOCK_SIZE, newPfs0.length);
-        const block = newPfs0.subarray(blockStart, blockEnd);
-        const hash = digest32(block);
-        htableRaw.set(hash, b * hashSize);
-    }
-    const htablePadded = new Uint8Array(pad200(htableRaw.length));
-    htablePadded.set(htableRaw);
+    const pfs0Hash = buildPfs0HashTable(newPfs0, PFS0_META_HASH_BLOCK_SIZE);
+    const htablePadded = pfs0Hash.hashTable;
     const pfs0Offset = htablePadded.length; // = 0x200
     const pfs0Size = newPfs0.length;
-    const masterHash = digest32(htableRaw);
+    const masterHash = pfs0Hash.masterHash;
 
     // ── Section layout ─────────────────────────────────────────────────────
     const sectionDataSize = pad200(pfs0Offset + pfs0Size);
@@ -557,7 +525,7 @@ export async function packMetaNca(cnmtData, pfs0FileName, titleId, keys, log) {
     // ── FsHeader (PFS0, CRYPT_CTR) ─────────────────────────────────────────
     const fsHeader = buildPfs0FsHeader(CRYPT.CTR);
     fillPfs0Superblock(fsHeader, masterHash, {
-        blockSize: PFS0_META_HASH_BLOCK_SIZE, hashTableSize: htableRaw.length,
+        blockSize: PFS0_META_HASH_BLOCK_SIZE, hashTableSize: pfs0Hash.rawHashSize,
         pfs0Offset, pfs0Size,
     });
 
@@ -893,33 +861,12 @@ export async function preparePlaintextProgramNca(exefsData, romfsData, controlDa
 
     _log('info', `  NCA layout: header=0x${NCA_HEADER_SIZE.toString(16)}, ExeFS=0x${exeSectionSize.toString(16)}, RomFS=0x${romSectionSize.toString(16)}, total=0x${ncaSize.toString(16)} (${ncaSize} bytes)`);
 
-    // ── Build NCA header (with zeros for section hashes) ───────────────────
+    // ── Build NCA header (shared helper, XTS-encrypted) ───────────────────
     _log('info', '  Building NCA header...');
-    const header = buildNcaHeader(titleId, [
-        { offset: sec0Start, endOffset: sec0End, size: exeSectionSize },
-        { offset: sec1Start, endOffset: sec1End, size: romSectionSize },
-    ], keys);
-
-    // ── FsHeader 0: ExeFS (PFS0) ──────────────────────────────────────────
-    const exeFsHeader = buildPfs0FsHeader(CRYPT.NONE);
-    fillPfs0Superblock(exeFsHeader, exeHash.masterHash, {
-        blockSize: PFS0_EXEFS_HASH_BLOCK_SIZE, hashTableSize: exeHash.rawHashSize,
-        pfs0Offset: exePfs0Offset, pfs0Size: exefsData.length,
+    const encHeader = buildEncryptedProgramNcaHeader({
+        titleId, keys, exeHash, exePfs0Offset, exefsSize: exefsData.length, romIvfc,
+        exeSectionSize, romSectionSize,
     });
-    header.set(exeFsHeader, 0x400);
-
-    // ── FsHeader 1: RomFS (IVFC) ──────────────────────────────────────────
-    const romFsHeader = buildRomfsFsHeader(CRYPT.NONE);
-    romFsHeader.set(romIvfc.ivfcHeader, 0x08);
-    header.set(romFsHeader, 0x600);
-
-    // ── Section hashes + NCA size ──────────────────────────────────────────
-    fillSectionHashes(header);
-    writeU64LE(header, 0x208, ncaSize);
-
-    // ── Encrypt header with XTS ───────────────────────────────────────────
-    _log('info', '  Encrypting header with XTS...');
-    const encHeader = encryptNcaHeader(header, keys);
 
     // ── Compute full NCA hash (sha256 over header + all section bytes) ─────
     const ncaHasher = new SHA256();
@@ -1054,25 +1001,11 @@ export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romf
     if (exePaddingSize > 0) await adapter.write(ncaOffset + sec0DataOff + exefsSize, new Uint8Array(exePaddingSize));
     if (romPaddingSize > 0) await adapter.write(ncaOffset + sec1DataOff + romfsDataSize, new Uint8Array(romPaddingSize));
 
-    // ── Build NCA header (identical to preparePlaintextProgramNca) ─────────
-    const sec0End = sec0Start + exeSectionSize;
-    const sec1End = sec1Start + romSectionSize;
-    const header = buildNcaHeader(titleId, [
-        { offset: sec0Start, endOffset: sec0End, size: exeSectionSize },
-        { offset: sec1Start, endOffset: sec1End, size: romSectionSize },
-    ], keys);
-    const exeFsHeader = buildPfs0FsHeader(CRYPT.NONE);
-    fillPfs0Superblock(exeFsHeader, exeHash.masterHash, {
-        blockSize: PFS0_EXEFS_HASH_BLOCK_SIZE, hashTableSize: exeHash.rawHashSize,
-        pfs0Offset: exeHtableSize, pfs0Size: exefsSize,
+    // ── Build NCA header (shared helper, XTS-encrypted) ───────────────────
+    const encHeader = buildEncryptedProgramNcaHeader({
+        titleId, keys, exeHash, exePfs0Offset: exeHtableSize, exefsSize, romIvfc,
+        exeSectionSize, romSectionSize,
     });
-    header.set(exeFsHeader, 0x400);
-    const romFsHeader = buildRomfsFsHeader(CRYPT.NONE);
-    romFsHeader.set(romIvfc.ivfcHeader, 0x08);
-    header.set(romFsHeader, 0x600);
-    fillSectionHashes(header);
-    writeU64LE(header, 0x208, ncaSize);
-    const encHeader = encryptNcaHeader(header, keys);
 
     // ── Seek-back: header + PFS0 htable + IVFC levels ──────────────────────
     _log('info', '  Writing header + hash tables (seek-back)...');
@@ -1155,24 +1088,10 @@ export async function computeProgramNcaContentId({ exefsSize, romfsDataSize, tit
     await streamRomfs(async (chunk, off) => { ivfc.update(chunk); romDone += chunk.length; _prog(romDone / romTotal); });
     const romIvfc = ivfc.finalize();
 
-    const sec0End = L.sec0Start + L.exeSectionSize;
-    const sec1End = L.sec1Start + L.romSectionSize;
-    const header = buildNcaHeader(titleId, [
-        { offset: L.sec0Start, endOffset: sec0End, size: L.exeSectionSize },
-        { offset: L.sec1Start, endOffset: sec1End, size: L.romSectionSize },
-    ], keys);
-    const exeFsHeader = buildPfs0FsHeader(CRYPT.NONE);
-    fillPfs0Superblock(exeFsHeader, exeHash.masterHash, {
-        blockSize: PFS0_EXEFS_HASH_BLOCK_SIZE, hashTableSize: exeHash.rawHashSize,
-        pfs0Offset: L.exeHtableSize, pfs0Size: exefsSize,
+    const encHeader = buildEncryptedProgramNcaHeader({
+        titleId, keys, exeHash, exePfs0Offset: L.exeHtableSize, exefsSize, romIvfc,
+        exeSectionSize: L.exeSectionSize, romSectionSize: L.romSectionSize,
     });
-    header.set(exeFsHeader, 0x400);
-    const romFsHeader = buildRomfsFsHeader(CRYPT.NONE);
-    romFsHeader.set(romIvfc.ivfcHeader, 0x08);
-    header.set(romFsHeader, 0x600);
-    fillSectionHashes(header);
-    writeU64LE(header, 0x208, L.ncaSize);
-    const encHeader = encryptNcaHeader(header, keys);
 
     // Hash NCA up to hashLevels, then clone state. The remaining bytes
     // (romChunks + romPadding) will be hashed in Pass 2 alongside the write,

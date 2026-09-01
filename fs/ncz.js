@@ -119,7 +119,11 @@ async function parseNczSections(reader) {
             ncaHeader = await reader.read(0, UNCOMPRESSABLE_HEADER_SIZE);
             nczhdrOffset = UNCOMPRESSABLE_HEADER_SIZE;
         } else {
-            throw new Error(`Invalid NCZ magic: ${magic} (at 0) / ${magicAt4000} (at 0x4000)`);
+            // Strict, matching python nsz (raise "No NCZSECTN found"). A .ncz
+            // without NCZSECTN at 0 or 0x4000 — plain NCA under a .ncz name or
+            // a corrupt pack — is an error, not a silent raw copy.
+            throw new Error(
+                `Invalid NCZ magic: expected NCZSECTN at 0 or 0x4000, got ${magic} (at 0) / ${magicAt4000} (at 0x4000)`);
         }
     }
 

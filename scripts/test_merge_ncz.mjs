@@ -2,8 +2,10 @@
 import { zstdCompressSync } from 'node:zlib';
 import { randomBytes } from 'node:crypto';
 import { PFS0Writer, PFS0 } from '../fs/pfs0.js';
-import { BufferReader } from '../fs/ncz.js';
+import { BufferReader, AdapterNCZReader, parseNczSections } from '../fs/ncz.js';
 import { mergeNSP } from '../fs/merge.js';
+import { writeFromReader } from '../fs/convert-common.js';
+import { setZstdStreamForcedWasm } from '../crypto/zstd.js';
 import { AesCtr } from '../crypto/aes-ops.mjs';
 import { AesEcb } from '../crypto/aes128.js';
 
@@ -265,7 +267,7 @@ async function main() {
     const ctrKey = new Uint8Array(16);
     const ctrCounter = new Uint8Array(16);
     for (let i = 0; i < 16; i++) ctrKey[i] = (i * 11 + 5) & 0xFF;
-    const { AesCtr } = await import('./crypto/aes-ops.mjs');
+    const { AesCtr } = await import('../crypto/aes-ops.mjs');
     const ctrPayload = randomBytes(ctrSecSize);
     const encrypted = new Uint8Array(ctrPayload);
     const ctr = new AesCtr(ctrKey, ctrCounter, 0x4000 + 0x2000);
@@ -591,6 +593,50 @@ async function main() {
         threw = /nodelta requires keys/.test(e.message);
     }
     assert(threw, 'nodelta without keys throws');
+
+    // WASM-path guard for the writeFromReader reader length. The streaming
+    // decompressor must be fed exactly the container bytes (nczLen), never the
+    // decompressed size (size/ncaSize): over-feeding runs past the zstd frame
+    // into trailing data, and the zstddec WASM wrapper throws ZSTD_decompressStream
+    // failed: -10 (prefix_unknown). node:zlib silently ignores that trailing data
+    // (which is how the pre-fix bug sailed through this suite), so this case
+    // forces the WASM path via setZstdStreamForcedWasm and traces the real
+    // writeFromReader loop. The member carries garbage *after* the frame so any
+    // over-read hits non-zstd bytes and must fail the test.
+    const wasmPayload = new Uint8Array(0x20000);
+    for (let i = 0; i < wasmPayload.length; i++) wasmPayload[i] = (i * 3 + 11) & 0xFF;
+    const nczWasm = buildNcz(header, wasmPayload);
+    const wasmJunk = new Uint8Array(0x10000).fill(0x5A);
+    const wasmMember = new Uint8Array(nczWasm.length + wasmJunk.length);
+    wasmMember.set(nczWasm, 0);
+    wasmMember.set(wasmJunk, nczWasm.length);
+
+    setZstdStreamForcedWasm(true);
+    try {
+        const wasmReader = new AdapterNCZReader(makeReader(wasmMember), 0, nczWasm.length);
+        const wasmParsed = await parseNczSections(wasmReader);
+        let wasmWritten = 0;
+        await writeFromReader(
+            { write: async (_p, c) => { wasmWritten += c.length; } },
+            0,
+            {
+                kind: 'ncz',
+                name: 'wasm-test.nca',
+                reader: makeReader(wasmMember),
+                offset: 0,
+                srcLen: nczWasm.length,
+                outLen: wasmParsed.ncaSize,
+                parsed: wasmParsed,
+            },
+            () => {},
+        );
+        assert(wasmWritten === wasmParsed.ncaSize,
+            `WASM path writeFromReader reads nczLen not size (wrote ${wasmWritten} of ${wasmParsed.ncaSize})`);
+    } catch (e) {
+        assert(false, `WASM path writeFromReader must not throw (${e.message})`);
+    } finally {
+        setZstdStreamForcedWasm(false);
+    }
 
     console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} TEST(S) FAILED`);
     process.exit(failures === 0 ? 0 : 1);

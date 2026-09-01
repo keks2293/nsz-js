@@ -77,7 +77,10 @@ async function main() {
         noDeltaBtn.classList.toggle('hidden', !noDeltaVisible);
         keepAcidSigBtn.classList.toggle('hidden', !keepAcidVisible);
         keepAcidKeyBtn.classList.toggle('hidden', !keepAcidVisible);
-        bufferedBtn.classList.toggle('hidden', !keepAcidVisible);
+        // Buffering is pointless for in-memory (blob) output — both buffer modes
+        // do a single RomFS decompression there, and 'buffered' just holds the
+        // whole NCA in memory. Only SW/FSA outputs need the choice.
+        bufferedBtn.classList.toggle('hidden', !(keepAcidVisible && downloadMode !== 'blob'));
     }
 
     updateOptionsVisibility();
@@ -767,7 +770,7 @@ async function main() {
                 writable,
                 keepNpdmAcidSig: keepAcidSig,
                 keepNpdmAcidKey: keepAcidKey,
-                updateMode: buffered ? 'buffered' : 'two-pass',
+                updateMode: (buffered && downloadMode !== 'blob') ? 'buffered' : 'two-pass',
             });
             checkSwDelivered(writable, result.size);
             if (writable) {

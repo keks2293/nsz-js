@@ -576,12 +576,54 @@ export async function update(readers, output, options = {}) {
         // before the NCA (no seek-back), so the contentId must be final after
         // Pass 1. Seekable outputs (FSA / memory) can write the header last.
         const appendOnly = !!(output.writable && typeof output.writable.seek !== 'function');
-        if (hasBktrRomfs && outRead !== null && updateMode !== 'buffered') {
-            log('info', 'Streaming update (seekable output): ExeFS + RomFS streamed via BKTR merge (no data buffer)...');
-            await new Promise(r => setTimeout(r, 0));
 
-            // Precompute section data sizes from the update header (no buffering).
-            const { romfsDataSize, exefsSize, programSize } = parseUpdateSectionSizes(updateHeaderDec, updateHeaderRaw, updateRomfsSec, updateExefsSec, keys);
+        // Split the update kind (BKTR merge vs base RomFS as-is) once, into two
+        // stream factories shared by the streaming and two-pass paths. Each call
+        // returns a fresh stream (new acidFilter / fresh base source) so repeated
+        // passes get clean state.
+        const makeStreamExefs = () => makeExefsStream(updateInput, keys, updateTikData, options, log);
+        const _baseReaderRef = baseReader;
+        const _baseParsedRef = baseParsed;
+        const makeStreamRomfs = hasBktrRomfs
+            ? () => async (emit) => {
+                log('info', '[makeStreamRomfs] creating fresh base source...');
+                const freshBase = baseIsNcz
+                    ? { headerRaw: baseHeaderRaw, source: new NczStreamSource(_baseReaderRef, _baseParsedRef, log) }
+                    : baseInput;
+                log('info', '[makeStreamRomfs] mergeRomFS starting...');
+                await mergeRomFS(freshBase, updateInput, {
+                    keys, baseTik: baseTikData, updateTik: updateTikData,
+                    // Await emit: a fire-and-forget onChunk lets the merge
+                    // run ahead of the output, queueing hundreds of MB of
+                    // pending writes in a slow (FSA) stream and making
+                    // "mergeRomFS done" fire before the writes land.
+                    onChunk: async (chunk, off) => { await emit(chunk, off); },
+                });
+            }
+            : () => async (emit) => {
+                await extractRomfsStream(baseInput, keys, baseTikData, async (chunk, off) => {
+                    await emit(chunk, off);
+                });
+            };
+
+        // Section data sizes for the Program NCA (single source, both paths).
+        let romfsDataSize, exefsSize, programSize;
+        if (hasBktrRomfs) {
+            ({ romfsDataSize, exefsSize, programSize } = parseUpdateSectionSizes(updateHeaderDec, updateHeaderRaw, updateRomfsSec, updateExefsSec, keys));
+        } else {
+            const baseDecBytes = decryptNcaHeaderBytes(baseHeaderRaw, keys);
+            const updateDecBytes = decryptNcaHeaderBytes(updateHeaderRaw, keys);
+            const { idx: romfsIdx } = findRomfsFsHeader(baseDecBytes, 'base');
+            const baseRomfsFsHdr = baseDecBytes.subarray(0x400 + romfsIdx * 0x200, 0x400 + (romfsIdx + 1) * 0x200);
+            romfsDataSize = Number(new DataView(baseRomfsFsHdr.buffer, baseRomfsFsHdr.byteOffset + 0x98, 8).getBigUint64(0, true));
+            const updateExefsFsHdr = updateDecBytes.subarray(0x400, 0x600);
+            exefsSize = Number(new DataView(updateExefsFsHdr.buffer, updateExefsFsHdr.byteOffset + 0x48, 8).getBigUint64(0, true));
+            programSize = programNcaSize(exefsSize, romfsDataSize);
+        }
+
+        if (outRead !== null && updateMode !== 'buffered') {
+            log('info', `Streaming update (seekable output): ExeFS streamed, RomFS via ${hasBktrRomfs ? 'BKTR merge' : 'base as-is'} (no data buffer)...`);
+            await new Promise(r => setTimeout(r, 0));
             log('info', `Program NCA (streaming): exefs=${exefsSize} romfs=${romfsDataSize} total=${programSize}`);
 
             const adapter = await buildAdapter(output, outRead, { log, progress });
@@ -598,26 +640,12 @@ export async function update(readers, output, options = {}) {
             const programNcaPfs0Offset = pfs0Header.headerSize + layoutPw.files[0].offset;
             log('info', `PFS0 layout: ${pfs0Header.headerSize} bytes header, ${layoutPw.files.length} members, Program NCA at 0x${programNcaPfs0Offset.toString(16)}`);
 
-            const acidFilter = createExefsAcidFilter({
-                keepSig: options.keepNpdmAcidSig === true,
-                keepKey: options.keepNpdmAcidKey === true,
-            }, log);
             const { hashHex: contentId } = await packProgramNcaStream({
                 adapter, ncaOffset: programNcaPfs0Offset,
                 exefsSize, romfsDataSize,
                 titleId: base.cnmt.titleId, keys,
-                streamExefs: async (emit) => {
-                    await extractExefsStream(updateInput, keys, updateTikData, async (chunk, off) => {
-                        await acidFilter(chunk, off);
-                        await emit(chunk, off);
-                    });
-                },
-                streamRomfs: async (emit) => {
-                    await mergeRomFS(baseInput, updateInput, {
-                        keys, baseTik: baseTikData, updateTik: updateTikData,
-                        onChunk: async (chunk, off) => { await emit(chunk, off); },
-                    });
-                },
+                streamExefs: makeStreamExefs(),
+                streamRomfs: makeStreamRomfs(),
                 log, progress,
             });
 
@@ -651,50 +679,9 @@ export async function update(readers, output, options = {}) {
         if (!hasBktrRomfs || (outRead === null && updateMode !== 'buffered')) {
             log('info', `Two-pass update (sequential output): ${hasBktrRomfs ? 'BKTR merge' : 'base RomFS + update ExeFS'}, ${appendOnly ? 3 : 2}× romfs reads, ~200 KB memory...`);
             await new Promise(r => setTimeout(r, 0));
-
-            let romfsDataSize, exefsSize, programSize;
-            if (hasBktrRomfs) {
-                ({ romfsDataSize, exefsSize, programSize } = parseUpdateSectionSizes(updateHeaderDec, updateHeaderRaw, updateRomfsSec, updateExefsSec, keys));
-            } else {
-                const baseDecBytes = decryptNcaHeaderBytes(baseHeaderRaw, keys);
-                const updateDecBytes = decryptNcaHeaderBytes(updateHeaderRaw, keys);
-                const { idx: romfsIdx } = findRomfsFsHeader(baseDecBytes, 'base');
-                const baseRomfsFsHdr = baseDecBytes.subarray(0x400 + romfsIdx * 0x200, 0x400 + (romfsIdx + 1) * 0x200);
-                romfsDataSize = Number(new DataView(baseRomfsFsHdr.buffer, baseRomfsFsHdr.byteOffset + 0x98, 8).getBigUint64(0, true));
-                const updateExefsFsHdr = updateDecBytes.subarray(0x400, 0x600);
-                exefsSize = Number(new DataView(updateExefsFsHdr.buffer, updateExefsFsHdr.byteOffset + 0x48, 8).getBigUint64(0, true));
-                programSize = programNcaSize(exefsSize, romfsDataSize);
-            }
             log('info', `Program NCA (two-pass): exefs=${exefsSize} romfs=${romfsDataSize} total=${programSize}`);
 
             const adapter = await buildAdapter(output, null, { log, progress });
-
-            const makeStreamExefs = () => makeExefsStream(updateInput, keys, updateTikData, options, log);
-            // Capture base refs before they're nulled below — Pass 2 re-invokes
-            // makeStreamRomfs() after baseParsed is set to null.
-            const _baseReaderRef = baseReader;
-            const _baseParsedRef = baseParsed;
-            const makeStreamRomfs = hasBktrRomfs
-                ? () => async (emit) => {
-                    log('info', '[makeStreamRomfs] creating fresh base source...');
-                    const freshBase = baseIsNcz
-                        ? { headerRaw: baseHeaderRaw, source: new NczStreamSource(_baseReaderRef, _baseParsedRef, log) }
-                        : baseInput;
-                    log('info', '[makeStreamRomfs] mergeRomFS starting...');
-                    await mergeRomFS(freshBase, updateInput, {
-                        keys, baseTik: baseTikData, updateTik: updateTikData,
-                        // Await emit: a fire-and-forget onChunk lets the merge
-                        // run ahead of the output, queueing hundreds of MB of
-                        // pending writes in a slow (FSA) stream and making
-                        // "mergeRomFS done" fire before the writes land.
-                        onChunk: async (chunk, off) => { await emit(chunk, off); },
-                    });
-                }
-                : () => async (emit) => {
-                    await extractRomfsStream(baseInput, keys, baseTikData, async (chunk, off) => {
-                        await emit(chunk, off);
-                    });
-                };
 
             const { size: computedSize, contentId, meta } = await computeProgramNcaContentId({
                 exefsSize, romfsDataSize, titleId: base.cnmt.titleId, keys,

@@ -75,12 +75,25 @@ console.log('ref (fd, seekback) :', ref.length, 'sha256=' + refSha);
 console.log('sim (sw, two-pass) :', sim.length, 'sha256=' + simSha);
 console.log('buffered (fd)      :', buf.length, 'sha256=' + bufSha);
 console.log('result.size        :', result.size);
-if (refSha === simSha && refSha === bufSha && ref.length === sim.length && ref.length === buf.length) {
-  console.log('MATCH — seekback ≡ two-pass ≡ buffered, all byte-identical to fd');
+
+// In-memory output with read-back: the new memory read() in buildRead() unlocks
+// the streaming single-decompression path for memory outputs (browser) — must
+// stay byte-identical to fd.
+const base4 = { name: 'base.nsp', reader: new FileReader(basePath) };
+const update4 = { name: 'update.nsz', reader: new FileReader(updatePath) };
+const memOut = { memory: true };
+const mem = await update([base4, update4], memOut, { keys, log, progress, bktrMerge: true });
+base4.reader.close(); update4.reader.close();
+const memBuf = new Uint8Array(await mem.blob.arrayBuffer());
+const memSha = crypto.createHash('sha256').update(memBuf).digest('hex');
+console.log('memory (streaming) :', memBuf.length, 'sha256=' + memSha);
+
+if (refSha === simSha && refSha === bufSha && refSha === memSha && ref.length === sim.length && ref.length === buf.length && ref.length === memBuf.length) {
+  console.log('MATCH — seekback ≡ two-pass ≡ buffered ≡ memory, all byte-identical');
 } else {
   console.log('MISMATCH');
-  let i = 0; const n = Math.min(ref.length, sim.length);
+  let i = 0; const n = Math.min(ref.length, sim.length, memBuf.length);
   while (i < n && ref[i] === sim[i]) i++;
-  console.log('first diff ref/sim at', i, '0x' + i.toString(16), 'len ref=' + ref.length + ' sim=' + sim.length + ' buf=' + buf.length);
+  console.log('first diff ref/sim at', i, '0x' + i.toString(16), 'len ref=' + ref.length + ' sim=' + sim.length + ' buf=' + buf.length + ' mem=' + memBuf.length);
   process.exit(1);
 }
