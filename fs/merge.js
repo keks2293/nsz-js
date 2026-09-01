@@ -86,15 +86,18 @@ export async function mergeNSP(readers, output, options = {}) {
             }
 
             seenNames.add(f.outputName);
-            if (f.isNcz) {
+            if (f.name.toLowerCase().endsWith('.ncz')) {
+                // A .ncz member must be a real NCZ (NCZSECTN at 0 or 0x4000);
+                // anything else (plain NCA or corrupt) errors in parseNczSections
+                // — matching python nsz, which raises "No NCZSECTN found".
                 const nczReader = new AdapterNCZReader(rReader, f.offset, f.size);
                 const parsed = await parseNczSections(nczReader);
-                const { ncaSize, sections } = parsed;
+                const { ncaSize } = parsed;
                 log('info', `[DECOMPRESS] ${f.name} -> ${f.outputName} (${formatBytes(ncaSize)})`);
-                members.push({ name: f.outputName, reader: rReader, src: i, offset: f.offset, size: ncaSize, isNcz: true, nczLen: f.size, parsed });
+                members.push({ kind: 'ncz', name: f.outputName, reader: rReader, offset: f.offset, srcLen: f.size, outLen: ncaSize, parsed });
                 totalDataSize += ncaSize;
             } else {
-                members.push({ name: f.outputName, reader: rReader, src: i, offset: f.offset, size: f.size, isNcz: false });
+                members.push({ kind: 'copy', name: f.outputName, reader: rReader, offset: f.offset, outLen: f.size });
                 totalDataSize += f.size;
             }
         }
@@ -105,7 +108,7 @@ export async function mergeNSP(readers, output, options = {}) {
     }
 
     const writer = new PFS0Writer();
-    for (const m of members) writer.add(m.name, m.size);
+    for (const m of members) writer.add(m.name, m.outLen);
     const header = writer.buildHeader();
     const headerSize = header.headerSize;
 
@@ -121,8 +124,8 @@ export async function mergeNSP(readers, output, options = {}) {
         const writePos = headerSize + writer.files[i].offset;
         const doneBefore = written;
         await writeFromReader(adapter, writePos, m,
-            (p) => progress((doneBefore + m.size * p) / totalDataSize, `${m.isNcz ? 'Decompressing' : 'Copying'} ${m.name}...`));
-        written = doneBefore + m.size;
+            (p) => progress((doneBefore + m.outLen * p) / totalDataSize, `${m.kind === 'ncz' ? 'Decompressing' : 'Copying'} ${m.name}...`));
+        written = doneBefore + m.outLen;
     }
 
     const totalSize = headerSize + totalDataSize;

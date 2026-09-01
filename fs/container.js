@@ -4,14 +4,13 @@
 import { PFS0 } from './pfs0.js';
 import { XCIReader } from './xci.js';
 
-// Enrich a PFS0/XCI entry with format metadata.
+// Enrich a PFS0/XCI entry with its output member name (nsz/xcz → nca).
 function enrichEntry(e) {
-    const isNcz = e.name.toLowerCase().endsWith('.ncz');
-    return { ...e, isNcz, outputName: isNcz ? e.name.replace(/\.ncz$/i, '.nca') : e.name };
+    return { ...e, outputName: e.name.toLowerCase().endsWith('.ncz') ? e.name.replace(/\.ncz$/i, '.nca') : e.name };
 }
 
 // r = { reader, name }. Returns { kind: 'pfs0'|'xci', entries }.
-// Each entry has { name, offset, size, isNcz, outputName }.
+// Each entry has { name, offset, size, outputName }.
 export async function openContainer(r) {
     const magic = await r.reader.read(0, 4);
     const m = String.fromCharCode(magic[0], magic[1], magic[2], magic[3]);

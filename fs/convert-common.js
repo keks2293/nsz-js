@@ -57,14 +57,14 @@ export function verifyNcaHash({ hash, inputName, outputName, cnmtHashMap, log })
 export async function collectFileMetas(files, adapter) {
     const metas = [];
     for (const f of files) {
-        const isNcz = f.name.toLowerCase().endsWith('.ncz');
-        const outputName = isNcz ? f.name.replace(/\.ncz$/i, '.nca') : f.name;
-        if (isNcz) {
+        const kind = f.name.toLowerCase().endsWith('.ncz') ? 'ncz' : 'copy';
+        const name = kind === 'ncz' ? f.name.replace(/\.ncz$/i, '.nca') : f.name;
+        if (kind === 'ncz') {
             const headerReader = new AdapterNCZReader(adapter, f.offset, Math.min(f.size, 0x10000));
             const parsed = await parseNczSections(headerReader);
-            metas.push({ name: outputName, size: parsed.ncaSize, isNcz: true, offset: f.offset, nczLen: f.size, inputName: f.name, parsed });
+            metas.push({ kind: 'ncz', name, size: parsed.ncaSize, inputName: f.name, offset: f.offset, srcLen: f.size, parsed });
         } else {
-            metas.push({ name: outputName, size: f.size, isNcz: false, offset: f.offset, inputName: f.name });
+            metas.push({ kind: 'copy', name, size: f.size, inputName: f.name, offset: f.offset });
         }
     }
     return metas;
@@ -74,9 +74,9 @@ export async function collectFileMetas(files, adapter) {
 // copy. With verify+createHash the output is hashed and verified via
 // verifyNcaHash. progress(fraction, label) is called during the work.
 export async function writeMember({ meta, adapter, writePos, verify, createHash, cnmtHashMap, log, progress, progressBase, pct }) {
-    if (meta.isNcz) {
+    if (meta.kind === 'ncz') {
         const hasher = verify ? createHash() : null;
-        const nczReader = new AdapterNCZReader(adapter, meta.offset, meta.nczLen);
+        const nczReader = new AdapterNCZReader(adapter, meta.offset, meta.srcLen);
         const decomp = new NCZDecompressor(nczReader);
         await decomp.decompress(
             (p) => progress(pct(progressBase + meta.size * p), `Decompressing ${meta.inputName}...`),
@@ -101,21 +101,35 @@ export async function writeMember({ meta, adapter, writePos, verify, createHash,
 
 // ── Streaming member write (merge / update) ───────────────────────────────
 
-// Write one member from a file reader: NCZ → streaming decompress, plain NCA
-// → copyRange. For NCZ with sections, pass `parsed` to skip re-parsing.
-// progress(fraction) is called during work.
-export async function writeFromReader(adapter, writePos, { reader, offset, size, isNcz, parsed }, progress) {
-    if (isNcz) {
-        const nczReader = new AdapterNCZReader(reader, offset, size);
-        const decomp = new NCZDecompressor(nczReader);
-        await decomp.decompress(
-            progress,
-            (chunk, chunkOffset) => adapter.write(writePos + chunkOffset, chunk),
-            parsed);
-    } else {
-        let copiedBytes = 0;
-        await copyRange(reader, offset, size,
-            (off, chunk) => adapter.write(writePos + off, chunk),
-            (n) => { copiedBytes += n; progress(copiedBytes / size); });
+// Write one member from a file reader onto the adapter at writePos. Members are
+// a discriminated union — the tag picks the operation and the shape dictates
+// the fields, so no field ever has two meanings:
+//   { kind: 'ncz',  reader, offset, srcLen, outLen, parsed? } → stream-decompress
+//   { kind: 'copy', reader, offset, outLen }                  → copyRange as-is
+// `srcLen` is ALWAYS the container (compressed) length to read; `outLen` is
+// always the decompressed output size. progress(fraction) is called during work.
+export async function writeFromReader(adapter, writePos, { kind, reader, offset, srcLen, outLen, parsed }, progress) {
+    switch (kind) {
+        case 'ncz': {
+            // Reader length is the container (compressed) member size, never the
+            // decompressed outLen: feeding past the zstd frame makes the WASM
+            // wrapper call ZSTD_decompressStream on trailing garbage and fail
+            // with error -10 (prefix_unknown).
+            const nczReader = new AdapterNCZReader(reader, offset, srcLen);
+            await new NCZDecompressor(nczReader).decompress(
+                progress,
+                (chunk, chunkOffset) => adapter.write(writePos + chunkOffset, chunk),
+                parsed);
+            break;
+        }
+        case 'copy': {
+            let copiedBytes = 0;
+            await copyRange(reader, offset, outLen,
+                (off, chunk) => adapter.write(writePos + off, chunk),
+                (n) => { copiedBytes += n; progress(copiedBytes / outLen); });
+            break;
+        }
+        default:
+            throw new Error(`writeFromReader: unknown member kind '${kind}'`);
     }
 }
