@@ -596,7 +596,9 @@ async function ncaRead(nca, offset, length) {
     return nca.subarray(offset, offset + length);
 }
 
-export async function extractExefs(ncaData, keys, tikData = null) {
+// ── Section metadata + streaming helpers ────────────────────────────────────
+
+function parseExefsSectionMeta(ncaData, keys, tikData) {
     const decHeader = decryptNcaHeaderBytes(ncaHeaderRaw(ncaData), keys);
     const titlekey = resolveTitlekey(tikData, decHeader, keys);
 
@@ -608,6 +610,54 @@ export async function extractExefs(ncaData, keys, tikData = null) {
 
     const mediaOffset = Number(new DataView(decHeader.buffer, decHeader.byteOffset + 0x240, 4).getUint32(0, true));
     const sectionOffset = mediaOffset * 0x200;
+
+    return { titlekey, sectionCtrRev, sectionOffset, sectionStart, sectionSize };
+}
+
+function parseRomfsSectionMeta(ncaData, keys, tikData) {
+    const decHeader = decryptNcaHeaderBytes(ncaHeaderRaw(ncaData), keys);
+    const titlekey = resolveTitlekey(tikData, decHeader, keys);
+
+    const { idx: romfsIdx, fsHdr: romfsFsHdr } = findRomfsFsHeader(decHeader, 'extractRomfs');
+    const sectionCtrRev = reversedSectionCtr(romfsFsHdr);
+
+    const mediaOffset = new DataView(decHeader.buffer, decHeader.byteOffset + 0x240 + romfsIdx * 0x10, 4).getUint32(0, true);
+    const mediaEnd = new DataView(decHeader.buffer, decHeader.byteOffset + 0x240 + romfsIdx * 0x10 + 4, 4).getUint32(0, true);
+    const sectionOffset = mediaOffset * 0x200;
+    const mediaSize = mediaEnd * 0x200 - sectionOffset;
+
+    return { titlekey, sectionCtrRev, sectionOffset, mediaSize };
+}
+
+async function streamNcaSection(ncaData, offset, size, titlekey, ctrRev, onChunk) {
+    if (!titlekey || size === 0) {
+        let done = 0;
+        while (done < size) {
+            const n = Math.min(0x100000, size - done);
+            const raw = await ncaRead(ncaData, offset + done, n);
+            await onChunk(raw, done);
+            done += n;
+        }
+        return size;
+    }
+
+    const c = new AesCtr(titlekey, ctrRev);
+    c.seek(offset);
+    let done = 0;
+    while (done < size) {
+        const n = Math.min(0x100000, size - done);
+        const cipher = await ncaRead(ncaData, offset + done, n);
+        const dec = await c.decrypt(cipher);
+        await onChunk(dec, done);
+        done += n;
+    }
+    return size;
+}
+
+// ── extractExefs / extractRomfs ─────────────────────────────────────────────
+
+export async function extractExefs(ncaData, keys, tikData = null) {
+    const { titlekey, sectionCtrRev, sectionOffset, sectionStart, sectionSize } = parseExefsSectionMeta(ncaData, keys, tikData);
 
     const raw = await ncaRead(ncaData, sectionOffset, sectionStart + sectionSize);
 
@@ -621,58 +671,15 @@ export async function extractExefs(ncaData, keys, tikData = null) {
     return decrypted.subarray(sectionStart, sectionStart + sectionSize);
 }
 
-// Streaming variant of extractExefs(): feeds the ExeFS PFS0 data (section
-// [sectionStart, sectionStart+sectionSize)) in order to onChunk(chunk, offInData)
-// instead of returning one big buffer. Only transient decrypt chunks are kept.
+// Streaming variant: feeds the ExeFS PFS0 data to onChunk(chunk, offInData)
+// instead of returning one big buffer.
 export async function extractExefsStream(ncaData, keys, tikData, onChunk) {
-    const decHeader = decryptNcaHeaderBytes(ncaHeaderRaw(ncaData), keys);
-    const titlekey = resolveTitlekey(tikData, decHeader, keys);
-
-    const exeFsFsHdr = decHeader.subarray(0x400, 0x600);
-    const sectionCtrRev = reversedSectionCtr(exeFsFsHdr);
-
-    const sectionStart = Number(new DataView(exeFsFsHdr.buffer, exeFsFsHdr.byteOffset + 0x40, 8).getBigUint64(0, true));
-    const sectionSize = Number(new DataView(exeFsFsHdr.buffer, exeFsFsHdr.byteOffset + 0x48, 8).getBigUint64(0, true));
-
-    const mediaOffset = Number(new DataView(decHeader.buffer, decHeader.byteOffset + 0x240, 4).getUint32(0, true));
-    const sectionOffset = mediaOffset * 0x200;
-
-    if (!titlekey || sectionSize === 0) {
-        // Plaintext: read + emit raw, in order.
-        let done = 0;
-        while (done < sectionSize) {
-            const n = Math.min(0x100000, sectionSize - done);
-            const raw = await ncaRead(ncaData, sectionOffset + sectionStart + done, n);
-            await onChunk(raw, done);
-            done += n;
-        }
-        return sectionSize;
-    }
-
-    const c = new AesCtr(titlekey, sectionCtrRev);
-    c.seek(sectionOffset + sectionStart);
-    let done = 0;
-    while (done < sectionSize) {
-        const n = Math.min(0x100000, sectionSize - done);
-        const cipher = await ncaRead(ncaData, sectionOffset + sectionStart + done, n);
-        const dec = await c.decrypt(cipher);
-        await onChunk(dec, done);
-        done += n;
-    }
-    return sectionSize;
+    const { titlekey, sectionCtrRev, sectionOffset, sectionStart, sectionSize } = parseExefsSectionMeta(ncaData, keys, tikData);
+    return streamNcaSection(ncaData, sectionOffset + sectionStart, sectionSize, titlekey, sectionCtrRev, onChunk);
 }
 
 export async function extractRomfs(ncaData, keys, tikData = null) {
-    const decHeader = decryptNcaHeaderBytes(ncaHeaderRaw(ncaData), keys);
-    const titlekey = resolveTitlekey(tikData, decHeader, keys);
-
-    const { idx: romfsIdx, fsHdr: romfsFsHdr } = findRomfsFsHeader(decHeader, 'extractRomfs');
-    const sectionCtrRev = reversedSectionCtr(romfsFsHdr);
-
-    const mediaOffset = new DataView(decHeader.buffer, decHeader.byteOffset + 0x240 + romfsIdx * 0x10, 4).getUint32(0, true);
-    const mediaEnd = new DataView(decHeader.buffer, decHeader.byteOffset + 0x240 + romfsIdx * 0x10 + 4, 4).getUint32(0, true);
-    const sectionOffset = mediaOffset * 0x200;
-    const mediaSize = mediaEnd * 0x200 - sectionOffset;
+    const { titlekey, sectionCtrRev, sectionOffset, mediaSize } = parseRomfsSectionMeta(ncaData, keys, tikData);
 
     const raw = await ncaRead(ncaData, sectionOffset, mediaSize);
     if (!titlekey || mediaSize === 0) return raw;
@@ -684,39 +691,8 @@ export async function extractRomfs(ncaData, keys, tikData = null) {
 }
 
 export async function extractRomfsStream(ncaData, keys, tikData, onChunk) {
-    const decHeader = decryptNcaHeaderBytes(ncaHeaderRaw(ncaData), keys);
-    const titlekey = resolveTitlekey(tikData, decHeader, keys);
-
-    const { idx: romfsIdx, fsHdr: romfsFsHdr } = findRomfsFsHeader(decHeader, 'extractRomfsStream');
-    const sectionCtrRev = reversedSectionCtr(romfsFsHdr);
-
-    const mediaOffset = new DataView(decHeader.buffer, decHeader.byteOffset + 0x240 + romfsIdx * 0x10, 4).getUint32(0, true);
-    const mediaEnd = new DataView(decHeader.buffer, decHeader.byteOffset + 0x240 + romfsIdx * 0x10 + 4, 4).getUint32(0, true);
-    const sectionOffset = mediaOffset * 0x200;
-    const mediaSize = mediaEnd * 0x200 - sectionOffset;
-
-    if (!titlekey || mediaSize === 0) {
-        let done = 0;
-        while (done < mediaSize) {
-            const n = Math.min(0x100000, mediaSize - done);
-            const raw = await ncaRead(ncaData, sectionOffset + done, n);
-            await onChunk(raw, done);
-            done += n;
-        }
-        return mediaSize;
-    }
-
-    const c = new AesCtr(titlekey, sectionCtrRev);
-    c.seek(sectionOffset);
-    let done = 0;
-    while (done < mediaSize) {
-        const n = Math.min(0x100000, mediaSize - done);
-        const cipher = await ncaRead(ncaData, sectionOffset + done, n);
-        const dec = await c.decrypt(cipher);
-        await onChunk(dec, done);
-        done += n;
-    }
-    return mediaSize;
+    const { titlekey, sectionCtrRev, sectionOffset, mediaSize } = parseRomfsSectionMeta(ncaData, keys, tikData);
+    return streamNcaSection(ncaData, sectionOffset, mediaSize, titlekey, sectionCtrRev, onChunk);
 }
 
 // ── NPDM ACID zeroing (hacpack parity) ───────────────────────────────────────
