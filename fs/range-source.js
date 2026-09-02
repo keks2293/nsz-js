@@ -4,15 +4,10 @@
 //   registerRange(offset, length)  -- optional pre-registration
 //
 // Backends:
-//  - BufferRangeSource: over an already-buffered NCA (or NCA-sized view).
+//  - BufferRangeSource: over an already-buffered NCA (Uint8Array).
 //  - FileRangeSource: random access over a container reader (.nsp input).
-//    Reads only the requested ranges — no section buffering.
+//  - ViewRangeSource: over a SparseNcaView (sparse header + sections).
 //  - NczStreamSource: ONE sequential pass of NCZ decompression (.nsz input).
-//    NCZ is sequential, so ranges must be requested in non-decreasing order.
-//    The pump only discards bytes that precede the earliest not-yet-delivered
-//    range, so it can never skip past a needed byte; a chunk may straddle a
-//    range boundary (partial fill carries across chunks). Decompression stops
-//    as soon as the last registered range is served.
 //
 // This is the same streaming discipline the NSZ→NSP converter uses
 // (decompress chunk-by-chunk, consume, never buffer the whole NCA).
@@ -61,48 +56,44 @@ export class SparseNcaView {
 
 const NCA_HEADER_SIZE = 0xC00;
 
-// RangeSource over a SparseNcaView (for NCA inputs whose sections are buffered
-// but not contiguous — e.g. .nsz update: BKTR + ExeFS sections, non-monotonic
-// patch access forbids a streaming source).
-export class ViewRangeSource {
-    constructor(view) {
-        this._view = view;
+// Unified random-access range source. All three backends share the same
+// structure; the only difference is how data is fetched:
+//   - subarray() for in-memory buffers/views
+//   - reader.read() for container files
+//
+// read(offset, length) -> Promise<Uint8Array>
+// registerRange()      -> no-op (used by NczStreamSource which is sequential)
+//
+// Exported factory constructors preserve the original API:
+//   new BufferRangeSource(ncaData)
+//   new FileRangeSource(containerReader, fileOffset, fileSize)
+//   new ViewRangeSource(view)
+
+class RangeSource {
+    constructor(length, readFn) {
+        this._length = length;
+        this._read = readFn;
     }
-    get length() { return this._view.length; }
+    get length() { return this._length; }
     registerRange() {}
     async read(offset, length) {
-        return this._view.subarray(offset, offset + length);
+        if (offset < 0 || offset + length > this._length) {
+            throw new Error(`RangeSource: read [${offset}, ${offset + length}) out of bounds (len ${this._length})`);
+        }
+        return this._read(offset, length);
     }
 }
 
-export class BufferRangeSource {
-    constructor(data) {
-        this._data = data;
-    }
-    get length() { return this._data.length; }
-    registerRange() {}
-    async read(offset, length) {
-        if (offset < 0 || offset + length > this._data.length) {
-            throw new Error(`BufferRangeSource: read [${offset}, ${offset + length}) out of bounds (len ${this._data.length})`);
-        }
-        return this._data.subarray(offset, offset + length);
-    }
+export function BufferRangeSource(data) {
+    return new RangeSource(data.length, (offset, length) => data.subarray(offset, offset + length));
 }
 
-export class FileRangeSource {
-    constructor(reader, fileOffset, fileSize) {
-        this._reader = reader;
-        this._fileOffset = fileOffset;
-        this._fileSize = fileSize;
-    }
-    get length() { return this._fileSize; }
-    registerRange() {}
-    async read(offset, length) {
-        if (offset < 0 || offset + length > this._fileSize) {
-            throw new Error(`FileRangeSource: read [${offset}, ${offset + length}) out of bounds (len ${this._fileSize})`);
-        }
-        return await this._reader.read(this._fileOffset + offset, length);
-    }
+export function FileRangeSource(reader, fileOffset, fileSize) {
+    return new RangeSource(fileSize, (offset, length) => reader.read(fileOffset + offset, length));
+}
+
+export function ViewRangeSource(view) {
+    return new RangeSource(view.length, (offset, length) => view.subarray(offset, offset + length));
 }
 
 const STOP_PUMP = 'STOP_PUMP';
