@@ -229,10 +229,10 @@ async function extractNcaSections(reader, ranges, kind, keys, log) {
 
 // ── Shared helpers for BKTR streaming paths ──────────────────────────────────
 
-function collectOtherNcas(update) {
+function collectOtherNcas(update, skipTypes = new Set([6, 1])) {
     const otherNcas = [];
     for (const e of update.cnmt.contentEntries) {
-        if (e.type === 6 || e.type === 1) continue;
+        if (skipTypes.has(e.type)) continue;
         const src = update.entries.find(x =>
             x.name.toLowerCase().startsWith(e.ncaId) && !x.name.toLowerCase().endsWith('.cnmt.nca'));
         if (src) {
@@ -766,22 +766,7 @@ export async function update(readers, output, options = {}) {
         members.push({ name: `${mergedProgram.id}.nca`, size: mergedProgram.size, data: mergedProgram.nca });
     }
 
-    const otherNcas = [];
-    for (const e of update.cnmt.contentEntries) {
-        if (e.type === 6) continue;
-        if (mergedProgram && e.type === 1) continue;
-        const ncaId = e.ncaId;
-        const src = update.entries.find(x =>
-            x.name.toLowerCase().startsWith(ncaId) && !x.name.toLowerCase().endsWith('.cnmt.nca'));
-        if (!src) continue;
-        const outName = src.name.replace(/\.ncz$/i, '.nca');
-        otherNcas.push({
-            name: outName, size: e.size,
-            src: { reader: update.reader, offset: src.offset, srcLen: src.size,
-                   kind: src.name.toLowerCase().endsWith('.ncz') ? 'ncz' : 'copy' },
-        });
-    }
-    otherNcas.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    const otherNcas = collectOtherNcas(update, mergedProgram ? new Set([6, 1]) : new Set([6]));
     members.push(...otherNcas);
 
     // CNMT last (yanu member order)
@@ -803,11 +788,11 @@ export async function update(readers, output, options = {}) {
             await adapter.write(pos, m.data);
         } else {
             await writeFromReader(adapter, pos,
-                { ...m.src, name: m.name, outLen: m.size },
-                (p) => progress((written + m.size * p) / totalData, `${m.src.kind === 'ncz' ? 'Decompressing' : 'Copying'} ${m.name}...`));
+                { kind: m.kind, name: m.name, reader: m.reader, offset: m.offset, srcLen: m.srcLen, outLen: m.outLen },
+                (p) => progress((written + m.outLen * p) / totalData, `${m.kind === 'ncz' ? 'Decompressing' : 'Copying'} ${m.name}...`));
         }
-        log('info', `[WRITTEN] ${m.name} (${m.size} bytes)`);
-        written += m.size;
+        log('info', `[WRITTEN] ${m.name} (${(m.data ? m.size : m.outLen)} bytes)`);
+        written += m.data ? m.size : m.outLen;
     }
 
     const totalSize = pfs0Header.headerSize + totalData;
