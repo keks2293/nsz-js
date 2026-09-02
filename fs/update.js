@@ -1,5 +1,5 @@
 import { PFS0, PFS0Writer } from './pfs0.js';
-import { buildAdapter, buildRead, collectBlob, copyRange } from './adapter.js';
+import { buildAdapter, buildRead, collectBlob } from './adapter.js';
 import { openContainer } from './container.js';
 import { NCZDecompressor, AdapterNCZReader, parseNczSections } from './ncz.js';
 import { decryptNcaHeader, decryptNcaSection, parseCnmtFromDecryptedSection } from './nca.js';
@@ -801,16 +801,10 @@ export async function update(readers, output, options = {}) {
         const pos = pfs0Header.headerSize + pw.files[i].offset;
         if (m.data) {
             await adapter.write(pos, m.data);
-        } else if (m.src.kind === 'ncz') {
-            const nczReader = new AdapterNCZReader(m.src.reader, m.src.offset, m.src.srcLen);
-            const parsed = await parseNczSections(nczReader);
-            const decomp = new NCZDecompressor(nczReader);
-            await decomp.decompress(
-                (p) => progress((written + m.size * p) / totalData, `Decompressing ${m.name}...`),
-                async (chunk, offset) => { await adapter.write(pos + offset, chunk); }, parsed);
         } else {
-            await copyRange(m.src.reader, m.src.offset, m.size,
-                (off, chunk) => adapter.write(pos + off, chunk));
+            await writeFromReader(adapter, pos,
+                { ...m.src, name: m.name, outLen: m.size },
+                (p) => progress((written + m.size * p) / totalData, `${m.src.kind === 'ncz' ? 'Decompressing' : 'Copying'} ${m.name}...`));
         }
         log('info', `[WRITTEN] ${m.name} (${m.size} bytes)`);
         written += m.size;
