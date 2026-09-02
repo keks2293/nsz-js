@@ -246,6 +246,19 @@ function collectOtherNcas(update, skipTypes = new Set([6, 1])) {
     return otherNcas;
 }
 
+function findProgramNcaEntry(container, label, log) {
+    for (const e of container.cnmt.contentEntries) {
+        if (e.type !== 1) continue;
+        const src = container.entries.find(x =>
+            x.name.toLowerCase().startsWith(e.ncaId) && !x.name.toLowerCase().endsWith('.cnmt.nca'));
+        if (src) {
+            log('info', `${label} Program NCA: ${src.name} (${src.size} bytes)`);
+            return { entry: e, src };
+        }
+    }
+    return null;
+}
+
 async function writeOtherNcas(adapter, update, pfs0Header, pw, otherNcas, written, totalData, progress, log) {
     for (let i = 0; i < otherNcas.length; i++) {
         const m = otherNcas[i];
@@ -415,28 +428,8 @@ export async function update(readers, output, options = {}) {
     let baseProgramEntry = null;
     let updateProgramEntry = null;
 
-    // Find base and update Program NCA entries (Program content type = 1)
-    for (const e of base.cnmt.contentEntries) {
-        if (e.type === 1) { // Program NCA
-            const src = base.entries.find(x =>
-                x.name.toLowerCase().startsWith(e.ncaId) && !x.name.toLowerCase().endsWith('.cnmt.nca'));
-            if (src) {
-                log('info', `Base Program NCA: ${src.name} (${src.size} bytes)`);
-                baseProgramEntry = { entry: e, src };
-            }
-        }
-    }
-    for (const e of update.cnmt.contentEntries) {
-        if (e.type === 1) { // Program NCA
-            const src = update.entries.find(x =>
-                x.name.toLowerCase().startsWith(e.ncaId) && !x.name.toLowerCase().endsWith('.cnmt.nca'));
-            if (src) {
-                log('info', `Update Program NCA: ${src.name} (${src.size} bytes)`);
-                updateProgramEntry = { entry: e, src };
-                break;
-            }
-        }
-    }
+    baseProgramEntry = findProgramNcaEntry(base, 'Base', log);
+    updateProgramEntry = findProgramNcaEntry(update, 'Update', log);
 
     // Check for BKTR RomFS in update Program NCA
     let hasBktrRomfs = false;
