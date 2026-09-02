@@ -1,7 +1,7 @@
 import { HFS0Writer } from './hfs0.js';
 import { XCIReader } from './xci.js';
 import { buildAdapter, collectBlob } from './adapter.js';
-import { collectFileMetas, writeMember } from './convert-common.js';
+import { collectFileMetas, writeFromReader } from './convert-common.js';
 
 const PARTITION_HEADER_SIZE = 0x8000;
 const ROOT_HFS0_PADDED_SIZE = 0x8000;
@@ -109,11 +109,10 @@ async function writePartitions(adapter, partitionMetas, layout, verify, options)
         let writePos = po.offset + PARTITION_HEADER_SIZE;
         for (let fi = 0; fi < pm.files.length; fi++) {
             const meta = pm.files[fi];
-            await writeMember({
-                meta, adapter, writePos,
-                verify, createHash: options.createHash, cnmtHashMap: pm.cnmtHashMap,
-                log, progress, progressBase: dataOverall, pct,
-            });
+            await writeFromReader(adapter, writePos,
+                { ...meta, reader: adapter, outLen: meta.size },
+                (p) => progress(pct(dataOverall + meta.size * p), `${meta.kind === 'ncz' ? 'Decompressing' : 'Copying'} ${meta.inputName}...`),
+                { verify, createHash: options.createHash, cnmtHashMap: pm.cnmtHashMap, log });
             writePos += meta.size;
             dataOverall += meta.size;
             progress(pct(dataOverall), `${pm.name}/${meta.inputName} done`);

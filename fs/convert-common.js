@@ -1,9 +1,8 @@
-// Shared NSZ/XCZ converter logic: NCA hash verification, member meta
-// collection, and per-member write (decompress-or-copy + verify).
+// Shared NSZ/XCZ/merge/update logic: NCA hash verification, member meta
+// collection, and per-member write (decompress-or-copy + optional verify).
 
 import { NCZDecompressor, AdapterNCZReader, parseNczSections } from './ncz.js';
 import { copyRange } from './adapter.js';
-import { sha256 } from '../crypto/sha256.js';
 
 // ── NCA hash verification ───────────────────────────────────────────────────
 
@@ -53,7 +52,12 @@ export function verifyNcaHash({ hash, inputName, outputName, cnmtHashMap, log })
 // ── Member meta + write ─────────────────────────────────────────────────────
 
 // Collect output metas for PFS0/HFS0 members. NCZ files are probed (header
-// only, first 0x10000 bytes) to learn the decompressed ncaSize.
+// only, first 0x10000 bytes) to learn the decompressed ncaSize. Metas carry the
+// same discriminated union as writeFromReader members — `kind` picks the write
+// operation, `srcLen` is the container (compressed) length, `size` the output
+// length (== outLen):
+//   { kind: 'ncz',  name, inputName, size, offset, srcLen, parsed } → decompress
+//   { kind: 'copy', name, inputName, size, offset }                 → copy as-is
 export async function collectFileMetas(files, adapter) {
     const metas = [];
     for (const f of files) {
@@ -70,63 +74,59 @@ export async function collectFileMetas(files, adapter) {
     return metas;
 }
 
-// Write one member at writePos: NCZ → streaming decompress + hash, or raw
-// copy. With verify+createHash the output is hashed and verified via
-// verifyNcaHash. progress(fraction, label) is called during the work.
-export async function writeMember({ meta, adapter, writePos, verify, createHash, cnmtHashMap, log, progress, progressBase, pct }) {
-    if (meta.kind === 'ncz') {
-        const hasher = verify ? createHash() : null;
-        const nczReader = new AdapterNCZReader(adapter, meta.offset, meta.srcLen);
-        const decomp = new NCZDecompressor(nczReader);
-        await decomp.decompress(
-            (p) => progress(pct(progressBase + meta.size * p), `Decompressing ${meta.inputName}...`),
-            async (chunk, offset) => {
-                if (hasher) hasher.update(chunk);
-                await adapter.write(writePos + offset, chunk);
-            },
-            meta.parsed);
-        if (hasher && isVerifiableNca(meta.name)) {
-            verifyNcaHash({ hash: hasher.hex(), inputName: meta.inputName, outputName: meta.name, cnmtHashMap, log });
-        }
-    } else {
-        progress(pct(progressBase), `Copying ${meta.inputName}...`);
-        const data = await adapter.read(meta.offset, meta.size);
-        if (verify && isVerifiableNca(meta.name)) {
-            const hash = await sha256(data);
-            verifyNcaHash({ hash, inputName: meta.inputName, outputName: meta.name, cnmtHashMap, log });
-        }
-        await adapter.write(writePos, data);
-    }
-}
+// ── Streaming member write (nsz/xcz/merge/update) ───────────────────────────
 
-// ── Streaming member write (merge / update) ───────────────────────────────
-
-// Write one member from a file reader onto the adapter at writePos. Members are
-// a discriminated union — the tag picks the operation and the shape dictates
-// the fields, so no field ever has two meanings:
-//   { kind: 'ncz',  reader, offset, srcLen, outLen, parsed? } → stream-decompress
-//   { kind: 'copy', reader, offset, outLen }                  → copyRange as-is
+// Write one member from a reader onto the adapter at writePos. Members are a
+// discriminated union — the tag picks the operation and the shape dictates the
+// fields, so no field ever has two meanings:
+//   { kind: 'ncz',  name?, inputName?, reader, offset, srcLen, outLen, parsed? } → stream-decompress
+//   { kind: 'copy', name?, inputName?, reader, offset, outLen }                 → copyRange as-is
 // `srcLen` is ALWAYS the container (compressed) length to read; `outLen` is
 // always the decompressed output size. progress(fraction) is called during work.
-export async function writeFromReader(adapter, writePos, { kind, reader, offset, srcLen, outLen, parsed }, progress) {
+// The source is `reader` — for nsz/xcz this is the shared adapter (its `read`
+// serves the input container), for merge/update a dedicated member reader.
+//
+// With verifyOpts ({ verify, createHash, cnmtHashMap, log }) the written bytes
+// are hashed (before the write, so SW/transfer adapters can't detach the
+// buffer first) and checked via verifyNcaHash when `name` ends in a verifiable
+// .nca. Abstracted from the old writeMember so there is a single branch-on-kind
+// dispatch for all four pipelines.
+export async function writeFromReader(adapter, writePos, { kind, name, inputName, reader, offset, srcLen, outLen, parsed }, progress, verifyOpts = {}) {
+    const { verify = false, createHash = null, cnmtHashMap = null, log = null } = verifyOpts;
+    // Hash bytes BEFORE the adapter write — SW/transfer adapters postMessage
+    // the buffer with `transfer`, detaching it (length becomes 0).
+    const writeAndHash = async (hasher, chunk, target) => {
+        if (hasher) hasher.update(chunk);
+        await adapter.write(target, chunk);
+    };
+    const verifyNca = (hasher) => {
+        if (hasher && name && isVerifiableNca(name)) {
+            verifyNcaHash({ hash: hasher.hex(), inputName: inputName || name, outputName: name, cnmtHashMap, log });
+        }
+    };
+
     switch (kind) {
         case 'ncz': {
             // Reader length is the container (compressed) member size, never the
             // decompressed outLen: feeding past the zstd frame makes the WASM
             // wrapper call ZSTD_decompressStream on trailing garbage and fail
             // with error -10 (prefix_unknown).
+            const hasher = verify ? createHash() : null;
             const nczReader = new AdapterNCZReader(reader, offset, srcLen);
             await new NCZDecompressor(nczReader).decompress(
                 progress,
-                (chunk, chunkOffset) => adapter.write(writePos + chunkOffset, chunk),
+                (chunk, chunkOffset) => writeAndHash(hasher, chunk, writePos + chunkOffset),
                 parsed);
+            verifyNca(hasher);
             break;
         }
         case 'copy': {
+            const hasher = verify ? createHash() : null;
             let copiedBytes = 0;
             await copyRange(reader, offset, outLen,
-                (off, chunk) => adapter.write(writePos + off, chunk),
+                (off, chunk) => writeAndHash(hasher, chunk, writePos + off),
                 (n) => { copiedBytes += n; progress(copiedBytes / outLen); });
+            verifyNca(hasher);
             break;
         }
         default:

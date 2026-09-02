@@ -1,6 +1,6 @@
 import { PFS0Writer, PFS0 } from './pfs0.js';
 import { buildAdapter, collectBlob } from './adapter.js';
-import { collectFileMetas, writeMember } from './convert-common.js';
+import { collectFileMetas, writeFromReader } from './convert-common.js';
 
 async function convertNSZStreaming(pfs0, adapter, options, cnmtHashes = new Map()) {
     const { verify = false, fixPadding = false } = options;
@@ -27,12 +27,10 @@ async function convertNSZStreaming(pfs0, adapter, options, cnmtHashes = new Map(
         const writePos = pfs0Header.headerSize + writer.files[idx].offset;
 
         options.log('info', `[EXISTS]     ${f.name}`);
-        await writeMember({
-            meta, adapter, writePos,
-            verify, createHash: options.createHash, cnmtHashMap: cnmtHashes,
-            log: options.log, progress: options.progress,
-            progressBase: dataWritten, pct,
-        });
+        await writeFromReader(adapter, writePos,
+            { ...meta, reader: adapter, outLen: meta.size },
+            (p) => options.progress(pct(dataWritten + meta.size * p), `${meta.kind === 'ncz' ? 'Decompressing' : 'Copying'} ${meta.inputName}...`),
+            { verify, createHash: options.createHash, cnmtHashMap: cnmtHashes, log: options.log });
 
         dataWritten += meta.size;
         options.progress(pct(dataWritten), `File ${idx + 1}/${files.length} done`);
