@@ -33,9 +33,11 @@ export function hexToBytes(hex) {
     return buf;
 }
 
+const HEXES = new Array(256).fill().map((_, i) => i.toString(16).padStart(2, '0'));
+
 export function bytesToHex(bytes) {
     let s = '';
-    for (let i = 0; i < bytes.length; i++) s += bytes[i].toString(16).padStart(2, '0');
+    for (let i = 0; i < bytes.length; i++) s += HEXES[bytes[i]];
     return s;
 }
 
