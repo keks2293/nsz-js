@@ -3,7 +3,7 @@ import { buildAdapter, buildRead, collectBlob } from './adapter.js';
 import { openContainer } from './container.js';
 import { NCZDecompressor, AdapterNCZReader, parseNczSections } from './ncz.js';
 import { decryptNcaHeader, decryptNcaSection, parseCnmtFromDecryptedSection } from './nca.js';
-import { Cnmt } from './cnmt.js';
+import { Cnmt, CONTENT_TYPE } from './cnmt.js';
 import { sha256 } from '../crypto/sha256.js';
 import { mergeRomFS } from './bktr-merge.js';
 import { FileRangeSource, NczStreamSource, ViewRangeSource, SparseNcaView } from './range-source.js';
@@ -134,16 +134,26 @@ async function rebuildCnmtNca(baseMeta, updateMeta, keys, log, mergedProgram = n
     const baseCnmt = baseMeta.cnmt;
     const updateCnmt = updateMeta.cnmt;
 
+    // Rebuilt CNMT content records come ONLY from the update CNMT; the base contributes no
+    // content records (its Program/Control/Manual/legal entries are fully replaced, so there is
+    // no merging/collapsing between base and update types — the update is authoritative). We keep
+    // only the base's titleId (below) and its extended header (PatchId/RequiredSystemVersion).
     const entries = [];
     for (const e of updateCnmt.contentEntries) {
-        if (e.type === 6) continue;
-        if (e.type === 1 && mergedProgram) {
-            entries.push(contentInfo(mergedProgram.hashHex, 1, mergedProgram.size));
+        if (e.type === CONTENT_TYPE.DELTA_FRAGMENT) continue;
+        if (e.type === CONTENT_TYPE.PROGRAM && mergedProgram) {
+            entries.push(contentInfo(mergedProgram.hashHex, CONTENT_TYPE.PROGRAM, mergedProgram.size));
             continue;
         }
-        // yanu uses type=4 for PublicData (BaseData), not type=5
-        const entryType = e.type === 5 ? 4 : e.type;
-        entries.push(contentInfo(e.hash, entryType, e.size));
+        // We carry each update content's CNMT type (B) through verbatim — no ad-hoc
+        // retyping. A proper reproduction of the repack tools (hacPack/yanu) would
+        // instead REBUILD the CNMT from NCA-header content types (scale A, 0x205) mapped
+        // to CNMT slots (scale B: programnca→1, datanca→2, controlnca→3, htmldocnca→4,
+        // legalnca→5). That classification is NOT a deterministic function of the NCA
+        // header (a Manual NCA, A=3, is recorded as B=4 or B=5 depending on the
+        // publisher/tool), so replicating it exactly needs the reference tool's slot
+        // decision — see DOC-REPACK.md. Until then we preserve the update's B as-is.
+        entries.push(contentInfo(e.hash, e.type, e.size));
     }
     log('info', `CNMT: base ${baseCnmt.titleId} v${baseCnmt.version} -> v${updateCnmt.version}, ${entries.length} contents` +
         (mergedProgram ? ` (program: merged NCA ${mergedProgram.hashHex.slice(0, 16)}...)` : ''));
@@ -229,7 +239,7 @@ async function extractNcaSections(reader, ranges, kind, keys, log) {
 
 // ── Shared helpers for BKTR streaming paths ──────────────────────────────────
 
-function collectOtherNcas(update, skipTypes = new Set([6, 1])) {
+function collectOtherNcas(update, skipTypes = new Set([CONTENT_TYPE.DELTA_FRAGMENT, CONTENT_TYPE.PROGRAM])) {
     const otherNcas = [];
     for (const e of update.cnmt.contentEntries) {
         if (skipTypes.has(e.type)) continue;
@@ -248,7 +258,7 @@ function collectOtherNcas(update, skipTypes = new Set([6, 1])) {
 
 function findProgramNcaEntry(container, label, log) {
     for (const e of container.cnmt.contentEntries) {
-        if (e.type !== 1) continue;
+        if (e.type !== CONTENT_TYPE.PROGRAM) continue;
         const src = container.entries.find(x =>
             x.name.toLowerCase().startsWith(e.ncaId) && !x.name.toLowerCase().endsWith('.cnmt.nca'));
         if (src) {

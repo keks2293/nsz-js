@@ -40,7 +40,7 @@ async function readCnmt(nsp, label) {
     console.log(`  content entries: ${cnmt.contentEntries.length}`);
     
     for (const entry of cnmt.contentEntries) {
-        const typeNames = {1:'Program', 2:'Manual', 3:'PublicData', 4:'BaseData', 5:'DeltaBaseData'};
+        const typeNames = {1:'Program', 2:'Data', 3:'Control', 4:'HtmlDocument', 5:'LegalInformation', 6:'DeltaFragment'};
         const sizeMB = (entry.size / 1048576).toFixed(1);
         console.log(`    ${typeNames[entry.type]||entry.type} ${entry.ncaId} size=${entry.size} (${sizeMB} MB)`);
     }

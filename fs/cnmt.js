@@ -1,5 +1,19 @@
 const HEXES = new Array(256).fill().map((_, i) => i.toString(16).padStart(2, '0'));
 
+// CNMT contentEntry.type (nn::ncm::ContentType; switchbrew CNMT#PackagedContentInfo@0x36).
+// Values verified against hacPack cnmt.c (cnmt_create_application: type = 0x1 Program /
+// 0x2 Data / 0x3 Control / 0x4 HtmlDocument / 0x5 LegalInformation) and
+// sinjunyoung/lh Ncm/ContentEnums.cs. Source: https://github.com/DarkMatterCore/hacPack/blob/master/cnmt.c
+export const CONTENT_TYPE = {
+    META: 0,
+    PROGRAM: 1,
+    DATA: 2,
+    CONTROL: 3,
+    HTML_DOCUMENT: 4,
+    LEGAL_INFORMATION: 5,
+    DELTA_FRAGMENT: 6,
+};
+
 function hex(bytes, reverse = false) {
     let h = '';
     if (reverse) {

@@ -444,6 +444,110 @@ This ensures the header's own hash table (which hashes all decrypted header byte
 7. Patch: htable_hash (0x408), section_hash (0x280) into decrypted header
 8. Re-encrypt header and section
 
+> **Retyping of content types (scale A→B) — NOT implemented.** Repack tools rebuild the CNMT
+> through hacPack `cnmt_create_application()` (`cnmt.c:10-79`), which assigns each entry's CNMT
+> type (scale **B**: 1 Program, 2 Data, 3 Control, 4 HtmlDocument, 5 LegalInformation,
+> 6 DeltaFragment) from the **CLI slot** the NCA is passed in as (`programnca`→1, `datanca`→2,
+> `controlnca`→3, `htmldocnca`→4, `legalnca`→5). The tool decides which slot to use based on the
+> NCA-header content type (scale **A**, `0x205`: 0 Program, 1 Meta, 2 Control, 3 Manual, 4 Data,
+> 5 PublicData). What we would need to reproduce this faithfully instead of our current
+> pass-through (which carries each update entry's B verbatim):
+>
+> 1. **Classify every update NCA by its header content type (scale A)** — not by the type
+>    already recorded in the update CNMT.
+> 2. **Map each A type to a hacPack slot**, then let the slot pick B (a Manual NCA, A=3, is
+>    placed in a specific slot and thereby becomes 4 or 5).
+>
+> **Why we do NOT do this today:** the A→B mapping is **not a deterministic function of the NCA
+> header** — a Manual NCA (A=3) is recorded as B=4 in one title and B=5 in another (verified on
+> real decrypted CNMTs: Stardew update `99636bbd…` = A=3/B=5 → B=4 in the reference yanu output;
+> LN2 update has **two** A=3 Manual NCAs, `546b1f…`=B=4 and `afa64f…`=B=5). The slot choice is a
+> decision of the publisher/tool, not derivable from the file. So a faithful reproduction needs
+> the reference tool's slot policy (and a reference output for a multi-Manual title), which we
+> don't have.
+>
+> What the source-level investigation of the reference stack (STORM SWITCH BOX) established:
+>
+> - **STORM SWITCH BOX contains no repack source** — it only bundles third-party binaries under
+>   `tools/com.github.nozwock.yanu/` (`yanu-cli.exe`, `hacpack.exe`, …) and shells out to them
+>   (`HardPatchEngine.cs` runs `yanu-cli update --base … --update …`; `MultiContentService.cs`
+>   runs `hacpack.exe … --type nca`). So the "fork source" is not public in the repo or anywhere
+>   on GitHub.
+> - **Stock `nozwock/yanu` 0.10.1 does NOT put Manual in the CNMT at all.** Its `create_meta()`
+>   (`crates/hac/src/vfs/nca.rs:284-315`) passes hacPack **only** `--programnca` + `--controlnca`;
+>   there is no `--htmldocnca`/`--legalnca` anywhere in its source, and no GitHub fork adds them.
+>   Its rebuilt CNMT therefore has **only Program(1)+Control(3)** — the Manual NCA travels to the
+>   output NSP as a member but is **absent from the CNMT**.
+> - The reference `…updated in yanu.nsp` (built by StormBox's yanu-cli) nevertheless contains a
+>   **third** record, the Manual NCA `99636bbd…` as **B=4 (HtmlDocument)**, whereas the source
+>   update CNMT carried it as **B=5 (LegalInformation)**. So that binary is a **modified yanu**
+>   that feeds the Manual into hacPack's `htmldocnca` slot → B=4.
+> - **Confirmed from the installed client's own operation log** (`STORM_SWITCH_BOX_4.1.2
+>   /history.json`, the Stardew "Update" run). The logged pipeline for the exact reference that
+>   built our `…updated in yanu.nsp` is: `yanu-cli` (logs `version="0.10.1"`, but that is the
+>   untouched version **string** — the binary is modified) → `hacPack v1.36 by The-4n`. Output
+>   NSP members, in order: `8dc3f778…` (merged Program), `99636bbd…` (the **update Manual**),
+>   `af613c75…` (update Control), `ee048d85…cnmt.nca` (rebuilt meta under **base** titleId
+>   `…8000`). The meta step is `cnmt_create_application` (`Application_0100e65002bb8000.cnmt`),
+>   i.e. the slot-based `cnmt.c` we studied. The Program hash `8dc3f778…` + Control `af613c75…`
+>   + Manual `99636bbd…` exactly match the three records in our reference CNMT — same run. Since
+>   stock yanu never copies the update Manual into `nca_dir` (filter is `{Program, Control}`) and
+>   never passes `--htmldocnca`, **both the Manual-in-NSP and the Manual-in-CNMT-as-4 are
+>   modifications** the private binary adds.
+>
+> Net effect for us: our pass-through (Manual kept as B=5) matches **neither** stock yanu (2
+> records, no Manual) **nor** the modified reference (B=4). Both alternatives need the tool's slot
+> policy, so until we have a reference for the general (esp. multi-Manual) case we **keep the
+> update's B types verbatim** (only merging the Program entry and dropping Delta) — the earlier
+> ad-hoc `5→4` (Legal→Html) rewrite was removed because it was an over-specific reproduction of
+> one reference case, not the actual mechanism.
+
+#### Why a `5→4` retype was dropped — grounded in the full internet CNMT database
+
+The CNMT `contentEntry.type` (scale **B**: 1 Program, 3 Control, 4 HtmlDocument, 5
+LegalInformation, 6 DeltaFragment) of *source* update NCAs is not what we ship. Repack tools
+rebuild the meta CNMT through hacPack `cnmt_create_application`, which **stamps `entry.type` from
+the CLI slot** the NCA is passed in as (`htmldocnca`→4, `legalnca`→5). Our very first rebuild
+emulated that with a hard-coded heuristic **`LegalInformation(5)→HtmlDocument(4)`** — it reproduced
+exactly one reference case (Stardew: the update Manual `99636bbd…` is B=5 in the source, B=4 in the
+yanu reference) but was a guess at the mechanism, not the mechanism.
+
+To test whether that mapping is real we pulled the **complete CNMT database** from
+`blawar/titledb` ([link](https://github.com/blawar/titledb/blob/master/cnmts.json) — `cnmts.json`,
+39,671 titleIds / 13,467 patch titles, gathered from the Nintendo CDN) and counted
+`contentEntry.type` across **every** patch-title (`id` ending `…800`) and every version:
+
+| Statistic (13,467 patch titles) | Value |
+|---|---|
+| Updates **with** a Manual (type 4 or 5) | **13,467 (100%)** |
+| Updates **without** any Manual | **0 (0%)** |
+| Updates with type 5 (LegalInformation) in latest | 13,466 |
+| Updates with type 4 (HtmlDocument) in latest | 1,740 (1,739 of them *also* have 5) |
+| Updates with BOTH 4 and 5 at once | 1,739 |
+| Updates with Delta fragments (type 6, any version) | 3,623 (~27%) |
+
+Local cross-check: our own decrypted files agree — Stardew / Chicken / Trackline update =
+Program+Control+Legal(5); LN2 = Program+Control+Html(4)+Legal(5); LN2 DLC = Data(2) only.
+
+**Conclusions that drive the code:**
+
+- **Why we do NOT do `5→4` (keep the update's B verbatim).** A→B is **not a deterministic
+  function of the NCA header**: a Manual NCA (scale A=3) is recorded B=4 in LN2 `546b1f…` and B=5
+  in Stardew `99636bbd…`/LN2 `afa64f…`, and the database shows **both** 4 and 5 can coexist in one
+  title (1,739 titles). `5→4` therefore happens to match Stardew only by picking the rarer choice
+  (type 4: 1,740 vs type 5: 13,466) and would turn a title's Legal into an Html for no reason. The
+  original publisher's B is already the slot output; reproducing the reference tool's *slot choice*
+  is impossible without knowing its private per-NCA slot policy — so we **pass through** each
+  update entry's B unchanged (only merging Program, dropping Delta). That is what `rebuildCnmtNca`
+  now does.
+- **Why we can leave the base Manual out when the update has one.** Every real update (13,467/100%)
+  ships its own Manual, and the console's **replace-by-type** rule means an update Manual replaces
+  the base one (Stardew reference keeps update `99636bbd…`, drops base `47499eec…`). Since a genuine
+  update always carries a Manual, our `collectOtherNcas()`, which reads contents **only from the
+  update**, correctly keeps the update Manual and there is **no real case where a base Manual should
+  be pulled in** — the "update has no Manual → keep base Manual" branch never triggers on genuine
+  data (it would only matter for stock-yanu-style rebuilds that discard the Manual entirely).
+
 ### Output NSP assembly
 
 The output NSP contains:
@@ -680,7 +784,7 @@ Output: 701,770,512 B / 4 members — same size as the yanu reference
 CNMT entries:
   type=1 ncaId=6e41adaf… size=699123712 (merged Program)
   type=3 ncaId=af613c75… size=2476032 (Control)
-  type=5 ncaId=99636bbd… size=166400 (PublicData)
+  type=5 ncaId=99636bbd… size=166400 (Manual — CNMT type 5 = LegalInformation, carried verbatim from the update; no ad-hoc 5→4 retype)
 
 Merged Program NCA structure:
   Header: cryptoType=0 (plaintext), keyIndex=0, XTS-encrypted header, zero sigs

@@ -3,11 +3,9 @@ import { decryptNcaHeader, readCnmtFromMeta } from './nca.js';
 import { Ticket } from './ticket.js';
 import { buildAdapter, collectBlob, copyRange } from './adapter.js';
 import { isMetaNca } from './nca-utils.js';
+import { CONTENT_TYPE } from './cnmt.js';
 
 const META_TYPE_LABELS = { 0x80: 'base', 0x81: 'update', 0x82: 'dlc' };
-
-const CONTENT_TYPE_META = 0;
-const CONTENT_TYPE_DELTA_FRAGMENT = 6;
 
 const ZERO_RIGHTS_ID = '0'.repeat(32);
 
@@ -93,7 +91,7 @@ export async function splitNSP(reader, keys, outputFactory, options = {}) {
 
         const missing = [];
         for (const content of cnmt.contentEntries) {
-            if (content.type === CONTENT_TYPE_META || content.type === CONTENT_TYPE_DELTA_FRAGMENT) continue;
+            if (content.type === CONTENT_TYPE.META || content.type === CONTENT_TYPE.DELTA_FRAGMENT) continue;
             const ref = ncaEntries.get(content.ncaId);
             if (ref) {
                 if (!members.includes(ref)) members.push(ref);
