@@ -6,11 +6,6 @@ import { openContainer } from './container.js';
 import { writeFromReader } from './convert-common.js';
 import { formatBytes } from './format.js';
 
-function stem(name) {
-    const dot = name.lastIndexOf('.');
-    return dot === -1 ? name : name.slice(0, dot);
-}
-
 export async function mergeNSP(readers, output, options = {}) {
     const { log = () => {}, progress = () => {}, nodelta = false, keys = null } = options;
 
@@ -69,7 +64,7 @@ export async function mergeNSP(readers, output, options = {}) {
         const entries = inputInfo.entries;
 
         for (const f of entries) {
-            const ncaStem = stem(f.outputName);
+            const ncaStem = f.outputName.slice(0, f.outputName.lastIndexOf('.'));
 
             if (seenNames.has(f.outputName)) continue;
 

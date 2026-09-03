@@ -5,11 +5,6 @@ import { KeysParser } from '../keys.js';
 import { PFS0 } from '../fs/pfs0.js';
 import { decryptNcaHeader, readCnmtFromMeta } from '../fs/nca.js';
 
-function stem(name) {
-    const dot = name.lastIndexOf('.');
-    return dot === -1 ? name : name.slice(0, dot);
-}
-
 function hex(b) {
     return Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
 }
