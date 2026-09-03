@@ -5,6 +5,7 @@ import { decryptNcaHeader, readCnmtFromMeta } from './nca.js';
 import { openContainer } from './container.js';
 import { writeFromReader } from './convert-common.js';
 import { formatBytes } from './format.js';
+import { isMetaNca } from './nca-utils.js';
 
 export async function mergeNSP(readers, output, options = {}) {
     const { log = () => {}, progress = () => {}, nodelta = false, keys = null } = options;
@@ -38,7 +39,7 @@ export async function mergeNSP(readers, output, options = {}) {
                 const raw = await r.reader.read(e.offset, Math.min(e.size, 0xC00));
                 header = decryptNcaHeader(raw, keys);
             } catch (_e) {}
-            if (!header || header.contentType !== 1) continue;
+            if (!isMetaNca(header)) continue;
             let cnmt = null;
             try {
                 cnmt = await readCnmtFromMeta(r.reader, e, header);

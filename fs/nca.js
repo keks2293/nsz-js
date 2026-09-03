@@ -1,7 +1,7 @@
 import { AesCtr, AesXts } from '../crypto/aes-ops.mjs';
 import { PFS0 } from './pfs0.js';
 import { Cnmt } from './cnmt.js';
-import { toKeyBytes, deriveTitlekeyFromKeyArea, bytesToHex } from './nca-utils.js';
+import { toKeyBytes, deriveTitlekeyFromKeyArea, bytesToHex, isMetaNca } from './nca-utils.js';
 
 const FsType = Object.freeze({ NONE: 0, PFS0: 2, ROMFS: 3 });
 
@@ -152,7 +152,7 @@ export async function decryptNcaSection(data, section) {
 }
 
 export async function readCnmtFromMeta(reader, entry, header) {
-    if (header.contentType !== 1) return null;
+    if (!isMetaNca(header)) return null;
     const section = header.sections[0];
     if (!section) return null;
 

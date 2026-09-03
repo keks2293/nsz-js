@@ -2,6 +2,7 @@ import { PFS0, PFS0Writer } from './pfs0.js';
 import { decryptNcaHeader, readCnmtFromMeta } from './nca.js';
 import { Ticket } from './ticket.js';
 import { buildAdapter, collectBlob, copyRange } from './adapter.js';
+import { isMetaNca } from './nca-utils.js';
 
 const META_TYPE_LABELS = { 0x80: 'base', 0x81: 'update', 0x82: 'dlc' };
 
@@ -72,7 +73,7 @@ export async function splitNSP(reader, keys, outputFactory, options = {}) {
     const titleGroups = [];
     for (const [name, metaEntry] of ncaEntries) {
         const header = parsedHeaders.get(metaEntry);
-        if (!header || header.contentType !== 1) continue;
+        if (!isMetaNca(header)) continue;
 
         let cnmt = null;
         try {

@@ -8,7 +8,7 @@ import { sha256 } from '../crypto/sha256.js';
 import { mergeRomFS } from './bktr-merge.js';
 import { FileRangeSource, NczStreamSource, ViewRangeSource, SparseNcaView } from './range-source.js';
 import { preparePlaintextProgramNca, writePlaintextProgramNca, packProgramNcaStream, computeProgramNcaContentId, writeProgramNcaTwoPass, extractExefsStream, extractRomfsStream, createExefsAcidFilter, packMetaNca, extractExefs, extractRomfs, processNpdmAcid, computeProgramNcaLayout } from './nca-pack.js';
-import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE, decryptNcaHeaderBytes, findRomfsFsHeader } from './nca-utils.js';
+import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE, decryptNcaHeaderBytes, findRomfsFsHeader, isMetaNca } from './nca-utils.js';
 import { writeFromReader } from './convert-common.js';
 
 function u32le(v) {
@@ -108,7 +108,7 @@ function contentInfo(hashHex, type, size) {
 async function readCnmtNca(reader, entry, keys) {
     const raw = await reader.read(entry.offset, entry.size);
     const header = decryptNcaHeader(raw.subarray(0, Math.min(entry.size, 0xC00)), keys);
-    if (!header || header.contentType !== 1) return null;
+    if (!isMetaNca(header)) return null;
     const section = header.sections[0];
     if (!section) return null;
     const data = await reader.read(entry.offset + section.offset, section.size);

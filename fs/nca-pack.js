@@ -2,7 +2,7 @@ import { AesXts, AesCtr } from '../crypto/aes-ops.mjs';
 import { AesEcb } from '../crypto/aes128.js';
 import { sha256, SHA256, digest32 } from '../crypto/sha256.js';
 import { PFS0, PFS0Writer } from './pfs0.js';
-import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE, toKeyBytes, decryptNcaHeaderBytes, resolveTitlekey, reversedSectionCtr, findRomfsFsHeader, MAGIC_IVFC, IVFC_HEADER_SIZE, IVFC_ID, IVFC_MASTER_HASH_SIZE, IVFC_NUM_LEVELS, IVFC_BLOCK_SIZE_LOG2, IVFC_HASH_BLOCK_SIZE, IVFC_HASH_SIZE, IVFC_LEVELS_OFFSET, IVFC_MASTER_HASH_OFFSET, IVFC_MAX_LEVEL, IVFC_LEVEL_HDR } from './nca-utils.js';
+import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE, toKeyBytes, decryptNcaHeaderBytes, resolveTitlekey, reversedSectionCtr, findRomfsFsHeader, MAGIC_IVFC, IVFC_HEADER_SIZE, IVFC_ID, IVFC_MASTER_HASH_SIZE, IVFC_NUM_LEVELS, IVFC_BLOCK_SIZE_LOG2, IVFC_HASH_BLOCK_SIZE, IVFC_HASH_SIZE, IVFC_LEVELS_OFFSET, IVFC_MASTER_HASH_OFFSET, IVFC_MAX_LEVEL, IVFC_LEVEL_HDR, CONTENT_TYPE } from './nca-utils.js';
 
 // Yanu update pipeline uses only:
 //   PROGRAM (--plaintext) → ExeFS + RomFS, CRYPT_NONE sections ✅
@@ -33,8 +33,6 @@ function pad4000(n) {
 const FS_TYPE = { ROMFS: 0x00, PFS0: 0x01 };
 const HASH_TYPE = { PFS0: 0x02, ROMFS: 0x03 };
 const CRYPT = { NONE: 0x01, CTR: 0x03 };
-// content_type field: 0=Program, 1=Meta (hacPack nca.c:249,617).
-const CONTENT_TYPE = { PROGRAM: 0x00, META: 0x01 };
 
 // ── PFS0 constants (hacpack pfs0.h) ───────────────────────────────────────────
 const PFS0_EXEFS_HASH_BLOCK_SIZE = 0x10000;
