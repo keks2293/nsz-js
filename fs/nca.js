@@ -1,7 +1,7 @@
 import { AesCtr, AesXts } from '../crypto/aes-ops.mjs';
 import { PFS0 } from './pfs0.js';
 import { Cnmt } from './cnmt.js';
-import { toKeyBytes, deriveTitlekeyFromKeyArea } from './nca-utils.js';
+import { toKeyBytes, deriveTitlekeyFromKeyArea, bytesToHex } from './nca-utils.js';
 
 const FsType = Object.freeze({ NONE: 0, PFS0: 2, ROMFS: 3 });
 
@@ -37,13 +37,13 @@ export class NCAHeader {
         const size = Number(view.getBigUint64(0x208, true));
 
         const titleIdBytes = arr.slice(0x210, 0x218);
-        const titleId = Array.from(titleIdBytes).reverse().map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+        const titleId = bytesToHex(titleIdBytes.reverse()).toUpperCase();
 
         const contentIndex = view.getUint32(0x218, true);
         const sdkVersion = view.getUint32(0x21C, true);
         const cryptoType2 = view.getUint8(0x220);
 
-        const rightsId = Array.from(arr.slice(0x230, 0x240)).map(b => b.toString(16).padStart(2, '0')).join('');
+        const rightsId = bytesToHex(arr.slice(0x230, 0x240));
 
         const sectionTables = [];
         for (let i = 0; i < 4; i++) {

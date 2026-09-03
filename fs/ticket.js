@@ -1,3 +1,5 @@
+import { bytesToHex } from './nca-utils.js';
+
 export class Ticket {
     static parse(buffer) {
         const view = new DataView(buffer);
@@ -42,22 +44,22 @@ export class Ticket {
         offset += 0xE;
 
         const ticketIdBytes = new Uint8Array(buffer.slice(offset, offset + 8));
-        const ticketId = Array.from(ticketIdBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        const ticketId = bytesToHex(ticketIdBytes);
         offset += 8;
 
         const deviceIdBytes = new Uint8Array(buffer.slice(offset, offset + 8));
-        const deviceId = Array.from(deviceIdBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        const deviceId = bytesToHex(deviceIdBytes);
         offset += 8;
 
         const rightsIdBytes = new Uint8Array(buffer.slice(offset, offset + 16));
-        const rightsId = Array.from(rightsIdBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        const rightsId = bytesToHex(rightsIdBytes);
         offset += 16;
 
         const accountId = view.getUint32(offset, false);
 
         const titleId = rightsId.substring(0, 16);
         const masterKeyRevision = parseInt(rightsId.charAt(18) || '0', 16);
-        const titleKey = Array.from(titleKeyBlock).map(b => b.toString(16).padStart(2, '0')).join('');
+        const titleKey = bytesToHex(titleKeyBlock);
 
         return {
             signatureType,

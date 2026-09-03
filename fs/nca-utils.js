@@ -33,6 +33,12 @@ export function hexToBytes(hex) {
     return buf;
 }
 
+export function bytesToHex(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += bytes[i].toString(16).padStart(2, '0');
+    return s;
+}
+
 export function writeU64LE(buf, offset, value) {
     const n = typeof value === 'bigint' ? value : BigInt(value);
     const view = new DataView(buf.buffer, buf.byteOffset + offset, 8);
@@ -84,7 +90,7 @@ export function extractTitlekeyFromTik(tikData, keys, expectedRightsId = null) {
     if (!titlekek) return null;
     if (expectedRightsId) {
         const rid = tikData.subarray(0x2A0, 0x2B0);
-        const ridStr = Array.from(rid).map(b => b.toString(16).padStart(2, '0')).join('');
+        const ridStr = bytesToHex(rid);
         if (ridStr.toLowerCase() !== expectedRightsId.toLowerCase()) return null;
     }
     return new AesEcb(toKeyBytes(titlekek)).decrypt(tikData.subarray(0x180, 0x190));
