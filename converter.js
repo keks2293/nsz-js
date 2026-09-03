@@ -8,6 +8,7 @@ import { convertXCZ } from './fs/xcz-convert.js';
 import { mergeNSP } from './fs/merge.js';
 import { update } from './fs/update.js';
 import { splitNSP as splitNSPFile } from './fs/split.js';
+import { formatBytes } from './fs/format.js';
 
 class FileSliceReader extends DataReader {
     constructor(file, baseOffset = 0, totalLength = null) {
@@ -48,14 +49,6 @@ class NSZConverter {
             console.error('Failed to parse keys:', e);
             return false;
         }
-    }
-
-    formatBytes(bytes) {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
     async decompressNSZtoNSP(file, options = {}) {

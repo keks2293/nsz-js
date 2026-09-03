@@ -1,5 +1,6 @@
 import { NSZConverter } from './converter.js';
 import { SWDownloader } from './sw-downloader.js';
+import { formatBytes } from './fs/format.js';
 
 // The SW stream is sequential and the main thread never observes the actual
 // delivered byte count — the success log shows the *expected* size. Compare the
@@ -89,14 +90,6 @@ async function main() {
     const files = [];
     const fileStatus = [];
     let converting = false;
-
-    function formatBytes(bytes) {
-        if (bytes === 0) return '0 B';
-        const k = 1024;
-        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-    }
 
     function isCompressedGame(name) {
         const lower = name.toLowerCase();

@@ -11,6 +11,7 @@ import { extractContentHashMap } from './fs/cnmt-hashes.js';
 import { mergeNSP as mergeNSPFile } from './fs/merge.js';
 import { splitNSP as splitNSPFile } from './fs/split.js';
 import { update as updateFile } from './fs/update.js';
+import { formatBytes } from './fs/format.js';
 
 class FileDescriptorReader extends DataReader {
     constructor(fd, baseOffset = 0, totalLength = null) {
@@ -36,14 +37,6 @@ class FileDescriptorReader extends DataReader {
 
 function makeExtractCnmtHashMap(keys) {
     return (cnmtData) => extractContentHashMap(cnmtData, keys);
-}
-
-function formatBytes(bytes) {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
 async function main() {

@@ -4,18 +4,11 @@ import { parseNczSections, AdapterNCZReader } from './ncz.js';
 import { decryptNcaHeader, readCnmtFromMeta } from './nca.js';
 import { openContainer } from './container.js';
 import { writeFromReader } from './convert-common.js';
+import { formatBytes } from './format.js';
 
 function stem(name) {
     const dot = name.lastIndexOf('.');
     return dot === -1 ? name : name.slice(0, dot);
-}
-
-function formatBytes(bytes) {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
 export async function mergeNSP(readers, output, options = {}) {
