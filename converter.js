@@ -53,7 +53,7 @@ class NSZConverter {
 
     async decompressNSZtoNSP(file, options = {}) {
         const { onProgress = () => {}, onLog = () => {}, writable = null, fixPadding = false, verify = false } = options;
-        onLog('info', `Processing: ${file.name} (${this.formatBytes(file.size)})`);
+        onLog('info', `Processing: ${file.name} (${formatBytes(file.size)})`);
         await this.init();
 
         const fileReader = new FileSliceReader(file, 0, file.size);
@@ -72,7 +72,7 @@ class NSZConverter {
 
         onProgress(1.0, 'Done!');
         const outputName = file.name.replace(/\.nsz$/i, '.nsp');
-        onLog('success', `Output: ${outputName} (${this.formatBytes(result.size)})`);
+        onLog('success', `Output: ${outputName} (${formatBytes(result.size)})`);
         return { blob: result.blob || null, name: outputName, size: result.size, writable: !!writable };
     }
 
@@ -95,7 +95,7 @@ class NSZConverter {
 
         onProgress(1.0, 'Done!');
         const outputName = file.name.replace(/\.xcz$/i, '.xci');
-        onLog('success', `Output: ${outputName} (${this.formatBytes(result.size)})`);
+        onLog('success', `Output: ${outputName} (${formatBytes(result.size)})`);
         return { blob: result.blob || null, name: outputName, size: result.size, writable: !!writable };
     }
 
@@ -118,7 +118,7 @@ class NSZConverter {
 
         onProgress(1.0, 'Done!');
         const outputName = files[0].name.replace(/\.(nsp|nsz|xci|xcz)$/i, '') + '_merged.nsp';
-        onLog('success', `Output: ${outputName} (${this.formatBytes(result.size)}), ${result.memberCount} members`);
+        onLog('success', `Output: ${outputName} (${formatBytes(result.size)}), ${result.memberCount} members`);
         return { blob: result.blob || null, name: outputName, size: result.size, memberCount: result.memberCount, writable: !!writable };
     }
 
@@ -149,7 +149,7 @@ class NSZConverter {
 
         onProgress(1.0, 'Done!');
         const outputName = files[0].name.replace(/\.(nsp|nsz|xci|xcz)$/i, '') + '_updated.nsp';
-        onLog('success', `Output: ${outputName} (${this.formatBytes(result.size)}), ${result.memberCount} members`);
+        onLog('success', `Output: ${outputName} (${formatBytes(result.size)}), ${result.memberCount} members`);
         return { blob: result.blob || null, name: outputName, size: result.size, memberCount: result.memberCount, writable: !!writable };
     }
 
