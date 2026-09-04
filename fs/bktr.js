@@ -2,8 +2,7 @@
 // Reference: SciresM/hactool (nca.c, bktr.h) + switchbrew.org/wiki/NCA
 
 import { AesEcb } from '../crypto/aes128.js';
-import { AesCtr } from '../crypto/aes-ops.mjs';
-import { hexToBytes, readLeU32, readLeU64, reversedSectionCtr, fsHeaderAt } from './nca-utils.js';
+import { hexToBytes, readLeU32, readLeU64 } from './nca-utils.js';
 
 
 export function parseBktrHeader(fsHdr, offset) {
@@ -47,11 +46,6 @@ export async function decryptBktrTableData(cipher, titlekey, nonce, absOffset) {
     }
 
     return result;
-}
-
-// Decrypt a BKTR table region located at absOffset within a full NCA buffer.
-export async function decryptBktrTable(ncaData, titlekey, nonce, absOffset, size) {
-    return decryptBktrTableData(ncaData.subarray(absOffset, absOffset + size), titlekey, nonce, absOffset);
 }
 
 // Parse relocation block per hactool bktr.h bktr_relocation_block_t
@@ -108,19 +102,6 @@ export function parseSubsectionBlock(block) {
     return { totalSize, entries };
 }
 
-export function findRelocEntry(entries, virtOffset) {
-    let lo = 0, hi = entries.length - 1;
-    while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        if (entries[mid].virtOffset > virtOffset) hi = mid - 1;
-        else lo = mid + 1;
-    }
-    if (hi < 0) return null;
-    const nextVirt = hi + 1 < entries.length ? entries[hi + 1].virtOffset : Infinity;
-    if (virtOffset < nextVirt) return entries[hi];
-    return null;
-}
-
 export function findSubsectionEntry(entries, physOffset) {
     const idx = subEntryIdx(entries, physOffset);
     if (idx < 0) return null;
@@ -138,32 +119,6 @@ export function subEntryIdx(entries, physOffset) {
     const nextOff = hi + 1 < entries.length ? entries[hi + 1].offset : Infinity;
     if (physOffset < nextOff) return hi;
     return -1;
-}
-
-// Build AesCtrEx counter block per hactool's nca_update_bktr_ctr
-// counter[0:4] = section_ctr[0:4] (first 4 bytes as-is, NOT reversed)
-// counter[4:8] = ctr_val LE
-// counter[8:16] = block_index BE (ofs / 16, where ofs is absolute offset in NCA)
-export function buildAesCtrExCounter(sectionCtr, ctrVal, fileOffset) {
-    const ctr = new Uint8Array(16);
-    // ctr[0:4] = section_ctr[0:4] as-is (matches hactool)
-    ctr[0] = sectionCtr[0];
-    ctr[1] = sectionCtr[1];
-    ctr[2] = sectionCtr[2];
-    ctr[3] = sectionCtr[3];
-    // ctr[4:8] = ctr_val LE
-    ctr[4] = ctrVal & 0xFF;
-    ctr[5] = (ctrVal >> 8) & 0xFF;
-    ctr[6] = (ctrVal >> 16) & 0xFF;
-    ctr[7] = (ctrVal >> 24) & 0xFF;
-    // ctr[8:16] = block_index BE
-    const blockIndex = Math.floor(fileOffset / 16);
-    let tmp = blockIndex;
-    for (let j = 15; j >= 8; j--) {
-        ctr[j] = tmp & 0xFF;
-        tmp >>= 8;
-    }
-    return ctr;
 }
 
 // Decrypt a patch region using AesCtrEx
@@ -214,11 +169,6 @@ export async function decryptPatchRegionData(cipher, titlekey, secureValue, subE
     return result;
 }
 
-// Decrypt a patch region located at fileOffset within a full NCA buffer.
-export async function decryptPatchRegion(ncaData, titlekey, secureValue, subEntry, fileOffset, size) {
-    return decryptPatchRegionData(ncaData.subarray(fileOffset, fileOffset + size), titlekey, secureValue, subEntry, fileOffset);
-}
-
 // Load titlekeys from file (format: rights_id = titlekey)
 // Returns Map<rights_id_string, Uint8Array>
 export async function loadTitlekeysFile(path) {
@@ -250,16 +200,4 @@ export function lookupTitlekeyFromDatabase(rightsId, titlekeysMap) {
     // rightsId should be 32-char hex string
     const rid = rightsId.toLowerCase().replace(/\s/g, '');
     return titlekeysMap.get(rid) || null;
-}
-
-// Decrypt base romfs section using AES-CTR with titlekey
-export async function decryptBaseRomfs(baseNcaData, baseRomfsSecMeta, baseDecHeader, baseTitlekey) {
-    const baseFsHdr = fsHeaderAt(baseDecHeader, baseRomfsSecMeta.secIdx);
-    const baseNonce = reversedSectionCtr(baseFsHdr);
-
-    const c = new AesCtr(baseTitlekey, baseNonce);
-    c.seek(baseRomfsSecMeta.offset);
-    return await c.decrypt(
-        baseNcaData.subarray(baseRomfsSecMeta.offset, baseRomfsSecMeta.offset + baseRomfsSecMeta.size)
-    );
 }
