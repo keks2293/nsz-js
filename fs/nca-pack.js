@@ -2,7 +2,7 @@ import { AesXts, AesCtr } from '../crypto/aes-ops.mjs';
 import { AesEcb } from '../crypto/aes128.js';
 import { sha256, SHA256, digest32 } from '../crypto/sha256.js';
 import { PFS0, PFS0Writer } from './pfs0.js';
-import { hexToBytes, writeU64LE, writeU32LE, readLeU64, fsHeaderAt, sectionMedia, NCA_HEADER_SIZE, toKeyBytes, decryptNcaHeaderBytes, resolveTitlekey, reversedSectionCtr, findRomfsFsHeader, MAGIC_IVFC, IVFC_HEADER_SIZE, IVFC_ID, IVFC_MASTER_HASH_SIZE, IVFC_NUM_LEVELS, IVFC_BLOCK_SIZE_LOG2, IVFC_HASH_BLOCK_SIZE, IVFC_HASH_SIZE, IVFC_LEVELS_OFFSET, IVFC_MASTER_HASH_OFFSET, IVFC_MAX_LEVEL, IVFC_LEVEL_HDR, NCA_CONTENT_TYPE } from './nca-utils.js';
+import { hexToBytes, writeU64LE, writeU32LE, readLeU64, fsHeaderAt, sectionMedia, NCA_HDR, FS_HDR, NCA_HEADER_SIZE, toKeyBytes, decryptNcaHeaderBytes, resolveTitlekey, reversedSectionCtr, findRomfsFsHeader, MAGIC_IVFC, IVFC_HEADER_SIZE, IVFC_ID, IVFC_MASTER_HASH_SIZE, IVFC_NUM_LEVELS, IVFC_BLOCK_SIZE_LOG2, IVFC_HASH_BLOCK_SIZE, IVFC_HASH_SIZE, IVFC_LEVELS_OFFSET, IVFC_MASTER_HASH_OFFSET, IVFC_MAX_LEVEL, IVFC_LEVEL_HDR, NCA_CONTENT_TYPE } from './nca-utils.js';
 
 // Yanu update pipeline uses only:
 //   PROGRAM (--plaintext) → ExeFS + RomFS, CRYPT_NONE sections ✅
@@ -296,22 +296,22 @@ function buildRomfsFsHeader(cryptType) { return buildFsHeader(FS_TYPE.ROMFS, HAS
 // ── Shared NCA header helpers ────────────────────────────────────────────────
 
 // Fill PFS0 superblock fields in an ExeFS/RomFS FsHeader.
-// Offsets: 0x08=master_hash, 0x28=block_size, 0x2C=always_2,
-// 0x38=hash_table_size, 0x40=pfs0_offset, 0x48=pfs0_size.
+// Offsets: FS_HDR.HASH_DATA=master_hash, 0x28=block_size, 0x2C=always_2,
+// 0x38=hash_table_size, FS_HDR.PFS0_OFFSET=pfs0_offset, FS_HDR.PFS0_SIZE=pfs0_size.
 function fillPfs0Superblock(fh, masterHash, { blockSize, hashTableSize, pfs0Offset, pfs0Size }) {
     const ev = new DataView(fh.buffer);
-    fh.set(masterHash, 0x08);
+    fh.set(masterHash, FS_HDR.HASH_DATA);
     ev.setUint32(0x28, blockSize, true);
     ev.setUint32(0x2C, 2, true);
     ev.setBigUint64(0x38, BigInt(hashTableSize), true);
-    ev.setBigUint64(0x40, BigInt(pfs0Offset), true);
-    ev.setBigUint64(0x48, BigInt(pfs0Size), true);
+    ev.setBigUint64(FS_HDR.PFS0_OFFSET, BigInt(pfs0Offset), true);
+    ev.setBigUint64(FS_HDR.PFS0_SIZE, BigInt(pfs0Size), true);
 }
 
 // Compute section hashes (sha256 of each 0x200-byte FsHeader) and place in NCA header.
 function fillSectionHashes(header) {
-    header.set(digest32(header.subarray(0x400, 0x600)), 0x280);
-    header.set(digest32(header.subarray(0x600, 0x800)), 0x2A0);
+    header.set(digest32(header.subarray(NCA_HDR.FS_HEADERS, NCA_HDR.FS_HEADERS + NCA_HDR.FS_HEADER_SIZE)), NCA_HDR.SECTION_HASHES);
+    header.set(digest32(header.subarray(NCA_HDR.FS_HEADERS + NCA_HDR.FS_HEADER_SIZE, NCA_HDR.FS_HEADERS + 2 * NCA_HDR.FS_HEADER_SIZE)), NCA_HDR.SECTION_HASHES + 0x20);
 }
 
 // XTS-encrypt the NCA header with header_key.
@@ -367,37 +367,37 @@ function buildNcaHeader(titleId, sections, keys, contentType = NCA_CONTENT_TYPE.
     const header = new Uint8Array(NCA_HEADER_SIZE);
 
     // fixed_key_sig + npdm_key_sig = all zeros (The-4n/hacPack default)
-    header.fill(0, 0, 0x200);
+    header.fill(0, NCA_HDR.SIGNATURE_FIXED, NCA_HDR.SIGNATURE_NPDM);
 
     // Magic: "NCA3"
-    header[0x200] = 0x4E; header[0x201] = 0x43; header[0x202] = 0x41; header[0x203] = 0x33;
+    header[NCA_HDR.MAGIC] = 0x4E; header[NCA_HDR.MAGIC + 1] = 0x43; header[NCA_HDR.MAGIC + 2] = 0x41; header[NCA_HDR.MAGIC + 3] = 0x33;
     // distribution = 0 (not gamecard)
-    header[0x204] = 0x00;
+    header[NCA_HDR.DISTRIBUTION] = 0x00;
     // content_type (NCA_CONTENT_TYPE)
-    header[0x205] = contentType;
-    // crypto_type(0x206)/kaek_ind(0x207)/crypto_type2(0x220) stay zero — keygen 1
+    header[NCA_HDR.CONTENT_TYPE] = contentType;
+    // crypto_type/kaek_ind/crypto_type2 stay zero — keygen 1
     // (keygen policy above; fresh buffer)
     // title_id (big-endian u64)
     const tidBytes = hexToBytes(titleId.toLowerCase());
     const tidRev = new Uint8Array(8);
     for (let i = 0; i < 8; i++) tidRev[i] = tidBytes[7 - i];
-    header.set(tidRev, 0x210);
+    header.set(tidRev, NCA_HDR.TITLE_ID);
     // sdk_version (hacpack main.c:116 default)
     const hv = new DataView(header.buffer, header.byteOffset);
-    hv.setUint32(0x21C, SDK_VERSION, true);
-    // rights_id [0x230..0x240) stays zero (fresh buffer, no titlekey)
+    hv.setUint32(NCA_HDR.SDK_VERSION, SDK_VERSION, true);
+    // rights_id stays zero (fresh buffer, no titlekey)
 
     // Section entries
     const validSecs = sections.filter(s => s.size > 0);
     for (let i = 0; i < validSecs.length; i++) {
-        const base = 0x240 + i * 0x10;
+        const base = NCA_HDR.SECTIONS + i * NCA_HDR.SECTION_ENTRY_SIZE;
         const sec = validSecs[i];
-        writeU32LE(header, base, Math.floor(sec.offset / 0x200));
-        writeU32LE(header, base + 4, Math.floor(sec.endOffset / 0x200));
+        writeU32LE(header, base, Math.floor(sec.offset / NCA_HDR.MEDIA_BLOCK_SIZE));
+        writeU32LE(header, base + 4, Math.floor(sec.endOffset / NCA_HDR.MEDIA_BLOCK_SIZE));
         header[base + 8] = 0x01; // _0x8[0] = 1 (hacPack always sets this)
     }
 
-    // Section hashes [0x280..0x300): stay zero here — fillSectionHashes()
+    // Section hashes [NCA_HDR.SECTION_HASHES..): stay zero here — fillSectionHashes()
     // writes slots 0/1 later; slots 2/3 remain zero (fresh buffer).
 
     // Key area: encrypted_keys[4][0x10]
@@ -412,9 +412,9 @@ function buildNcaHeader(titleId, sections, keys, contentType = NCA_CONTENT_TYPE.
         const chunk = keyBlock.subarray(blk * 0x10, (blk + 1) * 0x10);
         encKeyBlock.set(ecb.encrypt(chunk), blk * 0x10);
     }
-    header.set(encKeyBlock, 0x300);
+    header.set(encKeyBlock, NCA_HDR.KEY_AREA);
 
-    // _0x340[0xC0] padding = all zeros (already zeroed)
+    // padding = all zeros (already zeroed)
 
     // FsHeaders — filled by caller
 
@@ -441,12 +441,12 @@ function buildEncryptedProgramNcaHeader({ titleId, keys, exeHash, exePfs0Offset,
         blockSize: PFS0_EXEFS_HASH_BLOCK_SIZE, hashTableSize: exeHash.rawHashSize,
         pfs0Offset: exePfs0Offset, pfs0Size: exefsSize,
     });
-    header.set(exeFsHeader, 0x400);
+    header.set(exeFsHeader, NCA_HDR.FS_HEADERS);
     const romFsHeader = buildRomfsFsHeader(CRYPT.NONE);
-    romFsHeader.set(romIvfc.ivfcHeader, 0x08);
-    header.set(romFsHeader, 0x600);
+    romFsHeader.set(romIvfc.ivfcHeader, FS_HDR.HASH_DATA);
+    header.set(romFsHeader, NCA_HDR.FS_HEADERS + NCA_HDR.FS_HEADER_SIZE);
     fillSectionHashes(header);
-    writeU64LE(header, 0x208, ncaSize);
+    writeU64LE(header, NCA_HDR.SIZE, ncaSize);
     return encryptNcaHeader(header, keys);
 }
 
@@ -531,9 +531,9 @@ export async function packMetaNca(cnmtData, pfs0FileName, titleId, keys, log) {
     const header = buildNcaHeader(titleId, [
         { offset: sectionStart, endOffset: sectionEnd, size: sectionDataSize },
     ], keys, NCA_CONTENT_TYPE.META);
-    writeU64LE(header, 0x208, ncaSize);
-    header.set(digest32(fsHeader), 0x280);
-    header.set(fsHeader, 0x400);
+    writeU64LE(header, NCA_HDR.SIZE, ncaSize);
+    header.set(digest32(fsHeader), NCA_HDR.SECTION_HASHES);
+    header.set(fsHeader, NCA_HDR.FS_HEADERS);
 
     // ── Section data (CTR-encrypted) ───────────────────────────────────────
     const secDec = new Uint8Array(sectionDataSize);
@@ -603,8 +603,8 @@ function parseExefsSectionMeta(ncaData, keys, tikData) {
     const exeFsFsHdr = fsHeaderAt(decHeader, 0);
     const sectionCtrRev = reversedSectionCtr(exeFsFsHdr);
 
-    const sectionStart = readLeU64(exeFsFsHdr, 0x40);
-    const sectionSize = readLeU64(exeFsFsHdr, 0x48);
+    const sectionStart = readLeU64(exeFsFsHdr, FS_HDR.PFS0_OFFSET);
+    const sectionSize = readLeU64(exeFsFsHdr, FS_HDR.PFS0_SIZE);
 
     const mediaOffset = sectionMedia(decHeader, 0).mediaOffset;
     const sectionOffset = mediaOffset * 0x200;

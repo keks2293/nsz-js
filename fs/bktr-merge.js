@@ -1,7 +1,7 @@
 import { AesCtr } from '../crypto/aes-ops.mjs';
 import { decryptNcaHeader } from './nca.js';
 import { BufferRangeSource } from './range-source.js';
-import { decryptNcaHeaderBytes, fsHeaderAt, readLeU64, readLeU32, reversedSectionCtr, extractTitlekeyFromTik, deriveTitlekeyFromKeyArea, IVFC_LEVEL_HDR, IVFC_LEVELS_OFFSET, IVFC_MAX_LEVEL } from './nca-utils.js';
+import { decryptNcaHeaderBytes, fsHeaderAt, readLeU64, readLeU32, reversedSectionCtr, extractTitlekeyFromTik, deriveTitlekeyFromKeyArea, IVFC_LEVEL_HDR, IVFC_LEVELS_OFFSET, IVFC_MAX_LEVEL, FS_HDR } from './nca-utils.js';
 import {
     parseBktrHeader,
     decryptBktrTableData,
@@ -23,7 +23,6 @@ function toNcaInput(nca) {
     return nca;
 }
 
-const BKTR_HEADER_OFFSET = 0x100;
 const BKTR_MAGIC = 0x52544B42; // "BKTR"
 
 export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
@@ -62,20 +61,20 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
     // see the IVFC constants in nca-pack.js (single source, shared with the builder).
     // Level IVFC_MAX_LEVEL-1 is the DATA level: the actual RomFS image. hactool uses it as the RomFS base
     // (nca.c:1240 "ctx->bktr_ctx.romfs_offset = ctx->bktr_ctx.ivfc_levels[IVFC_MAX_LEVEL-1].data_offset").
-    const ivfcBase = IVFC_LEVELS_OFFSET + 0x8;
+    const ivfcBase = IVFC_LEVELS_OFFSET + FS_HDR.HASH_DATA;
     const readLevelU64 = (levelIdx, fieldOff) => readLeU64(updateFsHdr, ivfcBase + levelIdx * IVFC_LEVEL_HDR.SIZE + fieldOff);
     const dataLevelOffset = readLevelU64(IVFC_MAX_LEVEL - 1, IVFC_LEVEL_HDR.LOGICAL_OFFSET); // where RomFS data starts
     const dataLevelSize = readLevelU64(IVFC_MAX_LEVEL - 1, IVFC_LEVEL_HDR.HASH_DATA_SIZE);   // size of RomFS data
 
     // Parse BKTR headers
-    const relocHeader = parseBktrHeader(updateFsHdr, BKTR_HEADER_OFFSET);
-    const subHeader = parseBktrHeader(updateFsHdr, BKTR_HEADER_OFFSET + 0x20);
+    const relocHeader = parseBktrHeader(updateFsHdr, FS_HDR.PATCH_INFO);
+    const subHeader = parseBktrHeader(updateFsHdr, FS_HDR.PATCH_INFO_AESCTREX);
     if (relocHeader.magic !== BKTR_MAGIC) throw new Error(`BKTR: reloc magic 0x${relocHeader.magic.toString(16).padStart(8, '0')}`);
     if (subHeader.magic !== BKTR_MAGIC) throw new Error(`BKTR: sub magic 0x${subHeader.magic.toString(16).padStart(8, '0')}`);
 
     // AesCtrUpperIv: FsHeader[0x140:0x148] = {generation(u32 LE), secure_value(u32 LE)}
     // Stratosphere uses secure_value as ctr[0:4] BE in AesCtrEx counter
-    const secureValue = readLeU32(updateFsHdr, 0x144);
+    const secureValue = readLeU32(updateFsHdr, FS_HDR.SECURE_VALUE);
     // section_ctr for BKTR table decryption (regular AES-CTR, reversed)
     const updateNonce = reversedSectionCtr(updateFsHdr);
 

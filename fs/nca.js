@@ -1,20 +1,20 @@
 import { AesCtr, AesXts } from '../crypto/aes-ops.mjs';
 import { PFS0 } from './pfs0.js';
 import { Cnmt } from './cnmt.js';
-import { toKeyBytes, deriveTitlekeyFromKeyArea, bytesToHex, isMetaNca } from './nca-utils.js';
+import { toKeyBytes, deriveTitlekeyFromKeyArea, bytesToHex, isMetaNca, NCA_HDR, FS_HDR, NCA_HEADER_SIZE } from './nca-utils.js';
 
 const FsType = Object.freeze({ NONE: 0, PFS0: 2, ROMFS: 3 });
 
 class SectionHeader {
     constructor(buffer) {
         const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-        this.fsType = buffer[0x3];
-        this.cryptoType = buffer[0x4];
-        this.sectionStart = Number(view.getBigUint64(0x40, true));
-        this.size = Number(view.getBigUint64(0x48, true));
-        this.bktr1Buffer = buffer.slice(0x100, 0x120);
-        this.bktr2Buffer = buffer.slice(0x120, 0x140);
-        this.cryptoCounter = buffer.slice(0x140, 0x148).reverse();
+        this.fsType = buffer[FS_HDR.HASH_TYPE];
+        this.cryptoType = buffer[FS_HDR.CRYPTO_TYPE];
+        this.sectionStart = Number(view.getBigUint64(FS_HDR.PFS0_OFFSET, true));
+        this.size = Number(view.getBigUint64(FS_HDR.PFS0_SIZE, true));
+        this.bktr1Buffer = buffer.slice(FS_HDR.PATCH_INFO, FS_HDR.PATCH_INFO_AESCTREX);
+        this.bktr2Buffer = buffer.slice(FS_HDR.PATCH_INFO_AESCTREX, FS_HDR.SECTION_CTR);
+        this.cryptoCounter = buffer.slice(FS_HDR.SECTION_CTR, FS_HDR.SECTION_CTR + 8).reverse();
     }
 }
 
@@ -23,46 +23,46 @@ export class NCAHeader {
         const arr = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
         const view = new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
 
-        const magic = String.fromCharCode(arr[0x200], arr[0x201], arr[0x202], arr[0x203]);
+        const magic = String.fromCharCode(arr[NCA_HDR.MAGIC], arr[NCA_HDR.MAGIC + 1], arr[NCA_HDR.MAGIC + 2], arr[NCA_HDR.MAGIC + 3]);
 
         if (magic !== 'NCA3' && magic !== 'NCA2') {
             return null;
         }
 
-        const isGameCard = view.getUint8(0x204);
-        const contentType = view.getUint8(0x205);
-        const cryptoType = view.getUint8(0x206);
-        const keyIndex = view.getUint8(0x207);
+        const isGameCard = view.getUint8(NCA_HDR.DISTRIBUTION);
+        const contentType = view.getUint8(NCA_HDR.CONTENT_TYPE);
+        const cryptoType = view.getUint8(NCA_HDR.CRYPTO_TYPE);
+        const keyIndex = view.getUint8(NCA_HDR.KAEK_IND);
 
-        const size = Number(view.getBigUint64(0x208, true));
+        const size = Number(view.getBigUint64(NCA_HDR.SIZE, true));
 
-        const titleIdBytes = arr.slice(0x210, 0x218);
+        const titleIdBytes = arr.slice(NCA_HDR.TITLE_ID, NCA_HDR.TITLE_ID + 8);
         const titleId = bytesToHex(titleIdBytes.reverse()).toUpperCase();
 
-        const contentIndex = view.getUint32(0x218, true);
-        const sdkVersion = view.getUint32(0x21C, true);
-        const cryptoType2 = view.getUint8(0x220);
+        const contentIndex = view.getUint32(NCA_HDR.CONTENT_INDEX, true);
+        const sdkVersion = view.getUint32(NCA_HDR.SDK_VERSION, true);
+        const cryptoType2 = view.getUint8(NCA_HDR.CRYPTO_TYPE2);
 
-        const rightsId = bytesToHex(arr.slice(0x230, 0x240));
+        const rightsId = bytesToHex(arr.slice(NCA_HDR.RIGHTS_ID, NCA_HDR.RIGHTS_ID + 0x10));
 
         const sectionTables = [];
         for (let i = 0; i < 4; i++) {
-            const tableOffset = 0x240 + i * 0x10;
+            const tableOffset = NCA_HDR.SECTIONS + i * NCA_HDR.SECTION_ENTRY_SIZE;
             const mediaOffset = view.getUint32(tableOffset, true);
             const mediaEndOffset = view.getUint32(tableOffset + 4, true);
 
             sectionTables.push({
                 mediaOffset,
                 mediaEndOffset,
-                offset: mediaOffset * 0x200,
-                endOffset: mediaEndOffset * 0x200,
+                offset: mediaOffset * NCA_HDR.MEDIA_BLOCK_SIZE,
+                endOffset: mediaEndOffset * NCA_HDR.MEDIA_BLOCK_SIZE,
                 unknown1: view.getUint32(tableOffset + 8, true),
                 unknown2: view.getUint32(tableOffset + 12, true)
             });
         }
 
         // Raw key-area bytes + master key index (exposed for inspection)
-        const keyBlock = arr.slice(0x300, 0x340);
+        const keyBlock = arr.slice(NCA_HDR.KEY_AREA, NCA_HDR.KEY_AREA + 0x40);
         const masterKey = Math.max(cryptoType, cryptoType2) - 1;
         const mk = masterKey < 0 ? 0 : masterKey;
 
@@ -73,8 +73,8 @@ export class NCAHeader {
         const sections = [];
         const sectionFilesystems = [];
         for (let i = 0; i < 4; i++) {
-            const sectionHeaderOffset = 0x400 + i * 0x200;
-            const sectionHeaderData = arr.slice(sectionHeaderOffset, sectionHeaderOffset + 0x200);
+            const sectionHeaderOffset = NCA_HDR.FS_HEADERS + i * NCA_HDR.FS_HEADER_SIZE;
+            const sectionHeaderData = arr.slice(sectionHeaderOffset, sectionHeaderOffset + NCA_HDR.FS_HEADER_SIZE);
             const sectionHdr = new SectionHeader(sectionHeaderData);
             const st = sectionTables[i];
 
@@ -137,7 +137,7 @@ export function decryptNcaHeader(raw, keys = null) {
     const headerKey = toKeyBytes(keys.header_key);
     if (headerKey.length !== 32) return null;
     const arr = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
-    const len = Math.min(0xC00, arr.length);
+    const len = Math.min(NCA_HEADER_SIZE, arr.length);
     // Header is ALWAYS XTS-encrypted (hacPack encrypts unconditionally).
     // cryptoType byte = keygen index, NOT "no encryption".
     const decrypted = new AesXts(headerKey).decrypt(arr.subarray(0, len), 0);

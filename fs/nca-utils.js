@@ -5,6 +5,45 @@ import { AesXts } from '../crypto/aes-ops.mjs';
 
 export const NCA_HEADER_SIZE = 0xC00;
 
+// NCA header field offsets (mirror of hacPack nca_header_t, #pragma pack(1); switchbrew NCA).
+export const NCA_HDR = {
+    SIGNATURE_FIXED: 0x000,   // RSA sig over header (fixed key)
+    SIGNATURE_NPDM: 0x100,    // RSA sig over header (NPDM ACID key)
+    MAGIC: 0x200,
+    DISTRIBUTION: 0x204,
+    CONTENT_TYPE: 0x205,
+    CRYPTO_TYPE: 0x206,
+    KAEK_IND: 0x207,
+    SIZE: 0x208,
+    TITLE_ID: 0x210,
+    CONTENT_INDEX: 0x218,
+    SDK_VERSION: 0x21C,
+    CRYPTO_TYPE2: 0x220,
+    RIGHTS_ID: 0x230,
+    SECTIONS: 0x240,              // 4 × 0x10 section entries (media offset/end in 0x200 blocks)
+    SECTION_ENTRY_SIZE: 0x10,
+    SECTION_HASHES: 0x280,        // 4 × 0x20 sha256 of each FsHeader
+    KEY_AREA: 0x300,              // 4 × 0x10 encrypted titlekey slots
+    FS_HEADERS: 0x400,            // 4 × 0x200 FsSection headers
+    FS_HEADER_SIZE: 0x200,
+    MEDIA_BLOCK_SIZE: 0x200,
+};
+
+// FsSection header field offsets (switchbrew NCA FsHeader; hacPack nca_fs_header_t).
+export const FS_HDR = {
+    FS_TYPE: 0x02,
+    HASH_TYPE: 0x03,
+    CRYPTO_TYPE: 0x04,
+    HASH_DATA: 0x08,        // start of the hash superblock (PFS0 superblock / IVFC)
+    PFS0_OFFSET: 0x40,      // HierarchicalSha256Data (PFS0): LayerRegions[1] offset
+    PFS0_SIZE: 0x48,        // LayerRegions[1] size
+    ROMFS_DATA_SIZE: 0x98,  // IVFC (HierarchicalIntegrity): DATA level (5) hash_data_size
+    PATCH_INFO: 0x100,        // PatchInfo Indirect slot (reloc BKTR): offset@+0, size@+8, BKTR header@+0x10
+    PATCH_INFO_AESCTREX: 0x120, // PatchInfo AesCtrEx slot (sub BKTR): offset@+0, size@+8, BKTR header@+0x10
+    SECTION_CTR: 0x140,
+    SECURE_VALUE: 0x144,
+};
+
 // content_type field of the NCA header 0x205 (switchbrew NCA; hacPack nca.c:249,617).
 export const NCA_CONTENT_TYPE = { PROGRAM: 0x00, META: 0x01, CONTROL: 0x02, MANUAL: 0x03, DATA: 0x04, PUBLIC_DATA: 0x05 };
 
@@ -81,14 +120,14 @@ export function decryptNcaHeaderBytes(raw, keys) {
 // (i.e. 0,1 → master key 0).
 export function deriveTitlekeyFromKeyArea(decHeader, keys) {
     if (!keys) return null;
-    const cryptoType = decHeader[0x206];
-    const cryptoType2 = decHeader[0x220];
-    const kaekInd = decHeader[0x207];
+    const cryptoType = decHeader[NCA_HDR.CRYPTO_TYPE];
+    const cryptoType2 = decHeader[NCA_HDR.CRYPTO_TYPE2];
+    const kaekInd = decHeader[NCA_HDR.KAEK_IND];
     const maxCt = Math.max(cryptoType, cryptoType2);
     const mk = maxCt > 0 ? maxCt - 1 : 0;
     const kakHex = keys.keyAreaKeys && keys.keyAreaKeys[mk] && (keys.keyAreaKeys[mk][kaekInd] || keys.keyAreaKeys[mk][0]);
     if (!kakHex) return null;
-    const keyArea = decHeader.subarray(0x300, 0x340);
+    const keyArea = decHeader.subarray(NCA_HDR.KEY_AREA, NCA_HDR.KEY_AREA + 0x40);
     if (keyArea.length < 0x40) return null;
     const unwrapped = new AesEcb(toKeyBytes(kakHex)).decrypt(keyArea);
     return unwrapped.subarray(0x20, 0x30);
@@ -122,7 +161,7 @@ export function resolveTitlekey(tikData, decHeader, keys) {
 // but AES-CTR expects the initial counter big-endian (hactool nca.c nca_update_ctr
 // builds ctr[j] = section_ctr[8-j-1]).
 export function reversedSectionCtr(fsHdr) {
-    const raw = fsHdr.subarray(0x140, 0x148);
+    const raw = fsHdr.subarray(FS_HDR.SECTION_CTR, FS_HDR.SECTION_CTR + 8);
     const rev = new Uint8Array(8);
     for (let i = 0; i < 8; i++) rev[i] = raw[7 - i];
     return rev;
@@ -130,12 +169,14 @@ export function reversedSectionCtr(fsHdr) {
 
 // Return the FsSection header (0x200 B) for section idx (0-3) of a decrypted NCA header.
 export function fsHeaderAt(decHeader, idx) {
-    return decHeader.subarray(0x400 + idx * 0x200, 0x400 + (idx + 1) * 0x200);
+    const start = NCA_HDR.FS_HEADERS + idx * NCA_HDR.FS_HEADER_SIZE;
+    return decHeader.subarray(start, start + NCA_HDR.FS_HEADER_SIZE);
 }
 
 // Return the media offset/end (0x240 + idx*0x10 entry) for a section, in media units.
 export function sectionMedia(decHeader, idx) {
-    return { mediaOffset: readLeU32(decHeader, 0x240 + idx * 0x10), mediaEnd: readLeU32(decHeader, 0x240 + idx * 0x10 + 4) };
+    const e = NCA_HDR.SECTIONS + idx * NCA_HDR.SECTION_ENTRY_SIZE;
+    return { mediaOffset: readLeU32(decHeader, e), mediaEnd: readLeU32(decHeader, e + 4) };
 }
 
 // Find the RomFS section (hash_type 3) among the 4 FsHeaders of a decrypted header.

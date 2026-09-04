@@ -3,7 +3,7 @@
 
 import { AesEcb } from '../crypto/aes128.js';
 import { AesCtr } from '../crypto/aes-ops.mjs';
-import { hexToBytes, readLeU32, readLeU64, reversedSectionCtr } from './nca-utils.js';
+import { hexToBytes, readLeU32, readLeU64, reversedSectionCtr, fsHeaderAt } from './nca-utils.js';
 
 
 export function parseBktrHeader(fsHdr, offset) {
@@ -254,8 +254,7 @@ export function lookupTitlekeyFromDatabase(rightsId, titlekeysMap) {
 
 // Decrypt base romfs section using AES-CTR with titlekey
 export async function decryptBaseRomfs(baseNcaData, baseRomfsSecMeta, baseDecHeader, baseTitlekey) {
-    const romfsSecFsHdrOffset = 0x400 + baseRomfsSecMeta.secIdx * 0x200;
-    const baseFsHdr = baseDecHeader.subarray(romfsSecFsHdrOffset, romfsSecFsHdrOffset + 0x200);
+    const baseFsHdr = fsHeaderAt(baseDecHeader, baseRomfsSecMeta.secIdx);
     const baseNonce = reversedSectionCtr(baseFsHdr);
 
     const c = new AesCtr(baseTitlekey, baseNonce);
