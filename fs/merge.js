@@ -2,7 +2,7 @@ import { PFS0Writer } from './pfs0.js';
 import { buildAdapter, collectBlob } from './adapter.js';
 import { parseNczSections, AdapterNCZReader } from './ncz.js';
 import { decryptNcaHeader, readCnmtFromMeta } from './nca.js';
-import { CONTENT_TYPE } from './cnmt.js';
+import { CNMT_ENTRY_TYPE } from './cnmt.js';
 import { openContainer } from './container.js';
 import { writeFromReader } from './convert-common.js';
 import { formatBytes } from './format.js';
@@ -48,7 +48,7 @@ export async function mergeNSP(readers, output, options = {}) {
             if (!cnmt) continue;
 
             for (const content of cnmt.contentEntries) {
-                if (content.type === CONTENT_TYPE.DELTA_FRAGMENT) {
+                if (content.type === CNMT_ENTRY_TYPE.DELTA_FRAGMENT) {
                     deltaFrags.add(content.ncaId);
                 }
             }

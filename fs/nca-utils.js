@@ -5,8 +5,8 @@ import { AesXts } from '../crypto/aes-ops.mjs';
 
 export const NCA_HEADER_SIZE = 0xC00;
 
-// content_type field of the NCA header (hacPack nca.c:249,617).
-export const CONTENT_TYPE = { PROGRAM: 0x00, META: 0x01 };
+// content_type field of the NCA header 0x205 (switchbrew NCA; hacPack nca.c:249,617).
+export const NCA_CONTENT_TYPE = { PROGRAM: 0x00, META: 0x01, CONTROL: 0x02, MANUAL: 0x03, DATA: 0x04, PUBLIC_DATA: 0x05 };
 
 // ── IVFC format constants (hacpack ivfc.h / nca.c) ─────────────────────────────
 // ivfc_hdr_t: magic@0x00, id@0x04, master_hash_size@0x08, num_levels@0x0C,
@@ -150,5 +150,5 @@ export function findRomfsFsHeader(decHeader, name) {
 
 // content_type field of the NCA header: 0=Program, 1=Meta (hacPack nca.c:249,617).
 export function isMetaNca(header) {
-    return !!header && header.contentType === CONTENT_TYPE.META;
+    return !!header && header.contentType === NCA_CONTENT_TYPE.META;
 }

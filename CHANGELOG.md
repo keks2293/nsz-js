@@ -2,6 +2,8 @@
 
      ## ✅ Recent Changes (2026-09-04)
 
+      59. **Refactor: rename the two `CONTENT_TYPE` enums to disambiguate the scales** — `fs/cnmt.js` `CONTENT_TYPE` → `CNMT_ENTRY_TYPE` (CNMT entry role, `nn::ncm::ContentType`); `fs/nca-utils.js` `CONTENT_TYPE` → `NCA_CONTENT_TYPE` (NCA header 0x205, FS "ncatype"), now with the full value set (Program/Meta/Control/Manual/Data/PublicData). The two are distinct enums (switchbrew NCA vs NCM_services#ContentType — a Manual NCA, 0x205=3, is recorded as CNMT 4 or 5), previously sharing one name; consumers updated (`nca-pack.js`, `update.js`, `split.js`, `merge.js`). Docs-only comments; `npm run build` OK, unit tests pass.
+
       58. **Refactor: dedupe NCA section parsing into shared helpers** — `fs/nca-utils.js`. Added `readLeU64`/`readLeU32` (LE reads, subarray-safe), `fsHeaderAt(decHeader, idx)` (FsSection header at `0x400 + idx*0x200`) and `sectionMedia(decHeader, idx)` (media offset/end at `0x240 + idx*0x10`); `findRomfsFsHeader` now reuses `fsHeaderAt`. Replaced the duplicated inline `new DataView(...).getBigUint64/getUint32` and `subarray(0x400 + idx*0x200, ...)` boilerplate in `nca-pack.js` (parseExefsSectionMeta/parseRomfsSectionMeta), `update.js` (parseUpdateSectionSizes + streaming path) and `bktr-merge.js` (IVFC levels, secure value, both FsHeaders); `bktr.js`'s local readLe pair now imports the shared ones. Behavior identical (byte-for-byte same reads); `npm run build` OK, AES/XTS/CTR/vector unit tests pass.
 
      ## ✅ Recent Changes (2026-09-01)

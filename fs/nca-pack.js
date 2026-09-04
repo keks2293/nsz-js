@@ -2,7 +2,7 @@ import { AesXts, AesCtr } from '../crypto/aes-ops.mjs';
 import { AesEcb } from '../crypto/aes128.js';
 import { sha256, SHA256, digest32 } from '../crypto/sha256.js';
 import { PFS0, PFS0Writer } from './pfs0.js';
-import { hexToBytes, writeU64LE, writeU32LE, readLeU64, fsHeaderAt, sectionMedia, NCA_HEADER_SIZE, toKeyBytes, decryptNcaHeaderBytes, resolveTitlekey, reversedSectionCtr, findRomfsFsHeader, MAGIC_IVFC, IVFC_HEADER_SIZE, IVFC_ID, IVFC_MASTER_HASH_SIZE, IVFC_NUM_LEVELS, IVFC_BLOCK_SIZE_LOG2, IVFC_HASH_BLOCK_SIZE, IVFC_HASH_SIZE, IVFC_LEVELS_OFFSET, IVFC_MASTER_HASH_OFFSET, IVFC_MAX_LEVEL, IVFC_LEVEL_HDR, CONTENT_TYPE } from './nca-utils.js';
+import { hexToBytes, writeU64LE, writeU32LE, readLeU64, fsHeaderAt, sectionMedia, NCA_HEADER_SIZE, toKeyBytes, decryptNcaHeaderBytes, resolveTitlekey, reversedSectionCtr, findRomfsFsHeader, MAGIC_IVFC, IVFC_HEADER_SIZE, IVFC_ID, IVFC_MASTER_HASH_SIZE, IVFC_NUM_LEVELS, IVFC_BLOCK_SIZE_LOG2, IVFC_HASH_BLOCK_SIZE, IVFC_HASH_SIZE, IVFC_LEVELS_OFFSET, IVFC_MASTER_HASH_OFFSET, IVFC_MAX_LEVEL, IVFC_LEVEL_HDR, NCA_CONTENT_TYPE } from './nca-utils.js';
 
 // Yanu update pipeline uses only:
 //   PROGRAM (--plaintext) → ExeFS + RomFS, CRYPT_NONE sections ✅
@@ -363,7 +363,7 @@ function encryptNcaHeader(header, keys) {
 // visible statement of the zero-sig decision. Other zero regions (padding,
 // rights_id, unused section hashes) rely on the fresh allocation.
 
-function buildNcaHeader(titleId, sections, keys, contentType = CONTENT_TYPE.PROGRAM) {
+function buildNcaHeader(titleId, sections, keys, contentType = NCA_CONTENT_TYPE.PROGRAM) {
     const header = new Uint8Array(NCA_HEADER_SIZE);
 
     // fixed_key_sig + npdm_key_sig = all zeros (The-4n/hacPack default)
@@ -373,7 +373,7 @@ function buildNcaHeader(titleId, sections, keys, contentType = CONTENT_TYPE.PROG
     header[0x200] = 0x4E; header[0x201] = 0x43; header[0x202] = 0x41; header[0x203] = 0x33;
     // distribution = 0 (not gamecard)
     header[0x204] = 0x00;
-    // content_type (CONTENT_TYPE)
+    // content_type (NCA_CONTENT_TYPE)
     header[0x205] = contentType;
     // crypto_type(0x206)/kaek_ind(0x207)/crypto_type2(0x220) stay zero — keygen 1
     // (keygen policy above; fresh buffer)
@@ -530,7 +530,7 @@ export async function packMetaNca(cnmtData, pfs0FileName, titleId, keys, log) {
     // ── NCA header (content_type = Meta) ────────────────────────────────────
     const header = buildNcaHeader(titleId, [
         { offset: sectionStart, endOffset: sectionEnd, size: sectionDataSize },
-    ], keys, CONTENT_TYPE.META);
+    ], keys, NCA_CONTENT_TYPE.META);
     writeU64LE(header, 0x208, ncaSize);
     header.set(digest32(fsHeader), 0x280);
     header.set(fsHeader, 0x400);
