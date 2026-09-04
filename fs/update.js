@@ -8,7 +8,7 @@ import { sha256 } from '../crypto/sha256.js';
 import { mergeRomFS } from './bktr-merge.js';
 import { FileRangeSource, NczStreamSource, ViewRangeSource, SparseNcaView } from './range-source.js';
 import { preparePlaintextProgramNca, writePlaintextProgramNca, packProgramNcaStream, computeProgramNcaContentId, writeProgramNcaTwoPass, extractExefsStream, extractRomfsStream, createExefsAcidFilter, packMetaNca, extractExefs, extractRomfs, processNpdmAcid, computeProgramNcaLayout } from './nca-pack.js';
-import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE, decryptNcaHeaderBytes, findRomfsFsHeader, isMetaNca } from './nca-utils.js';
+import { hexToBytes, writeU64LE, writeU32LE, readLeU64, fsHeaderAt, NCA_HEADER_SIZE, decryptNcaHeaderBytes, findRomfsFsHeader, isMetaNca } from './nca-utils.js';
 import { writeFromReader } from './convert-common.js';
 
 function u32le(v) {
@@ -61,11 +61,11 @@ async function readPlaintextNcaHeader(containerReader, src) {
 function parseUpdateSectionSizes(updateHeaderDec, updateHeaderRaw, updateRomfsSec, updateExefsSec, keys) {
     const decBytes = decryptNcaHeaderBytes(updateHeaderRaw, keys);
     const romfsIdx = updateHeaderDec.sections.indexOf(updateRomfsSec);
-    const romfsFsHdr = decBytes.subarray(0x400 + romfsIdx * 0x200, 0x400 + (romfsIdx + 1) * 0x200);
-    const romfsDataSize = Number(new DataView(romfsFsHdr.buffer, romfsFsHdr.byteOffset + 0x98, 8).getBigUint64(0, true));
+    const romfsFsHdr = fsHeaderAt(decBytes, romfsIdx);
+    const romfsDataSize = readLeU64(romfsFsHdr, 0x98);
     const exefsIdx = updateHeaderDec.sections.indexOf(updateExefsSec);
-    const exefsFsHdr = decBytes.subarray(0x400 + exefsIdx * 0x200, 0x400 + (exefsIdx + 1) * 0x200);
-    const exefsSize = Number(new DataView(exefsFsHdr.buffer, exefsFsHdr.byteOffset + 0x48, 8).getBigUint64(0, true));
+    const exefsFsHdr = fsHeaderAt(decBytes, exefsIdx);
+    const exefsSize = readLeU64(exefsFsHdr, 0x48);
     return { romfsDataSize, exefsSize, programSize: programNcaSize(exefsSize, romfsDataSize) };
 }
 
@@ -616,10 +616,10 @@ export async function update(readers, output, options = {}) {
             const baseDecBytes = decryptNcaHeaderBytes(baseHeaderRaw, keys);
             const updateDecBytes = decryptNcaHeaderBytes(updateHeaderRaw, keys);
             const { idx: romfsIdx } = findRomfsFsHeader(baseDecBytes, 'base');
-            const baseRomfsFsHdr = baseDecBytes.subarray(0x400 + romfsIdx * 0x200, 0x400 + (romfsIdx + 1) * 0x200);
-            romfsDataSize = Number(new DataView(baseRomfsFsHdr.buffer, baseRomfsFsHdr.byteOffset + 0x98, 8).getBigUint64(0, true));
-            const updateExefsFsHdr = updateDecBytes.subarray(0x400, 0x600);
-            exefsSize = Number(new DataView(updateExefsFsHdr.buffer, updateExefsFsHdr.byteOffset + 0x48, 8).getBigUint64(0, true));
+            const baseRomfsFsHdr = fsHeaderAt(baseDecBytes, romfsIdx);
+            romfsDataSize = readLeU64(baseRomfsFsHdr, 0x98);
+            const updateExefsFsHdr = fsHeaderAt(updateDecBytes, 0);
+            exefsSize = readLeU64(updateExefsFsHdr, 0x48);
             programSize = programNcaSize(exefsSize, romfsDataSize);
         }
 

@@ -44,6 +44,14 @@ export function bytesToHex(bytes) {
     return s;
 }
 
+export function readLeU64(buf, o) {
+    return Number(new DataView(buf.buffer, buf.byteOffset + o, 8).getBigUint64(0, true));
+}
+
+export function readLeU32(buf, o) {
+    return new DataView(buf.buffer, buf.byteOffset + o, 4).getUint32(0, true);
+}
+
 export function writeU64LE(buf, offset, value) {
     const n = typeof value === 'bigint' ? value : BigInt(value);
     const view = new DataView(buf.buffer, buf.byteOffset + offset, 8);
@@ -120,11 +128,21 @@ export function reversedSectionCtr(fsHdr) {
     return rev;
 }
 
+// Return the FsSection header (0x200 B) for section idx (0-3) of a decrypted NCA header.
+export function fsHeaderAt(decHeader, idx) {
+    return decHeader.subarray(0x400 + idx * 0x200, 0x400 + (idx + 1) * 0x200);
+}
+
+// Return the media offset/end (0x240 + idx*0x10 entry) for a section, in media units.
+export function sectionMedia(decHeader, idx) {
+    return { mediaOffset: readLeU32(decHeader, 0x240 + idx * 0x10), mediaEnd: readLeU32(decHeader, 0x240 + idx * 0x10 + 4) };
+}
+
 // Find the RomFS section (hash_type 3) among the 4 FsHeaders of a decrypted header.
 // Returns { idx, fsHdr } or throws.
 export function findRomfsFsHeader(decHeader, name) {
     for (let i = 0; i < 4; i++) {
-        const fh = decHeader.subarray(0x400 + i * 0x200, 0x400 + i * 0x200 + 0x200);
+        const fh = fsHeaderAt(decHeader, i);
         if (fh[0x03] === 3) return { idx: i, fsHdr: fh };
     }
     throw new Error(`${name}: RomFS section not found`);

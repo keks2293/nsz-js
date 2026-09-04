@@ -3,15 +3,7 @@
 
 import { AesEcb } from '../crypto/aes128.js';
 import { AesCtr } from '../crypto/aes-ops.mjs';
-import { hexToBytes, reversedSectionCtr } from './nca-utils.js';
-
-export function readLeU64(buf, o) {
-    return Number(new DataView(buf.buffer, buf.byteOffset + o, 8).getBigUint64(0, true));
-}
-
-export function readLeU32(buf, o) {
-    return new DataView(buf.buffer, buf.byteOffset + o, 4).getUint32(0, true);
-}
+import { hexToBytes, readLeU32, readLeU64, reversedSectionCtr } from './nca-utils.js';
 
 
 export function parseBktrHeader(fsHdr, offset) {

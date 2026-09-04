@@ -1,7 +1,7 @@
 import { AesCtr } from '../crypto/aes-ops.mjs';
 import { decryptNcaHeader } from './nca.js';
 import { BufferRangeSource } from './range-source.js';
-import { decryptNcaHeaderBytes, reversedSectionCtr, extractTitlekeyFromTik, deriveTitlekeyFromKeyArea, IVFC_LEVEL_HDR, IVFC_LEVELS_OFFSET, IVFC_MAX_LEVEL } from './nca-utils.js';
+import { decryptNcaHeaderBytes, fsHeaderAt, readLeU64, readLeU32, reversedSectionCtr, extractTitlekeyFromTik, deriveTitlekeyFromKeyArea, IVFC_LEVEL_HDR, IVFC_LEVELS_OFFSET, IVFC_MAX_LEVEL } from './nca-utils.js';
 import {
     parseBktrHeader,
     decryptBktrTableData,
@@ -55,16 +55,15 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
     const baseDecHeader = decryptNcaHeaderBytes(baseNcaData.headerRaw, keys);
 
     // Update FsHeader
-    const updateFsHdr = updateDecHeader.subarray(0x400 + updateRomfsSecIdx * 0x200, 0x400 + updateRomfsSecIdx * 0x200 + 0x200);
+    const updateFsHdr = fsHeaderAt(updateDecHeader, updateRomfsSecIdx);
 
     // Parse IVFC header from the BKTR superblock (bktr_superblock_t = ivfc_header @ superblock+0x0, see nca.h).
     // The BKTR superblock starts at FsHeader+0x8; ivfc_hdr_t/ivfc_level_hdr_t layout:
     // see the IVFC constants in nca-pack.js (single source, shared with the builder).
     // Level IVFC_MAX_LEVEL-1 is the DATA level: the actual RomFS image. hactool uses it as the RomFS base
     // (nca.c:1240 "ctx->bktr_ctx.romfs_offset = ctx->bktr_ctx.ivfc_levels[IVFC_MAX_LEVEL-1].data_offset").
-    const ivfcBase = updateFsHdr.byteOffset + 0x8;
-    const readLevelU64 = (levelIdx, fieldOff) =>
-        Number(new DataView(updateFsHdr.buffer, ivfcBase + IVFC_LEVELS_OFFSET + levelIdx * IVFC_LEVEL_HDR.SIZE + fieldOff, 8).getBigUint64(0, true));
+    const ivfcBase = IVFC_LEVELS_OFFSET + 0x8;
+    const readLevelU64 = (levelIdx, fieldOff) => readLeU64(updateFsHdr, ivfcBase + levelIdx * IVFC_LEVEL_HDR.SIZE + fieldOff);
     const dataLevelOffset = readLevelU64(IVFC_MAX_LEVEL - 1, IVFC_LEVEL_HDR.LOGICAL_OFFSET); // where RomFS data starts
     const dataLevelSize = readLevelU64(IVFC_MAX_LEVEL - 1, IVFC_LEVEL_HDR.HASH_DATA_SIZE);   // size of RomFS data
 
@@ -76,7 +75,7 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
 
     // AesCtrUpperIv: FsHeader[0x140:0x148] = {generation(u32 LE), secure_value(u32 LE)}
     // Stratosphere uses secure_value as ctr[0:4] BE in AesCtrEx counter
-    const secureValue = new DataView(updateFsHdr.buffer, updateFsHdr.byteOffset + 0x144, 4).getUint32(0, true);
+    const secureValue = readLeU32(updateFsHdr, 0x144);
     // section_ctr for BKTR table decryption (regular AES-CTR, reversed)
     const updateNonce = reversedSectionCtr(updateFsHdr);
 
@@ -134,7 +133,7 @@ export async function mergeRomFS(baseNcaData, updateNcaData, options = {}) {
     // full-image buffer (the old approach decrypted the whole ~850 MB section
     // up front and it lived alongside `merged` for the entire merge).
     // Counter base = section offset (AesCtr counter = absolute section byte / 16).
-    const baseFsHdr = baseDecHeader.subarray(0x400 + baseRomfsSecMeta.secIdx * 0x200, 0x400 + baseRomfsSecMeta.secIdx * 0x200 + 0x200);
+    const baseFsHdr = fsHeaderAt(baseDecHeader, baseRomfsSecMeta.secIdx);
     const baseNonce = reversedSectionCtr(baseFsHdr);
     const baseCtr = new AesCtr(baseTitlekey, baseNonce);
     const BASE_DECRYPT_CHUNK = 0x1000000; // 16 MB

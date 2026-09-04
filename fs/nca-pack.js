@@ -2,7 +2,7 @@ import { AesXts, AesCtr } from '../crypto/aes-ops.mjs';
 import { AesEcb } from '../crypto/aes128.js';
 import { sha256, SHA256, digest32 } from '../crypto/sha256.js';
 import { PFS0, PFS0Writer } from './pfs0.js';
-import { hexToBytes, writeU64LE, writeU32LE, NCA_HEADER_SIZE, toKeyBytes, decryptNcaHeaderBytes, resolveTitlekey, reversedSectionCtr, findRomfsFsHeader, MAGIC_IVFC, IVFC_HEADER_SIZE, IVFC_ID, IVFC_MASTER_HASH_SIZE, IVFC_NUM_LEVELS, IVFC_BLOCK_SIZE_LOG2, IVFC_HASH_BLOCK_SIZE, IVFC_HASH_SIZE, IVFC_LEVELS_OFFSET, IVFC_MASTER_HASH_OFFSET, IVFC_MAX_LEVEL, IVFC_LEVEL_HDR, CONTENT_TYPE } from './nca-utils.js';
+import { hexToBytes, writeU64LE, writeU32LE, readLeU64, fsHeaderAt, sectionMedia, NCA_HEADER_SIZE, toKeyBytes, decryptNcaHeaderBytes, resolveTitlekey, reversedSectionCtr, findRomfsFsHeader, MAGIC_IVFC, IVFC_HEADER_SIZE, IVFC_ID, IVFC_MASTER_HASH_SIZE, IVFC_NUM_LEVELS, IVFC_BLOCK_SIZE_LOG2, IVFC_HASH_BLOCK_SIZE, IVFC_HASH_SIZE, IVFC_LEVELS_OFFSET, IVFC_MASTER_HASH_OFFSET, IVFC_MAX_LEVEL, IVFC_LEVEL_HDR, CONTENT_TYPE } from './nca-utils.js';
 
 // Yanu update pipeline uses only:
 //   PROGRAM (--plaintext) → ExeFS + RomFS, CRYPT_NONE sections ✅
@@ -600,13 +600,13 @@ function parseExefsSectionMeta(ncaData, keys, tikData) {
     const decHeader = decryptNcaHeaderBytes(ncaHeaderRaw(ncaData), keys);
     const titlekey = resolveTitlekey(tikData, decHeader, keys);
 
-    const exeFsFsHdr = decHeader.subarray(0x400, 0x600);
+    const exeFsFsHdr = fsHeaderAt(decHeader, 0);
     const sectionCtrRev = reversedSectionCtr(exeFsFsHdr);
 
-    const sectionStart = Number(new DataView(exeFsFsHdr.buffer, exeFsFsHdr.byteOffset + 0x40, 8).getBigUint64(0, true));
-    const sectionSize = Number(new DataView(exeFsFsHdr.buffer, exeFsFsHdr.byteOffset + 0x48, 8).getBigUint64(0, true));
+    const sectionStart = readLeU64(exeFsFsHdr, 0x40);
+    const sectionSize = readLeU64(exeFsFsHdr, 0x48);
 
-    const mediaOffset = Number(new DataView(decHeader.buffer, decHeader.byteOffset + 0x240, 4).getUint32(0, true));
+    const mediaOffset = sectionMedia(decHeader, 0).mediaOffset;
     const sectionOffset = mediaOffset * 0x200;
 
     return { titlekey, sectionCtrRev, sectionOffset, sectionStart, sectionSize };
@@ -619,8 +619,7 @@ function parseRomfsSectionMeta(ncaData, keys, tikData) {
     const { idx: romfsIdx, fsHdr: romfsFsHdr } = findRomfsFsHeader(decHeader, 'extractRomfs');
     const sectionCtrRev = reversedSectionCtr(romfsFsHdr);
 
-    const mediaOffset = new DataView(decHeader.buffer, decHeader.byteOffset + 0x240 + romfsIdx * 0x10, 4).getUint32(0, true);
-    const mediaEnd = new DataView(decHeader.buffer, decHeader.byteOffset + 0x240 + romfsIdx * 0x10 + 4, 4).getUint32(0, true);
+    const { mediaOffset, mediaEnd } = sectionMedia(decHeader, romfsIdx);
     const sectionOffset = mediaOffset * 0x200;
     const mediaSize = mediaEnd * 0x200 - sectionOffset;
 
