@@ -1,5 +1,6 @@
 import { AesCtr, aesBackend } from '../crypto/aes-ops.mjs';
 import { decompressBlock, decompressStream } from '../crypto/zstd.js';
+import { readLeU64, readLeU32 } from './bytes.js';
 const UNCOMPRESSABLE_HEADER_SIZE = 0x4000;
 const SECTION_CHUNK_SIZE = 0x1000000; // 16MB
 
@@ -13,16 +14,6 @@ function bytesToAscii(bytes, start, end) {
         str += String.fromCharCode(bytes[i]);
     }
     return str;
-}
-
-function readBigUInt64LE(bytes, offset) {
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    return view.getBigUint64(offset, true);
-}
-
-function readUInt32LE(bytes, offset) {
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    return view.getUint32(offset, true);
 }
 
 function sliceBytes(bytes, start, end) {
@@ -71,9 +62,9 @@ class BufferReader extends DataReader {
 
 class NCZSection {
     constructor(data, offset) {
-        this.offset = Number(readBigUInt64LE(data, offset));
-        this.size = Number(readBigUInt64LE(data, offset + 8));
-        this.cryptoType = Number(readBigUInt64LE(data, offset + 16));
+        this.offset = readLeU64(data, offset);
+        this.size = readLeU64(data, offset + 8);
+        this.cryptoType = readLeU64(data, offset + 16);
         this.cryptoKey = sliceBytes(data, offset + 32, offset + 48);
         this.cryptoCounter = sliceBytes(data, offset + 48, offset + 64);
     }
@@ -86,8 +77,8 @@ class NCZBlockHeader {
         this.type = data[offset + 9];
         this.unused = data[offset + 10];
         this.blockSizeExponent = data[offset + 11];
-        this.numberOfBlocks = readUInt32LE(data, offset + 12);
-        this.decompressedSize = Number(readBigUInt64LE(data, offset + 16));
+        this.numberOfBlocks = readLeU32(data, offset + 12);
+        this.decompressedSize = readLeU64(data, offset + 16);
     }
 }
 
@@ -129,7 +120,7 @@ async function parseNczSections(reader) {
 
     let offset = nczhdrOffset + 8;
     const sectionCountBytes = await reader.read(offset, 8);
-    const sectionCount = Number(readBigUInt64LE(sectionCountBytes, 0));
+    const sectionCount = readLeU64(sectionCountBytes, 0);
     console.log('[NCZ] sectionCount:', sectionCount);
     offset += 8;
 
@@ -330,7 +321,7 @@ function parseBlockSchedule(blockSizeExponent, numberOfBlocks, decompressedSize,
     const relOffsets = new Array(numberOfBlocks);
     let offset = 24 + numberOfBlocks * 4;
     for (let i = 0; i < numberOfBlocks; i++) {
-        const compressedSize = readUInt32LE(sizeListData, i * 4);
+        const compressedSize = readLeU32(sizeListData, i * 4);
         sizes[i] = compressedSize;
         relOffsets[i] = offset;
         offset += compressedSize;

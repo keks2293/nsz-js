@@ -2,7 +2,7 @@
 // Reference: SciresM/hactool (nca.c, bktr.h) + switchbrew.org/wiki/NCA
 
 import { AesEcb } from '../crypto/aes128.js';
-import { hexToBytes, readLeU32, readLeU64 } from './nca-utils.js';
+import { hexToBytes, readLeU32, readLeU64 } from './bytes.js';
 
 
 export function parseBktrHeader(fsHdr, offset) {

@@ -1,7 +1,8 @@
 import { AesCtr, AesXts } from '../crypto/aes-ops.mjs';
 import { PFS0 } from './pfs0.js';
 import { Cnmt } from './cnmt.js';
-import { toKeyBytes, deriveTitlekeyFromKeyArea, bytesToHex, isMetaNca, NCA_HDR, FS_HDR, NCA_HEADER_SIZE } from './nca-utils.js';
+import { bytesToHex } from './bytes.js';
+import { toKeyBytes, deriveTitlekeyFromKeyArea, isMetaNca, NCA_HDR, FS_HDR, NCA_HEADER_SIZE } from './nca-utils.js';
 
 const FsType = Object.freeze({ NONE: 0, PFS0: 2, ROMFS: 3 });
 

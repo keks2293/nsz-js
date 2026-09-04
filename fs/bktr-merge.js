@@ -1,7 +1,8 @@
 import { AesCtr } from '../crypto/aes-ops.mjs';
 import { decryptNcaHeader } from './nca.js';
 import { BufferRangeSource } from './range-source.js';
-import { decryptNcaHeaderBytes, fsHeaderAt, readLeU64, readLeU32, reversedSectionCtr, extractTitlekeyFromTik, deriveTitlekeyFromKeyArea, IVFC_LEVEL_HDR, IVFC_LEVELS_OFFSET, IVFC_MAX_LEVEL, FS_HDR } from './nca-utils.js';
+import { readLeU64, readLeU32 } from './bytes.js';
+import { decryptNcaHeaderBytes, fsHeaderAt, reversedSectionCtr, extractTitlekeyFromTik, deriveTitlekeyFromKeyArea, IVFC_LEVEL_HDR, IVFC_LEVELS_OFFSET, IVFC_MAX_LEVEL, FS_HDR } from './nca-utils.js';
 import {
     parseBktrHeader,
     decryptBktrTableData,

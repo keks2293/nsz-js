@@ -1,4 +1,4 @@
-import { bytesToHex } from './nca-utils.js';
+import { bytesToHex } from './bytes.js';
 
 export class Ticket {
     static parse(buffer) {

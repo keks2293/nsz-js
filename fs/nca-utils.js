@@ -1,7 +1,9 @@
-// Shared NCA utilities extracted from duplicated code in nca-pack.js, update.js, bktr.js, bktr-merge.js
+// NCA-specific utilities (header offsets, titlekey, FsSection, IVFC).
+// Generic byte-level helpers (hex + LE read/write) live in ./bytes.js.
 
 import { AesEcb } from '../crypto/aes128.js';
 import { AesXts } from '../crypto/aes-ops.mjs';
+import { hexToBytes, bytesToHex, readLeU32 } from './bytes.js';
 
 export const NCA_HEADER_SIZE = 0xC00;
 
@@ -66,41 +68,6 @@ export const IVFC_MAX_LEVEL = 6;             // hacpack ivfc.h; level [5] = DATA
 // ivfc_level_hdr_t: logical_offset(u64)@+0x00, hash_data_size(u64)@+0x08,
 // block_size(u32)@+0x10, reserved(u32)@+0x14 → 0x18 bytes
 export const IVFC_LEVEL_HDR = { SIZE: 0x18, LOGICAL_OFFSET: 0x00, HASH_DATA_SIZE: 0x08, BLOCK_SIZE: 0x10 };
-
-export function hexToBytes(hex) {
-    const buf = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < hex.length; i += 2) {
-        buf[i / 2] = parseInt(hex.substr(i, 2), 16);
-    }
-    return buf;
-}
-
-const HEXES = new Array(256).fill().map((_, i) => i.toString(16).padStart(2, '0'));
-
-export function bytesToHex(bytes) {
-    let s = '';
-    for (let i = 0; i < bytes.length; i++) s += HEXES[bytes[i]];
-    return s;
-}
-
-export function readLeU64(buf, o) {
-    return Number(new DataView(buf.buffer, buf.byteOffset + o, 8).getBigUint64(0, true));
-}
-
-export function readLeU32(buf, o) {
-    return new DataView(buf.buffer, buf.byteOffset + o, 4).getUint32(0, true);
-}
-
-export function writeU64LE(buf, offset, value) {
-    const n = typeof value === 'bigint' ? value : BigInt(value);
-    const view = new DataView(buf.buffer, buf.byteOffset + offset, 8);
-    view.setBigUint64(0, n, true);
-}
-
-export function writeU32LE(buf, offset, value) {
-    const view = new DataView(buf.buffer, buf.byteOffset + offset, 4);
-    view.setUint32(0, value, true);
-}
 
 // Normalize a key from the keys file: hex string, Uint8Array, or Array.
 export function toKeyBytes(v) {

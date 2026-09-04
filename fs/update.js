@@ -8,7 +8,8 @@ import { sha256 } from '../crypto/sha256.js';
 import { mergeRomFS } from './bktr-merge.js';
 import { FileRangeSource, NczStreamSource, ViewRangeSource, SparseNcaView } from './range-source.js';
 import { preparePlaintextProgramNca, writePlaintextProgramNca, packProgramNcaStream, computeProgramNcaContentId, writeProgramNcaTwoPass, extractExefsStream, extractRomfsStream, createExefsAcidFilter, packMetaNca, extractExefs, extractRomfs, processNpdmAcid, computeProgramNcaLayout } from './nca-pack.js';
-import { hexToBytes, writeU64LE, writeU32LE, readLeU64, fsHeaderAt, FS_HDR, NCA_HEADER_SIZE, decryptNcaHeaderBytes, findRomfsFsHeader, isMetaNca } from './nca-utils.js';
+import { hexToBytes, writeU64LE, writeU32LE, readLeU64 } from './bytes.js';
+import { fsHeaderAt, FS_HDR, NCA_HEADER_SIZE, decryptNcaHeaderBytes, findRomfsFsHeader, isMetaNca } from './nca-utils.js';
 import { writeFromReader } from './convert-common.js';
 
 function u32le(v) {
