@@ -918,15 +918,6 @@ export async function writePlaintextProgramNca(prepared, outputAdapter, log, bas
     }
 }
 
-export async function packPlaintextProgramNcaStreaming(exefsData, romfsData, controlData, titleId, keys, outputAdapter, log, baseOffset = 0) {
-    const _log = typeof log === 'function' ? log : () => {};
-    _log('info', '----> Creating Program NCA (streaming):');
-    const prepared = await preparePlaintextProgramNca(exefsData, romfsData, controlData, titleId, keys, log);
-    await writePlaintextProgramNca(prepared, outputAdapter, log, baseOffset);
-    _log('info', '  ----> Created Program NCA: ' + prepared.size + ' bytes sha256=' + prepared.hashHex);
-    return { hashHex: prepared.hashHex, size: prepared.size };
-}
-
 // ── Fully streaming Program NCA pack (seekable output, no data buffer) ─────────
 // Avoids holding the NCA (or the romfs/exefs data) as a single ArrayBuffer — the
 // payload is written straight to the output adapter via streamExefs/streamRomfs,

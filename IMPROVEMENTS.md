@@ -222,7 +222,7 @@ Prioritized areas for improvement identified 2026-05-30.
 
 - ⏳ **`NCZBlockHeader` — 4 of 7 parsed fields never read** — `fs/ncz.js`. `originalSize`, `checksum`, `blockSize`, `numBlocks` are parsed but never accessed downstream. Only `magic`, `numSections`, `sectionSize` are used. **Ожидает доработки** — как в Python nsz `Header.Block`, можно начать использовать все поля.
 
-- ⏳ **`NCAHeader` — static-only class, never instantiated** — `fs/nca.js`. `getContentTypeName()` is never called. Only `parse()` is used. **Ожидает доработки** — как в Python nsz `NcaHeader`: full class inheriting `File` с `open()`, getters/setters, instance state.
+- ⏳ **`NCAHeader` — static-only class, never instantiated** — `fs/nca.js`. Only `parse()` is used (the never-called `getContentTypeName()` helper has been removed). **Ожидает доработки** — как в Python nsz `NcaHeader`: full class inheriting `File` с `open()`, getters/setters, instance state.
 
 - ⏳ **`Cnmt` — static-only class, wrapper around `parse()`** — `fs/cnmt.js`. No instance state, no methods beyond `parse()`. **Ожидает доработки** — как в Python nsz `Cnmt`: full class с instance state (`titleId`, `version`, `contentEntries`, `metaEntries`), метод `printInfo()`.
 
@@ -274,7 +274,7 @@ Prioritized areas for improvement identified 2026-05-30.
     hash is deterministic — depends only on exefs/romfs/keys), so the real `<contentId>.nca` name is
     known BEFORE the PFS0 header is written
   - `write` streams the prepared NCA via `write(offset, data)` (bytes identical to what `prepare` hashed)
-  - (earlier `packPlaintextProgramNcaStreaming()` = prepare + write is superseded — update.js calls
+  - (earlier `packPlaintextProgramNcaStreaming()` = prepare + write is superseded and now removed — update.js calls
     prepare + write directly)
 - Integration into `--update` pipeline (fully streaming, no seek-back):
   - PFS0 header built ONCE at start with real names → write at offset 0 → done, never touched again

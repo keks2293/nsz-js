@@ -126,11 +126,6 @@ export class NCAHeader {
             sectionFilesystems,
         };
     }
-
-    static getContentTypeName(type) {
-        const names = ['PROGRAM', 'META', 'CONTROL', 'MANUAL', 'DATA', 'PUBLICDATA'];
-        return names[type] || 'UNKNOWN';
-    }
 }
 
 export function decryptNcaHeader(raw, keys = null) {
@@ -177,33 +172,6 @@ export function parseCnmtFromDecryptedSection(fsData, section) {
     const f = files[0];
     const raw = pfs0Raw.subarray(f.offset, f.offset + f.size);
     return Cnmt.parse(raw);
-}
-
-export class BKTR {
-    static parseSection(buffer, ncaOffset) {
-        const arr = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-        const view = new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
-
-        if (arr.length < 0x30) return null;
-
-        const bktrOffset = Number(view.getBigUint64(0, true));
-        const bktrSize = Number(view.getBigUint64(8, true));
-        const magic = String.fromCharCode(arr[16], arr[17], arr[18], arr[19]);
-
-        if (magic !== 'BKTR' || bktrSize === 0) return null;
-
-        const version = view.getUint32(20, true);
-        const entryCount = view.getUint32(24, true);
-
-        return {
-            bktrOffset,
-            bktrSize,
-            magic,
-            version,
-            entryCount,
-            ncaOffset
-        };
-    }
 }
 
 export { FsType, SectionHeader };
