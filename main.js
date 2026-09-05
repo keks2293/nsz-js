@@ -439,17 +439,41 @@ async function main() {
         URL.revokeObjectURL(url);
     }
 
-    async function runConvert() {
-        if (files.length === 0) return;
-
+    // Shared runner scaffolding: show progress/log, lock the button, reset stats.
+    function beginRun() {
         progressContainer.classList.add('visible');
         logContainer.classList.add('visible');
         convertBtn.disabled = true;
         converting = true;
         progressSpeed.textContent = '';
         progressTime.textContent = '';
-
         updateProgress(0);
+    }
+
+    // Shared runner teardown: unlock button, mark done, fill the bar.
+    function endRun() {
+        converting = false;
+        updateButtonLabel();
+        progressTitle.textContent = 'Done';
+        updateProgress(1);
+    }
+
+    // Pick a save directory; on rejection log + reset and return null (caller bails).
+    async function pickOrAbort() {
+        const h = await pickDirectory();
+        if (h === 'ABORT') {
+            addLog('error', 'Save location rejected');
+            converting = false;
+            updateButtonLabel();
+            return null;
+        }
+        return h;
+    }
+
+    async function runConvert() {
+        if (files.length === 0) return;
+
+        beginRun();
         addLog('info', `Starting conversion (${downloadMode})...`);
 
         const convertOptions = [];
@@ -461,13 +485,8 @@ async function main() {
         const startTime = Date.now();
         const updateStats = makeUpdateStats(totalBytes, startTime);
 
-        const directoryHandle = await pickDirectory();
-        if (directoryHandle === 'ABORT') {
-            addLog('error', 'Save location rejected');
-            converting = false;
-            updateButtonLabel();
-            return;
-        }
+        const directoryHandle = await pickOrAbort();
+        if (directoryHandle === null) return;
 
         const fileIframes = files.map(() => {
             const iframe = document.createElement('iframe');
@@ -572,23 +591,13 @@ async function main() {
             }
         }
 
-        converting = false;
-        updateButtonLabel();
-        progressTitle.textContent = 'Done';
-        updateProgress(1);
+        endRun();
     }
 
     async function runMerge() {
         if (files.length < 2) return;
 
-        progressContainer.classList.add('visible');
-        logContainer.classList.add('visible');
-        convertBtn.disabled = true;
-        converting = true;
-        progressSpeed.textContent = '';
-        progressTime.textContent = '';
-
-        updateProgress(0);
+        beginRun();
         addLog('info', `Starting merge (${downloadMode})...`);
 
         const mergeOptions = [];
@@ -599,13 +608,8 @@ async function main() {
         const startTime = Date.now();
         const updateStats = makeUpdateStats(totalBytes, startTime);
 
-        const directoryHandle = await pickDirectory();
-        if (directoryHandle === 'ABORT') {
-            addLog('error', 'Save location rejected');
-            converting = false;
-            updateButtonLabel();
-            return;
-        }
+        const directoryHandle = await pickOrAbort();
+        if (directoryHandle === null) return;
 
         const iframe = document.createElement('iframe');
         iframe.style.display = 'none';
@@ -672,23 +676,13 @@ async function main() {
             updateFileList();
         }
 
-        converting = false;
-        updateButtonLabel();
-        progressTitle.textContent = 'Done';
-        updateProgress(1);
+        endRun();
     }
 
     async function runUpdate() {
         if (files.length !== 2) return;
 
-        progressContainer.classList.add('visible');
-        logContainer.classList.add('visible');
-        convertBtn.disabled = true;
-        converting = true;
-        progressSpeed.textContent = '';
-        progressTime.textContent = '';
-
-        updateProgress(0);
+        beginRun();
         addLog('info', `Starting update (${downloadMode})...`);
         addLog('info', 'Options: keys required (decrypt CNMT metadata)');
 
@@ -696,13 +690,8 @@ async function main() {
         const startTime = Date.now();
         const updateStats = makeUpdateStats(totalBytes, startTime);
 
-        const directoryHandle = await pickDirectory();
-        if (directoryHandle === 'ABORT') {
-            addLog('error', 'Save location rejected');
-            converting = false;
-            updateButtonLabel();
-            return;
-        }
+        const directoryHandle = await pickOrAbort();
+        if (directoryHandle === null) return;
 
         const iframe = document.createElement('iframe');
         iframe.style.display = 'none';
@@ -786,23 +775,13 @@ async function main() {
             updateFileList();
         }
 
-        converting = false;
-        updateButtonLabel();
-        progressTitle.textContent = 'Done';
-        updateProgress(1);
+        endRun();
     }
 
     async function runSplit() {
         if (files.length !== 1) return;
 
-        progressContainer.classList.add('visible');
-        logContainer.classList.add('visible');
-        convertBtn.disabled = true;
-        converting = true;
-        progressSpeed.textContent = '';
-        progressTime.textContent = '';
-
-        updateProgress(0);
+        beginRun();
         addLog('info', `Starting split (${downloadMode})...`);
 
         addLog('info', 'Options: none');
@@ -811,13 +790,8 @@ async function main() {
         const startTime = Date.now();
         const updateStats = makeUpdateStats(totalBytes, startTime);
 
-        const directoryHandle = await pickDirectory();
-        if (directoryHandle === 'ABORT') {
-            addLog('error', 'Save location rejected');
-            converting = false;
-            updateButtonLabel();
-            return;
-        }
+        const directoryHandle = await pickOrAbort();
+        if (directoryHandle === null) return;
 
         const onProgress = (p) => { updateProgress(p); updateStats(p); };
 
@@ -871,10 +845,7 @@ async function main() {
             updateFileList();
         }
 
-        converting = false;
-        updateButtonLabel();
-        progressTitle.textContent = 'Done';
-        updateProgress(1);
+        endRun();
     }
 
     convertBtn.addEventListener('click', async () => {
