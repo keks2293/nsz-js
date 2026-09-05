@@ -58,10 +58,6 @@ class PFS0 {
     getFiles() {
         return this.files;
     }
-
-    getHeaderSize() {
-        return this.headerSize;
-    }
 }
 
 class PFS0Writer {

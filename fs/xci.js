@@ -85,18 +85,4 @@ export class XCIReader {
         const data = await this.reader.read(partitionEntry.offset, partitionEntry.size);
         return new HFS0Reader(data, partitionEntry.offset);
     }
-
-    async readAllPartitionFiles() {
-        const result = {};
-        for (const p of this.partitions) {
-            if (p.size > 0) {
-                try {
-                    result[p.name] = await this.readPartitionFiles(p);
-                } catch (e) {
-                    console.warn(`Failed to read partition ${p.name}: ${e.message}`);
-                }
-            }
-        }
-        return result;
-    }
 }

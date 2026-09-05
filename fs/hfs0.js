@@ -51,10 +51,6 @@ export class HFS0Reader {
     getFiles() {
         return this.files;
     }
-
-    getHeaderSize() {
-        return this._headerSize;
-    }
 }
 
 export class HFS0Writer {
