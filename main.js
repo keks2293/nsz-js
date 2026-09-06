@@ -794,7 +794,7 @@ async function main() {
         const directoryHandle = await pickOrAbort();
         if (directoryHandle === 'ABORT') return;
 
-        const onProgress = (p) => { updateProgress(p); updateStats(p); };
+        const onProgress = (p, label) => { updateProgress(p); updateStats(p); if (label) progressTitle.textContent = label; };
 
         try {
             const result = await converter.splitNSP(files[0], {

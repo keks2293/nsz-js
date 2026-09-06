@@ -14,6 +14,17 @@ function stem(name) {
     return dot === -1 ? name : name.slice(0, dot);
 }
 
+function resolveTicket(g, byRightsId, byTitleId) {
+    let tik = null;
+    if (g.rightsId) {
+        tik = byRightsId.get(g.rightsId);
+    }
+    if (!tik) {
+        tik = byTitleId.get(g.titleId.toLowerCase());
+    }
+    return tik;
+}
+
 async function collectTickets(reader, ticketEntries, log = () => {}) {
     const byRightsId = new Map();
     const byTitleId = new Map();
@@ -123,14 +134,38 @@ export async function splitNSP(reader, keys, outputFactory, options = {}) {
         throw new Error('splitNSP: no meta (.cnmt.nca) titles found — is this a valid merged NSP?');
     }
 
+    const resolved = titleGroups.map((g) => {
+        const tik = resolveTicket(g, byRightsId, byTitleId);
+        let total = 0;
+        for (const e of g.members) total += e.size;
+        if (tik) {
+            total += tik.size;
+            const tikStem = stem(tik.name);
+            for (const cert of certEntries) {
+                if (stem(cert.name) === tikStem) total += cert.size;
+            }
+        }
+        return { tik, total };
+    });
+    const grandTotal = resolved.reduce((s, r) => s + r.total, 0);
+
     const results = [];
+    let processed = 0;
     for (let i = 0; i < titleGroups.length; i++) {
         const g = titleGroups[i];
+        const { tik, total } = resolved[i];
         const label = META_TYPE_LABELS[g.titleType] ?? `0x${g.titleType.toString(16)}`;
         const outputName = `${g.titleId.toLowerCase()}_${label}_v${g.version}.nsp`;
 
         const outputObj = await outputFactory(g, i, outputName);
-        if (!outputObj) continue;
+        if (!outputObj) {
+            processed += total;
+            continue;
+        }
+
+        if (g.rightsId && !byRightsId.get(g.rightsId)) {
+            log('warn', `Protected title ${g.titleId} (rightsId=${g.rightsId}): no matching ticket in input`);
+        }
 
         const writer = new PFS0Writer();
         const fileList = [];
@@ -139,16 +174,6 @@ export async function splitNSP(reader, keys, outputFactory, options = {}) {
             fileList.push(e);
         }
 
-        let tik = null;
-        if (g.rightsId) {
-            tik = byRightsId.get(g.rightsId);
-            if (!tik) {
-                log('warn', `Protected title ${g.titleId} (rightsId=${g.rightsId}): no matching ticket in input`);
-            }
-        }
-        if (!tik) {
-            tik = byTitleId.get(g.titleId.toLowerCase());
-        }
         if (tik) {
             writer.add(tik.name, tik.size);
             fileList.push(tik);
@@ -168,8 +193,6 @@ export async function splitNSP(reader, keys, outputFactory, options = {}) {
         }, { log, progress });
         await adapter.write(0, header.buffer);
 
-        let written = 0;
-        const total = fileList.reduce((s, e) => s + e.size, 0);
         for (let j = 0; j < fileList.length; j++) {
             const e = fileList[j];
             const writePos = headerSize + writer.files[j].offset;
@@ -179,8 +202,8 @@ export async function splitNSP(reader, keys, outputFactory, options = {}) {
                 e.size,
                 (pos, data) => adapter.write(writePos + pos, data),
                 (n) => {
-                    written += n;
-                    progress((i + written / total) / titleGroups.length, `Writing ${outputName}...`);
+                    processed += n;
+                    progress(processed / grandTotal, `Writing (${i + 1}/${titleGroups.length}) ${outputName}...`);
                 },
             );
         }
