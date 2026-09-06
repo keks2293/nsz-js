@@ -458,14 +458,15 @@ async function main() {
         updateProgress(1);
     }
 
-    // Pick a save directory; on rejection log + reset and return null (caller bails).
+    // Pick a save directory. Returns the handle, or null in non-FSA modes — that
+    // is NORMAL (the output factory falls back to SW/blob); 'ABORT' only on user
+    // rejection, after logging + resetting (caller bails on 'ABORT', never on null).
     async function pickOrAbort() {
         const h = await pickDirectory();
         if (h === 'ABORT') {
             addLog('error', 'Save location rejected');
             converting = false;
             updateButtonLabel();
-            return null;
         }
         return h;
     }
@@ -486,7 +487,7 @@ async function main() {
         const updateStats = makeUpdateStats(totalBytes, startTime);
 
         const directoryHandle = await pickOrAbort();
-        if (directoryHandle === null) return;
+        if (directoryHandle === 'ABORT') return;
 
         const fileIframes = files.map(() => {
             const iframe = document.createElement('iframe');
@@ -609,7 +610,7 @@ async function main() {
         const updateStats = makeUpdateStats(totalBytes, startTime);
 
         const directoryHandle = await pickOrAbort();
-        if (directoryHandle === null) return;
+        if (directoryHandle === 'ABORT') return;
 
         const iframe = document.createElement('iframe');
         iframe.style.display = 'none';
@@ -691,7 +692,7 @@ async function main() {
         const updateStats = makeUpdateStats(totalBytes, startTime);
 
         const directoryHandle = await pickOrAbort();
-        if (directoryHandle === null) return;
+        if (directoryHandle === 'ABORT') return;
 
         const iframe = document.createElement('iframe');
         iframe.style.display = 'none';
@@ -791,7 +792,7 @@ async function main() {
         const updateStats = makeUpdateStats(totalBytes, startTime);
 
         const directoryHandle = await pickOrAbort();
-        if (directoryHandle === null) return;
+        if (directoryHandle === 'ABORT') return;
 
         const onProgress = (p) => { updateProgress(p); updateStats(p); };
 
