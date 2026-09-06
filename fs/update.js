@@ -270,17 +270,21 @@ function findProgramNcaEntry(container, label, log) {
     return null;
 }
 
-async function writeOtherNcas(adapter, update, pfs0Header, pw, otherNcas, written, totalData, progress, log) {
+// Tail of the write phase: the non-Program NCAs. Continues the phase scale
+// opened by the Program NCA write — baseDone bytes already counted, phaseTotal
+// the phase's full byte budget — so program + tail form ONE continuous bar.
+async function writeOtherNcas(adapter, pfs0Header, pw, otherNcas, baseDone, phaseTotal, progress, log, phaseLabel) {
+    let tailDone = 0;
     for (let i = 0; i < otherNcas.length; i++) {
         const m = otherNcas[i];
         const member = pw.files[i + 1];
         const pos = pfs0Header.headerSize + member.offset;
         await writeFromReader(adapter, pos, m,
-            (p) => progress((written + member.size * p) / totalData, `${m.kind === 'ncz' ? 'Decompressing' : 'Copying'} ${m.name}...`));
+            (p) => progress((baseDone + tailDone + member.size * p) / phaseTotal, phaseLabel, phaseTotal));
         log('info', `[WRITTEN] ${m.name} (${m.outLen} bytes)`);
-        written += member.size;
+        tailDone += member.size;
     }
-    return written;
+    return tailDone;
 }
 
 async function writeCnmt(adapter, pfs0Header, pw, rebuilt, log) {
@@ -319,8 +323,8 @@ function buildFinalPfs0(programName, programSize, otherNcas, rebuilt) {
 // then finish. pfs0Header is the header used to compute member offsets
 // (normally the one just built; the seekback path passes its layout header,
 // which is size-identical to the real one).
-async function finalizeOutputNsP(adapter, { pfs0Header, pw, otherNcas, programSize, totalData, rebuilt, update, output, log, progress }) {
-    await writeOtherNcas(adapter, update, pfs0Header, pw, otherNcas, programSize, totalData, progress, log);
+async function finalizeOutputNsP(adapter, { pfs0Header, pw, otherNcas, totalData, rebuilt, output, log, progress, phaseLabel, phaseBaseDone, phaseTotal }) {
+    await writeOtherNcas(adapter, pfs0Header, pw, otherNcas, phaseBaseDone, phaseTotal, progress, log, phaseLabel);
     await writeCnmt(adapter, pfs0Header, pw, rebuilt, log);
     return finishOutput(adapter, pfs0Header, totalData, pw, output, log);
 }
@@ -339,7 +343,12 @@ async function finalizeOutputNsP(adapter, { pfs0Header, pw, otherNcas, programSi
 //     contentId piggybacks on the Pass 2 write. 2× romfs reads.
 async function writeTwoPassProgramAndFinish({ adapter, base, update, keys, log, progress, output, programSize, meta, makeStreamExefs, makeStreamRomfs, contentId, appendOnly }) {
     const otherNcas = collectOtherNcas(update);
-    const progProgress = (headerSize, total) => (p) => progress((headerSize + p * programSize) / total, 'Writing Program NCA...');
+    // Pass 2 is the write phase: Program NCA + other NCAs are one continuous
+    // bar (the NCA is scaled into [0, programSize/phaseTotal], the tail picks
+    // up at programSize/phaseTotal and runs to 1).
+    const tailBytes = otherNcas.reduce((s, m) => s + m.outLen, 0);
+    const phaseTotal = programSize + tailBytes;
+    const pass2Progress = (p) => progress(p * programSize / phaseTotal, 'Writing output (2/2)', phaseTotal);
 
     if (appendOnly) {
         // contentId is final after Pass 1 → real PFS0 header first, then the NCA.
@@ -350,9 +359,9 @@ async function writeTwoPassProgramAndFinish({ adapter, base, update, keys, log, 
         await writeProgramNcaTwoPass({
             meta, adapter, ncaOffset: programNcaPfs0Offset, contentId,
             streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
-            progress: progProgress(pfs0Header.headerSize, totalData),
+            progress: pass2Progress,
         });
-        return finalizeOutputNsP(adapter, { pfs0Header, pw, otherNcas, programSize, totalData, rebuilt, update, output, log, progress });
+        return finalizeOutputNsP(adapter, { pfs0Header, pw, otherNcas, totalData, rebuilt, output, log, progress, phaseLabel: 'Writing output (2/2)', phaseBaseDone: programSize, phaseTotal });
     }
 
     // Seekable: compute the layout in memory only (temp names are the same
@@ -364,14 +373,14 @@ async function writeTwoPassProgramAndFinish({ adapter, base, update, keys, log, 
     const id = await writeProgramNcaTwoPass({
         meta, adapter, ncaOffset: programNcaPfs0Offset,
         streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
-        progress: progProgress(layoutHdr.headerSize, layoutTotal),
+        progress: pass2Progress,
     });
     log('info', `ContentId: ${id} (${programSize} bytes)`);
     const rebuilt = await rebuildCnmtNca(base, update, keys, log, { hashHex: id, size: programSize });
     const { pw, pfs0Header, totalData } = buildFinalPfs0(`${id.slice(0, 32)}.nca`, programSize, otherNcas, rebuilt);
     await adapter.write(0, pfs0Header.buffer);
     log('info', `PFS0 header ${pfs0Header.headerSize} bytes, ${pw.files.length} members`);
-    return finalizeOutputNsP(adapter, { pfs0Header, pw, otherNcas, programSize, totalData, rebuilt, update, output, log, progress });
+    return finalizeOutputNsP(adapter, { pfs0Header, pw, otherNcas, totalData, rebuilt, output, log, progress, phaseLabel: 'Writing output (2/2)', phaseBaseDone: programSize, phaseTotal });
 }
 
 // Factory for a streaming ExeFS extractor with NPDM ACID filtering applied.
@@ -643,13 +652,19 @@ export async function update(readers, output, options = {}) {
             const programNcaPfs0Offset = pfs0Header.headerSize + layoutPw.files[0].offset;
             log('info', `PFS0 layout: ${pfs0Header.headerSize} bytes header, ${layoutPw.files.length} members, Program NCA at 0x${programNcaPfs0Offset.toString(16)}`);
 
+            // One write phase: program work (exefs + romfs writes + the full-NCA
+            // re-read for the contentId, mirroring streamTotal in packProgramNcaStream)
+            // + the other-NCAs tail — one continuous bar, no reset between them.
+            const streamWork = exefsSize + (romfsDataSize || 1) + programSize;
+            const phaseTotal = streamWork + otherNcas.reduce((s, m) => s + m.outLen, 0);
             const { hashHex: contentId } = await packProgramNcaStream({
                 adapter, ncaOffset: programNcaPfs0Offset,
                 exefsSize, romfsDataSize,
                 titleId: base.cnmt.titleId, keys,
                 streamExefs: makeStreamExefs(),
                 streamRomfs: makeStreamRomfs(),
-                log, progress,
+                log,
+                progress: (p) => progress(p * streamWork / phaseTotal, 'Writing output (1/1)', phaseTotal),
             });
 
             baseSource = null;
@@ -662,7 +677,7 @@ export async function update(readers, output, options = {}) {
             log('info', `PFS0 header ${realPfs0.headerSize} bytes, ${realPw.files.length} members`);
 
             // Tail uses the layout header (pfs0Header), size-identical to realPfs0.
-            return finalizeOutputNsP(adapter, { pfs0Header, pw: realPw, otherNcas, programSize, totalData, rebuilt, update, output, log, progress });
+            return finalizeOutputNsP(adapter, { pfs0Header, pw: realPw, otherNcas, totalData, rebuilt, output, log, progress, phaseLabel: 'Writing output (1/1)', phaseBaseDone: streamWork, phaseTotal });
         }
 
         // ── Two-pass path (sequential output): no data buffer ───────────────
@@ -686,10 +701,14 @@ export async function update(readers, output, options = {}) {
 
             const adapter = await buildAdapter(output, null, { log, progress });
 
+            // Phase 1: pass-1 work is read-only (no output bytes) — exefs 2× +
+            // romfs 1× (2× when contentId must be final after pass 1), mirroring
+            // pass1Total in computeProgramNcaContentId.
+            const pass1Bytes = 2 * exefsSize + (appendOnly ? 2 : 1) * (romfsDataSize || 1);
             const { size: computedSize, contentId, meta } = await computeProgramNcaContentId({
                 exefsSize, romfsDataSize, titleId: base.cnmt.titleId, keys,
                 streamExefs: makeStreamExefs(), streamRomfs: makeStreamRomfs(), log,
-                progress: (p) => progress(p * 0.5),
+                progress: (p) => progress(p, 'Computing contentId (1/2)', pass1Bytes),
                 contentIdInPass1: appendOnly,
             });
             log('info', contentId
@@ -757,7 +776,10 @@ export async function update(readers, output, options = {}) {
         await new Promise(r => setTimeout(r, 0));
         await writePlaintextProgramNca(preparedProgram, adapter, log, programNcaPfs0Offset);
 
-        return finalizeOutputNsP(adapter, { pfs0Header, pw, otherNcas, programSize: mergedProgram.size, totalData, rebuilt, update, output, log, progress });
+        // Pre-tail phases (merge/extract/prep) are untracked — the tail is the
+        // whole visible write, so it runs the phase scale from 0.
+        const bufferedTailBytes = otherNcas.reduce((s, m) => s + m.outLen, 0) || 1;
+        return finalizeOutputNsP(adapter, { pfs0Header, pw, otherNcas, totalData, rebuilt, output, log, progress, phaseLabel: 'Writing output', phaseBaseDone: 0, phaseTotal: bufferedTailBytes });
     }
 
     // ── Non-merge path (original, buffered) ─────────────────────────────────

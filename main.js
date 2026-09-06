@@ -346,11 +346,22 @@ async function main() {
         btn.addEventListener('click', () => setMode(btn.dataset.op));
     });
 
+    // Speed/ETA tracker. Phased ops (update) report a per-phase fraction p with
+    // a stable phase label + the phase's byte total; the sample window resets on
+    // every label change so speed/ETA reflect the CURRENT phase. Non-phased ops
+    // call updateStats(p) — label-less, one window over the whole run.
     function makeUpdateStats(totalBytes, startTime) {
         const speedSamples = [];
-        return function updateStats(overallProgress) {
+        let phaseBytes = totalBytes;
+        let lastLabel = null;
+        return function updateStats(overallProgress, label = null, phaseBytesArg = null) {
+            if (label && label !== lastLabel) {
+                lastLabel = label;
+                speedSamples.length = 0;
+                phaseBytes = (typeof phaseBytesArg === 'number' && phaseBytesArg > 0) ? phaseBytesArg : totalBytes;
+            }
             const now = Date.now();
-            const bytesDone = totalBytes * Math.min(1, Math.max(0, overallProgress));
+            const bytesDone = phaseBytes * Math.min(1, Math.max(0, overallProgress));
 
             speedSamples.push({ t: now, b: bytesDone });
             while (speedSamples.length > 1 && speedSamples[speedSamples.length - 1].t - speedSamples[0].t > 5000) {
@@ -364,14 +375,14 @@ async function main() {
                 ? `${Math.floor(elapsed / 60)}m ${Math.floor(elapsed % 60)}s`
                 : `${Math.floor(elapsed)}s`;
 
-            if (speedSamples.length >= 3 && bytesDone > totalBytes * 0.02) {
+            if (speedSamples.length >= 3 && bytesDone > phaseBytes * 0.02) {
                 const first = speedSamples[0];
                 const last = speedSamples[speedSamples.length - 1];
                 const dur = (last.t - first.t) / 1000;
                 const speed = (last.b - first.b) / dur;
                 if (isFinite(speed) && speed > 0) {
                     progressSpeed.textContent = `${(speed / 1048576).toFixed(1)} MB/s`;
-                    const remaining = (totalBytes - bytesDone) / speed;
+                    const remaining = (phaseBytes - bytesDone) / speed;
                     const remainingStr = remaining >= 60
                         ? `${Math.floor(remaining / 60)}m ${Math.floor(remaining % 60)}s`
                         : `${Math.floor(remaining)}s`;
@@ -744,7 +755,11 @@ async function main() {
             };
         }
 
-        const onProgress = (p) => { updateProgress(p); updateStats(p); };
+        const onProgress = (p, label, phaseBytes) => {
+            updateProgress(p);
+            if (label) progressTitle.textContent = label;
+            updateStats(p, label, phaseBytes);
+        };
 
         try {
             const result = await converter.updateNSPs(files, {

@@ -941,24 +941,31 @@ export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romf
     const pfs0 = new StreamingPfs0Hasher(PFS0_EXEFS_HASH_BLOCK_SIZE);
     const ivfc = new StreamingIvfcHasher(romfsDataSize);
 
+    // ── Phase progress ──────────────────────────────────────────────────────
+    // Covers exefs write + romfs write + the full-NCA re-read for the contentId
+    // (the re-read is real work — it streams ncaSize bytes from the output).
+    const _prog = typeof progress === 'function' ? progress : () => {};
+    const streamTotal = exefsSize + (romfsDataSize || 1) + ncaSize;
+    let done = 0;
+    const rep = (n) => { done += n; _prog(done / streamTotal); };
+
     // ── Stream ExeFS data → output + PFS0 hasher ───────────────────────────
     _log('info', '  Streaming ExeFS (PFS0 data) → output...');
     await streamExefs(async (chunk, off) => {
+        const n = chunk.length;
         await adapter.write(ncaOffset + sec0DataOff + off, chunk);
         pfs0.update(chunk);
+        rep(n);
     });
     const exeHash = pfs0.finalize();
 
     // ── Stream RomFS data → output + IVFC hasher ───────────────────────────
     _log('info', '  Streaming RomFS (BKTR data) → output...');
-    const _prog = typeof progress === 'function' ? progress : () => {};
-    const romTotal = romfsDataSize || 1;
-    let romDone = 0;
     await streamRomfs(async (chunk, off) => {
+        const n = chunk.length;
         await adapter.write(ncaOffset + sec1DataOff + off, chunk);
         ivfc.update(chunk);
-        romDone += chunk.length;
-        _prog(romDone / romTotal);
+        rep(n);
     });
     const romIvfc = ivfc.finalize();
 
@@ -992,6 +999,7 @@ export async function packProgramNcaStream({ adapter, ncaOffset, exefsSize, romf
         const part = await adapter.read(ncaOffset + roff, n);
         h.update(part);
         roff += n;
+        rep(n);
     }
     const hashHex = h.hex();
     _log('info', `  ----> Program NCA (streaming): ${ncaSize} bytes sha256=${hashHex}`);
@@ -1041,16 +1049,20 @@ export async function computeProgramNcaContentId({ exefsSize, romfsDataSize, tit
     const L = computeProgramNcaLayout(exefsSize, romfsDataSize);
     _log('info', `  Two-pass NCA layout: ExeFS=0x${L.exeSectionSize.toString(16)} (htable 0x${L.exeHtableSize.toString(16)}), RomFS=0x${L.romSectionSize.toString(16)} (levels 0x${L.hashLevelsSize.toString(16)}), total=0x${L.ncaSize.toString(16)}`);
 
+    // Phase progress over ALL pass-1 work: exefs is streamed twice (PFS0 hash +
+    // SHA256), romfs once (IVFC) or twice (+SHA256 when contentIdInPass1).
+    const _prog = typeof progress === 'function' ? progress : () => {};
+    const pass1Total = 2 * exefsSize + (contentIdInPass1 ? 2 : 1) * (romfsDataSize || 1);
+    let done = 0;
+    const rep = (n) => { done += n; _prog(done / pass1Total); };
+
     _log('info', '  Pass 1: Computing hash metadata (1 romfs pass)...');
     const pfs0 = new StreamingPfs0Hasher(PFS0_EXEFS_HASH_BLOCK_SIZE);
-    await streamExefs(async (chunk, off) => { pfs0.update(chunk); });
+    await streamExefs(async (chunk, off) => { pfs0.update(chunk); rep(chunk.length); });
     const exeHash = pfs0.finalize();
 
     const ivfc = new StreamingIvfcHasher(romfsDataSize);
-    const _prog = typeof progress === 'function' ? progress : () => {};
-    const romTotal = romfsDataSize || 1;
-    let romDone = 0;
-    await streamRomfs(async (chunk, off) => { ivfc.update(chunk); romDone += chunk.length; _prog(romDone / romTotal); });
+    await streamRomfs(async (chunk, off) => { ivfc.update(chunk); rep(chunk.length); });
     const romIvfc = ivfc.finalize();
 
     const encHeader = buildEncryptedProgramNcaHeader({
@@ -1067,7 +1079,7 @@ export async function computeProgramNcaContentId({ exefsSize, romfsDataSize, tit
     const sha = new SHA256();
     sha.update(encHeader);
     sha.update(exeHash.hashTable);
-    await streamExefs(async (chunk) => { sha.update(chunk); });
+    await streamExefs(async (chunk) => { sha.update(chunk); rep(chunk.length); });
     if (L.exePaddingSize > 0) sha.update(new Uint8Array(L.exePaddingSize));
     for (const lvl of romIvfc.hashLevels) sha.update(lvl);
 
@@ -1075,7 +1087,7 @@ export async function computeProgramNcaContentId({ exefsSize, romfsDataSize, tit
     let sha256Mid = null;
     if (contentIdInPass1) {
         _log('info', '  Pass 1: Computing contentId (re-stream)...');
-        await streamRomfs(async (chunk) => { sha.update(chunk); });
+        await streamRomfs(async (chunk) => { sha.update(chunk); rep(chunk.length); });
         if (L.romPaddingSize > 0) sha.update(new Uint8Array(L.romPaddingSize));
         contentId = sha.hex();
         _log('info', `  ----> Program NCA (two-pass): ${L.ncaSize} bytes sha256=${contentId}`);
